@@ -11,3 +11,7 @@ const ROLES = {
 export default function App() {
   // ... rest of your code
 }
+// pages/index.js
+export default function Home() {
+  return <div>Hello world</div>;
+}
