@@ -18,7 +18,7 @@ export default function Home() {
     setMessage('')
 
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password,
     })
 
