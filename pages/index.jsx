@@ -167,11 +167,8 @@ export default function Home() {
             fontSize: '14px',
           }}
         >
-          Don’t have an account?{' '}
-          <Link
-            href="/signup"
-            style={{ color: '#60a5fa', textDecoration: 'none' }}
-          >
+          Don&apos;t have an account?{' '}
+          <Link href="/signup" style={{ color: '#60a5fa', textDecoration: 'none' }}>
             Create one
           </Link>
         </p>
