@@ -1,37 +1,20 @@
+import { useState } from 'react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { supabase } from '../utils/supabase'
+import { useRouter } from 'next/router'
+import { supabase } from '../utils/supabaseClient'
 
 export default function Home() {
-  const [session, setSession] = useState(null)
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
-  useEffect(() => {
-    async function getSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-
-      setSession(session)
-      setLoading(false)
-    }
-
-    getSession()
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  async function handleSignIn(e) {
+  const handleLogin = async (e) => {
     e.preventDefault()
+    setLoading(true)
+    setError('')
     setMessage('')
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -40,141 +23,159 @@ export default function Home() {
     })
 
     if (error) {
-      setMessage(error.message)
+      setError(error.message)
+      setLoading(false)
       return
     }
 
-    setMessage('Logged in successfully.')
-  }
-
-  async function handleSignOut() {
-    const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      setMessage(error.message)
-      return
-    }
-
-    setMessage('Signed out.')
-  }
-
-  if (loading) {
-    return <main style={{ padding: '40px' }}>Loading...</main>
-  }
-
-  if (session) {
-    return (
-      <main style={{ padding: '40px', fontFamily: 'Arial, sans-serif' }}>
-        <h1>Logged In</h1>
-        <p>Welcome: {session.user.email}</p>
-
-        <button
-          onClick={handleSignOut}
-          style={{
-            marginTop: '16px',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Sign Out
-        </button>
-      </main>
-    )
+    setMessage('Login successful.')
+    setLoading(false)
+    router.push('/dashboard')
   }
 
   return (
-    <main
+    <div
       style={{
         minHeight: '100vh',
         display: 'flex',
-        alignItems: 'center',
         justifyContent: 'center',
-        background: '#0f172a',
-        color: 'white',
-        fontFamily: 'Arial, sans-serif',
-        padding: '24px',
+        alignItems: 'center',
+        backgroundColor: '#0f172a',
+        padding: '20px',
       }}
     >
       <div
         style={{
           width: '100%',
           maxWidth: '420px',
-          background: '#111827',
-          padding: '24px',
-          borderRadius: '12px',
-          border: '1px solid #374151',
+          backgroundColor: '#1e293b',
+          padding: '32px',
+          borderRadius: '16px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+          color: 'white',
         }}
       >
-        <h1 style={{ marginBottom: '8px' }}>Operations Dashboard</h1>
-        <p style={{ marginBottom: '20px', color: '#9ca3af' }}>
+        <h1
+          style={{
+            fontSize: '28px',
+            fontWeight: '700',
+            marginBottom: '8px',
+            textAlign: 'center',
+          }}
+        >
+          Operations Dashboard
+        </h1>
+
+        <p
+          style={{
+            textAlign: 'center',
+            color: '#94a3b8',
+            marginBottom: '24px',
+          }}
+        >
           Sign in to continue
         </p>
 
-        <form onSubmit={handleSignIn} style={{ display: 'grid', gap: '12px' }}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{
-              padding: '12px',
-              borderRadius: '8px',
-              border: '1px solid #4b5563',
-              background: '#1f2937',
-              color: 'white',
-            }}
-          />
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: '16px' }}>
+            <label
+              style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                color: '#cbd5e1',
+              }}
+            >
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: '10px',
+                border: '1px solid #334155',
+                backgroundColor: '#0f172a',
+                color: 'white',
+                outline: 'none',
+              }}
+            />
+          </div>
 
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{
-              padding: '12px',
-              borderRadius: '8px',
-              border: '1px solid #4b5563',
-              background: '#1f2937',
-              color: 'white',
-            }}
-          />
+          <div style={{ marginBottom: '16px' }}>
+            <label
+              style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                color: '#cbd5e1',
+              }}
+            >
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: '10px',
+                border: '1px solid #334155',
+                backgroundColor: '#0f172a',
+                color: 'white',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          {error && (
+            <p style={{ color: '#f87171', marginBottom: '12px' }}>{error}</p>
+          )}
+
+          {message && (
+            <p style={{ color: '#4ade80', marginBottom: '12px' }}>{message}</p>
+          )}
 
           <button
             type="submit"
+            disabled={loading}
             style={{
+              width: '100%',
               padding: '12px',
-              borderRadius: '8px',
+              borderRadius: '10px',
               border: 'none',
+              backgroundColor: '#2563eb',
+              color: 'white',
+              fontWeight: '600',
               cursor: 'pointer',
+              marginBottom: '16px',
             }}
           >
-            Sign In
+            {loading ? 'Logging in...' : 'Log In'}
           </button>
         </form>
 
-        <Link href="/signup">
-          <button
-            style={{
-              marginTop: '12px',
-              width: '100%',
-              padding: '12px',
-              borderRadius: '8px',
-              border: '1px solid #4b5563',
-              background: 'transparent',
-              color: 'white',
-              cursor: 'pointer',
-            }}
+        <p
+          style={{
+            textAlign: 'center',
+            color: '#94a3b8',
+            fontSize: '14px',
+          }}
+        >
+          Don’t have an account?{' '}
+          <Link
+            href="/signup"
+            style={{ color: '#60a5fa', textDecoration: 'none' }}
           >
-            Create Account
-          </button>
-        </Link>
-
-        {message && (
-          <p style={{ marginTop: '16px', color: '#93c5fd' }}>{message}</p>
-        )}
+            Create one
+          </Link>
+        </p>
       </div>
-    </main>
+    </div>
   )
 }
