@@ -23,7 +23,7 @@ export default function Signup() {
     const trimmedCompany = company.trim()
     const trimmedFullName = fullName.trim()
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
+    const { data, error: signupError } = await supabase.auth.signUp({
       email: trimmedEmail,
       password,
       options: {
@@ -34,8 +34,8 @@ export default function Signup() {
       },
     })
 
-    if (signUpError) {
-      setError(signUpError.message)
+    if (signupError) {
+      setError(signupError.message)
       setLoading(false)
       return
     }
@@ -43,12 +43,14 @@ export default function Signup() {
     const user = data?.user
 
     if (user) {
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: user.id,
-        email: trimmedEmail,
-        company: trimmedCompany,
-        full_name: trimmedFullName,
-      })
+      const { error: profileError } = await supabase.from('profiles').insert([
+        {
+          id: user.id,
+          email: trimmedEmail,
+          full_name: trimmedFullName,
+          company: trimmedCompany,
+        },
+      ])
 
       if (profileError) {
         setError(profileError.message)
@@ -57,12 +59,12 @@ export default function Signup() {
       }
     }
 
-    setMessage('Account created successfully. You can now log in.')
+    setMessage('Account created. Check your email if confirmation is enabled.')
     setLoading(false)
 
     setTimeout(() => {
       router.push('/')
-    }, 1200)
+    }, 1500)
   }
 
   return (
@@ -105,7 +107,7 @@ export default function Signup() {
             marginBottom: '24px',
           }}
         >
-          Set up your account to access the dashboard
+          Set up your company profile
         </p>
 
         <form onSubmit={handleSignup}>
@@ -257,10 +259,7 @@ export default function Signup() {
           }}
         >
           Already have an account?{' '}
-          <Link
-            href="/"
-            style={{ color: '#60a5fa', textDecoration: 'none' }}
-          >
+          <Link href="/" style={{ color: '#60a5fa', textDecoration: 'none' }}>
             Log in
           </Link>
         </p>
