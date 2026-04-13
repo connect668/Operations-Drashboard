@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import { supabase } from '../utils/supabaseClient'
+import { supabase } from '../lib/supabaseClient'
 
 export default function Home() {
   const router = useRouter()
