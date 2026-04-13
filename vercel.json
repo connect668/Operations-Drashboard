@@ -12,7 +12,7 @@ export default function Home() {
       setErrorMessage('')
 
       const { data, error } = await supabase
-        .from('profiles')
+        .from('Profiles')
         .select('*')
         .order('created_at', { ascending: false })
 
