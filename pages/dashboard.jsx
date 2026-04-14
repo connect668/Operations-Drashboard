@@ -16,6 +16,12 @@ const ROLE_LEVELS = {
   "Area Manager": 3,
 };
 
+function getNextRole(role) {
+  if (role === "Manager") return "General Manager";
+  if (role === "General Manager") return "Area Coach";
+  return null;
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState(TABS.coaching);
   const [user, setUser] = useState(null);
@@ -32,22 +38,23 @@ export default function Dashboard() {
   const [decisionMessage, setDecisionMessage] = useState("");
   const [coachingMessage, setCoachingMessage] = useState("");
 
-  const [coachingLoading, setCoachingLoading] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState(false);
-
-  const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
-  const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
-  const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
+  const [coachingLoading, setCoachingLoading] = useState(false);
 
   const [teamDecisions, setTeamDecisions] = useState([]);
   const [teamDecisionsLoading, setTeamDecisionsLoading] = useState(false);
   const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
+
+  const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
+  const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
+  const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
 
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
   }, [profile]);
 
   const canViewLeadershipTabs = currentRoleLevel >= 2;
+  const nextRole = getNextRole(profile?.role);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -88,11 +95,11 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!profile?.company || !canViewLeadershipTabs) return;
+    if (!profile?.company || !profile?.role || !canViewLeadershipTabs) return;
 
-    fetchTeamCoachingRequests();
     fetchTeamDecisions();
-  }, [profile?.company, canViewLeadershipTabs]);
+    fetchTeamCoachingRequests();
+  }, [profile?.company, profile?.role, canViewLeadershipTabs]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -136,6 +143,8 @@ export default function Dashboard() {
             user?.email ||
             "Unknown User",
           user_role: profile?.role || "Manager",
+          submitted_by_role: profile?.role || "Manager",
+          visible_to_role: nextRole,
           situation: decisionSituation.trim(),
           action_taken: decisionAction.trim(),
           reasoning: decisionReasoning.trim() || null,
@@ -148,15 +157,10 @@ export default function Dashboard() {
       setDecisionAction("");
       setDecisionReasoning("");
       setDecisionMessage("Decision submitted successfully.");
-
-      if (canViewLeadershipTabs) {
-        fetchTeamDecisions();
-      }
     } catch (error) {
       console.error("Decision submit error:", error);
       setDecisionMessage(
-        error.message ||
-          'Failed to submit decision. If needed, the "decision_logs" table or columns may need to be matched to your database.'
+        error.message || "Failed to submit decision."
       );
     } finally {
       setDecisionLoading(false);
@@ -189,7 +193,10 @@ export default function Dashboard() {
             user?.email ||
             "Unknown User",
           requester_role: profile?.role || "Manager",
+          submitted_by_role: profile?.role || "Manager",
+          visible_to_role: nextRole,
           request_text: coachingText.trim(),
+          status: "open",
         },
       ]);
 
@@ -197,10 +204,6 @@ export default function Dashboard() {
 
       setCoachingText("");
       setCoachingMessage("Coaching request submitted successfully.");
-
-      if (canViewLeadershipTabs) {
-        fetchTeamCoachingRequests();
-      }
     } catch (error) {
       console.error("Coaching submit error:", error);
       setCoachingMessage(error.message || "Failed to submit coaching request.");
@@ -209,8 +212,36 @@ export default function Dashboard() {
     }
   };
 
+  const fetchTeamDecisions = async () => {
+    if (!profile?.company || !profile?.role) return;
+
+    setTeamDecisionsLoading(true);
+    setTeamDecisionsMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("decision_logs")
+        .select("*")
+        .eq("company", profile.company)
+        .eq("visible_to_role", profile.role)
+        .neq("user_id", user?.id || "")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setTeamDecisions(data || []);
+    } catch (error) {
+      console.error("Fetch team decisions error:", error);
+      setTeamDecisionsMessage(
+        error.message || "Failed to load team decisions."
+      );
+    } finally {
+      setTeamDecisionsLoading(false);
+    }
+  };
+
   const fetchTeamCoachingRequests = async () => {
-    if (!profile?.company) return;
+    if (!profile?.company || !profile?.role) return;
 
     setTeamCoachingLoading(true);
     setTeamCoachingMessage("");
@@ -220,6 +251,8 @@ export default function Dashboard() {
         .from("coaching_requests")
         .select("*")
         .eq("company", profile.company)
+        .eq("visible_to_role", profile.role)
+        .neq("user_id", user?.id || "")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -232,33 +265,6 @@ export default function Dashboard() {
       );
     } finally {
       setTeamCoachingLoading(false);
-    }
-  };
-
-  const fetchTeamDecisions = async () => {
-    if (!profile?.company) return;
-
-    setTeamDecisionsLoading(true);
-    setTeamDecisionsMessage("");
-
-    try {
-      const { data, error } = await supabase
-        .from("decision_logs")
-        .select("*")
-        .eq("company", profile.company)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      setTeamDecisions(data || []);
-    } catch (error) {
-      console.error("Fetch team decisions error:", error);
-      setTeamDecisionsMessage(
-        error.message ||
-          'Failed to load team decisions. Your "decision_logs" structure may need to be matched.'
-      );
-    } finally {
-      setTeamDecisionsLoading(false);
     }
   };
 
@@ -282,7 +288,6 @@ export default function Dashboard() {
 
   const formatDate = (value) => {
     if (!value) return "Unknown date";
-
     try {
       return new Date(value).toLocaleString();
     } catch {
@@ -411,10 +416,7 @@ export default function Dashboard() {
                   placeholder="Example: An employee showed up 30 minutes late without calling. What does company policy say I should do?"
                   style={styles.textarea}
                 />
-                <button
-                  style={styles.primaryButton}
-                  onClick={handlePullPolicy}
-                >
+                <button style={styles.primaryButton} onClick={handlePullPolicy}>
                   Pull Policy
                 </button>
                 {policyMessage ? (
@@ -481,8 +483,7 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Request Coaching</h1>
                 <p style={styles.subtitle}>
-                  Ask for leadership support when a second layer of guidance is
-                  needed.
+                  Ask for leadership support when a second layer of guidance is needed.
                 </p>
               </div>
 
@@ -516,7 +517,7 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Team Decisions</h1>
                 <p style={styles.subtitle}>
-                  Review submitted decisions across your company.
+                  Review decisions routed to your clearance level.
                 </p>
               </div>
 
@@ -549,8 +550,7 @@ export default function Dashboard() {
                               {item.user_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.user_role || "Manager"} •{" "}
-                              {item.company || "No company"}
+                              {item.user_role || "Manager"} • {item.company || "No company"}
                             </div>
                           </div>
                           <div style={styles.feedDate}>
@@ -591,7 +591,7 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Team Coaching Requests</h1>
                 <p style={styles.subtitle}>
-                  Review and manage coaching requests submitted by your team.
+                  Review coaching requests routed to your clearance level.
                 </p>
               </div>
 
@@ -613,9 +613,7 @@ export default function Dashboard() {
                 {teamCoachingLoading ? (
                   <p style={styles.message}>Loading coaching requests...</p>
                 ) : teamCoachingRequests.length === 0 ? (
-                  <p style={styles.message}>
-                    No coaching requests found yet.
-                  </p>
+                  <p style={styles.message}>No coaching requests found yet.</p>
                 ) : (
                   <div style={styles.cardList}>
                     {teamCoachingRequests.map((item) => (
@@ -626,8 +624,7 @@ export default function Dashboard() {
                               {item.requester_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.requester_role || "Manager"} •{" "}
-                              {item.company || "No company"}
+                              {item.requester_role || "Manager"} • {item.company || "No company"}
                             </div>
                           </div>
                           <div style={styles.feedDate}>
@@ -648,25 +645,19 @@ export default function Dashboard() {
                         <div style={styles.actionRow}>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "in_progress")
-                            }
+                            onClick={() => updateCoachingStatus(item.id, "in_progress")}
                           >
                             Start Review
                           </button>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "resolved")
-                            }
+                            onClick={() => updateCoachingStatus(item.id, "resolved")}
                           >
                             Mark Resolved
                           </button>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "open")
-                            }
+                            onClick={() => updateCoachingStatus(item.id, "open")}
                           >
                             Reopen
                           </button>
