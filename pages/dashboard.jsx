@@ -644,7 +644,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={{ ...styles.page, padding: isMobile ? "16px" : "24px" }}>
+    <div className="dashboard-page" style={{ ...styles.page, padding: isMobile ? "16px" : "24px" }}>
       {/* Mobile top bar */}
       {isMobile && (
         <div style={styles.mobileTopBar}>
@@ -686,10 +686,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={isMobile ? styles.containerMobile : styles.container}>
+      <div className="dashboard-container" style={isMobile ? styles.containerMobile : styles.container}>
         {/* Desktop sidebar only */}
         {!isMobile && (
-        <aside style={styles.sidebar}>
+        <aside className="dashboard-sidebar" style={styles.sidebar}>
           <div style={styles.brandCard}>
             <div style={styles.smallLabel}>SIGNED IN AS</div>
             <div style={styles.userName}>
@@ -734,7 +734,7 @@ export default function Dashboard() {
         </aside>
         )}
 
-        <main style={styles.main}>
+        <main className="dashboard-main" style={styles.main}>
           {activeTab === TABS.policy && (
             <>
               <div style={styles.headerCard}>
@@ -1066,7 +1066,7 @@ export default function Dashboard() {
                 </p>
               </div>
 
-              <div style={{ ...styles.managersLayout, gridTemplateColumns: isMobile ? "1fr" : "360px 1fr" }}>
+              <div className="managers-layout" style={{ ...styles.managersLayout, gridTemplateColumns: isMobile ? "1fr" : "360px 1fr" }}>
                 <div style={styles.panelCard}>
                   <div style={styles.sectionTopRow}>
                     <div style={styles.sectionHeading}>Manager Directory</div>
@@ -1141,7 +1141,7 @@ export default function Dashboard() {
                   ) : selectedManagerLoading ? (
                     <p style={styles.message}>Loading manager file...</p>
                   ) : !managerFileTab ? (
-                    <div style={styles.logTypeSelector}>
+                    <div className="log-type-selector" style={styles.logTypeSelector}>
                       <button
                         style={styles.logTypeButton}
                         onClick={() => setManagerFileTab("decisions")}
@@ -1389,7 +1389,7 @@ export default function Dashboard() {
 
                 {facilitiesMessage && <p style={styles.message}>{facilitiesMessage}</p>}
 
-                <div style={isMobile ? { display: "flex", flexDirection: "column", gap: "16px" } : styles.facilitiesLayout}>
+                <div className="facilities-layout" style={isMobile ? { display: "flex", flexDirection: "column", gap: "16px" } : styles.facilitiesLayout}>
 
                   {/* ── PANEL 1: Facilities ── */}
                   {(!isMobile || (!selectedFacility && !selectedGM)) && (
