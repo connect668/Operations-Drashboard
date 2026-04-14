@@ -7,6 +7,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [message, setMessage] = useState("");
+  const [situation, setSituation] = useState("");
+  const [actionTaken, setActionTaken] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -25,14 +28,8 @@ export default function DashboardPage() {
         .eq("id", user.id)
         .maybeSingle();
 
-      if (error) {
-        setMessage(error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!data) {
-        setMessage("No profile row exists for this user yet.");
+      if (error || !data) {
+        setMessage("Could not load profile.");
         setLoading(false);
         return;
       }
@@ -49,18 +46,36 @@ export default function DashboardPage() {
     router.push("/");
   }
 
-  if (loading) {
-    return <div style={{ padding: "2rem" }}>Loading dashboard...</div>;
+  async function handleSubmitLog(e) {
+    e.preventDefault();
+    setMessage("");
+    setSubmitting(true);
+
+    const { error } = await supabase.from("decision_logs").insert([
+      {
+        user_id: profile.id,
+        full_name: profile.full_name,
+        role: profile.role,
+        company: profile.company || null,
+        situation,
+        action_taken: actionTaken,
+      },
+    ]);
+
+    if (error) {
+      setMessage(error.message);
+      setSubmitting(false);
+      return;
+    }
+
+    setSituation("");
+    setActionTaken("");
+    setMessage("Decision log submitted successfully.");
+    setSubmitting(false);
   }
 
-  if (!profile) {
-    return (
-      <div style={{ padding: "2rem" }}>
-        <h1>No profile found</h1>
-        <p>{message}</p>
-      </div>
-    );
-  }
+  if (loading) return <div style={{ padding: "2rem" }}>Loading...</div>;
+  if (!profile) return <div style={{ padding: "2rem" }}>No profile found.</div>;
 
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
@@ -69,49 +84,57 @@ export default function DashboardPage() {
       <p><strong>Role:</strong> {profile.role}</p>
       <p><strong>Company:</strong> {profile.company || "Not assigned yet"}</p>
 
-      <div
-        style={{
-          marginTop: "2rem",
-          padding: "1rem",
-          border: "1px solid #ccc",
-          borderRadius: "8px",
-        }}
-      >
-        {profile.role === "pending" && (
-          <>
-            <h2>Account Pending</h2>
-            <p>Your account has been created, but your access level has not been assigned yet.</p>
-          </>
-        )}
+      {profile.role === "pending" && (
+        <div style={{ marginTop: "2rem" }}>
+          <h2>Pending Access</h2>
+          <p>Your account is waiting for approval.</p>
+        </div>
+      )}
 
-        {profile.role === "manager" && (
-          <>
-            <h2>Manager Dashboard</h2>
-            <p>Submit decision logs, ask policy questions, and review your own activity.</p>
-          </>
-        )}
+      {(profile.role === "manager" || profile.role === "admin") && (
+        <div style={{ marginTop: "2rem", maxWidth: "700px" }}>
+          <h2>Submit Decision Log</h2>
+          <form onSubmit={handleSubmitLog} style={{ display: "grid", gap: "12px" }}>
+            <textarea
+              placeholder="Situation"
+              value={situation}
+              onChange={(e) => setSituation(e.target.value)}
+              required
+              rows={5}
+              style={{ padding: "12px" }}
+            />
 
-        {profile.role === "gm" && (
-          <>
-            <h2>GM Dashboard</h2>
-            <p>Review manager activity, ratings, and store-level trends.</p>
-          </>
-        )}
+            <textarea
+              placeholder="Action Taken"
+              value={actionTaken}
+              onChange={(e) => setActionTaken(e.target.value)}
+              required
+              rows={5}
+              style={{ padding: "12px" }}
+            />
 
-        {profile.role === "area_coach" && (
-          <>
-            <h2>Area Coach Dashboard</h2>
-            <p>Compare stores, monitor GMs, and review higher-level trends.</p>
-          </>
-        )}
+            <button type="submit" disabled={submitting}>
+              {submitting ? "Submitting..." : "Submit Log"}
+            </button>
+          </form>
+        </div>
+      )}
 
-        {profile.role === "admin" && (
-          <>
-            <h2>Admin Dashboard</h2>
-            <p>Manage users, roles, and company-wide settings.</p>
-          </>
-        )}
-      </div>
+      {profile.role === "gm" && (
+        <div style={{ marginTop: "2rem" }}>
+          <h2>GM Dashboard</h2>
+          <p>GM tools go here later.</p>
+        </div>
+      )}
+
+      {profile.role === "area_coach" && (
+        <div style={{ marginTop: "2rem" }}>
+          <h2>Area Coach Dashboard</h2>
+          <p>Area coach tools go here later.</p>
+        </div>
+      )}
+
+      {message && <p style={{ marginTop: "1rem" }}>{message}</p>}
 
       <button onClick={handleSignOut} style={{ marginTop: "2rem" }}>
         Sign Out
