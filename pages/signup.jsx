@@ -8,6 +8,7 @@ export default function SignupPage() {
 
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
+  const [selectedRole, setSelectedRole] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -37,15 +38,13 @@ export default function SignupPage() {
       return;
     }
 
-    const { error: profileError } = await supabase.from("profiles").insert([
-      {
-        id: user.id,
-        email: user.email,
-        full_name: name,
-        company: company || null,
-        role: "pending",
-      },
-    ]);
+    const { error: profileError } = await supabase.from("profiles").upsert({
+      id: user.id,
+      email: user.email,
+      full_name: name,
+      company: company || null,
+      role: selectedRole,
+    });
 
     if (profileError) {
       setMessage(profileError.message);
@@ -117,6 +116,25 @@ export default function SignupPage() {
               color: "white",
             }}
           />
+
+          <select
+            value={selectedRole}
+            onChange={(e) => setSelectedRole(e.target.value)}
+            required
+            style={{
+              padding: "12px",
+              borderRadius: "10px",
+              border: "1px solid #374151",
+              backgroundColor: "#1f2937",
+              color: selectedRole ? "white" : "#9ca3af",
+            }}
+          >
+            <option value="" disabled>Select your role</option>
+            <option value="Manager">Manager</option>
+            <option value="General Manager">General Manager</option>
+            <option value="Area Coach">Area Coach</option>
+            <option value="Area Manager">Area Manager</option>
+          </select>
 
           <input
             type="email"
