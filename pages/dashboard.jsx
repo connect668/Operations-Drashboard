@@ -5,7 +5,6 @@ import { supabase } from "../lib/supabaseClient";
 export default function DashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [message, setMessage] = useState("");
 
@@ -20,16 +19,20 @@ export default function DashboardPage() {
         return;
       }
 
-      setUser(user);
-
       const { data, error } = await supabase
-        .from("Profiles")
+        .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        setMessage("Could not load profile.");
+        setMessage(error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!data) {
+        setMessage("No profile row exists for this user yet.");
         setLoading(false);
         return;
       }
@@ -46,7 +49,9 @@ export default function DashboardPage() {
     router.push("/");
   }
 
-  if (loading) return <div style={{ padding: "2rem" }}>Loading dashboard...</div>;
+  if (loading) {
+    return <div style={{ padding: "2rem" }}>Loading dashboard...</div>;
+  }
 
   if (!profile) {
     return (
@@ -59,11 +64,26 @@ export default function DashboardPage() {
 
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
-      <h1>Welcome, {profile.name}</h1>
+      <h1>Welcome, {profile.full_name}</h1>
       <p><strong>Email:</strong> {profile.email}</p>
       <p><strong>Role:</strong> {profile.role}</p>
+      <p><strong>Company:</strong> {profile.company || "Not assigned yet"}</p>
 
-      <div style={{ marginTop: "2rem", padding: "1rem", border: "1px solid #ccc", borderRadius: "8px" }}>
+      <div
+        style={{
+          marginTop: "2rem",
+          padding: "1rem",
+          border: "1px solid #ccc",
+          borderRadius: "8px",
+        }}
+      >
+        {profile.role === "pending" && (
+          <>
+            <h2>Account Pending</h2>
+            <p>Your account has been created, but your access level has not been assigned yet.</p>
+          </>
+        )}
+
         {profile.role === "manager" && (
           <>
             <h2>Manager Dashboard</h2>
