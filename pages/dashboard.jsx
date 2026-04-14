@@ -1,878 +1,542 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-const MOCK_LOGS = [
-  {
-    id: 1,
-    user: "Jordan M.",
-    role: "manager",
-    situation: "Employee showed up 45 minutes late without calling in.",
-    action: "I gave them a verbal warning and documented it in their file.",
-    timestamp: "Today, 9:14 AM",
-    ratings: { policy: 5, judgment: 4, documentation: 5, escalation: 5 },
-    overall: "green",
-    flag: null,
-  },
-  {
-    id: 2,
-    user: "Casey R.",
-    role: "manager",
-    situation:
-      "Two employees had a heated argument on the floor in front of customers.",
-    action: "I told them to stop and moved on. Didn’t write anything up.",
-    timestamp: "Yesterday, 2:31 PM",
-    ratings: { policy: 2, judgment: 2, documentation: 1, escalation: 2 },
-    overall: "red",
-    flag:
-      "Failure to document incident. No escalation on customer-facing conflict.",
-  },
-  {
-    id: 3,
-    user: "Morgan T.",
-    role: "manager",
-    situation: "Employee requested time off during a blackout period.",
-    action: "I denied it and explained the blackout policy verbally.",
-    timestamp: "Yesterday, 11:05 AM",
-    ratings: { policy: 4, judgment: 4, documentation: 3, escalation: 5 },
-    overall: "yellow",
-    flag: "Verbal only — should have provided written denial for record.",
-  },
+const TABS = [
+  { id: "policy", label: "Request Policy" },
+  { id: "document", label: "Document Decision" },
+  { id: "coaching", label: "Request Coaching" },
 ];
 
-async function callClaude(messages, systemPrompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages,
-    }),
-  });
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState("document");
+  const [profile, setProfile] = useState(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [submittingDecision, setSubmittingDecision] = useState(false);
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const data = await res.json();
-  return data.content?.map((b) => b.text || "").join("\n") || "No response.";
-}
-
-function Spinner() {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "20px 0",
-        color: "#9aa6b2",
-      }}
-    >
-      <div
-        style={{
-          width: 18,
-          height: 18,
-          border: "2px solid #34414d",
-          borderTop: "2px solid #6f8ea8",
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-        }}
-      />
-      <span style={{ fontSize: 13 }}>Analyzing...</span>
-    </div>
+  const [policyPrompt, setPolicyPrompt] = useState(
+    "Frequent example: An employee arrived late without calling. What does company policy say I should do?"
   );
-}
 
-// ─── REQUEST POLICY ───────────────────────────────────────────────────────────
-function PromptScreen() {
-  const [situation, setSituation] = useState("");
-  const [response, setResponse] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [coachingPrompt, setCoachingPrompt] = useState("");
 
-  const systemPrompt = `You are a policy guidance AI for frontline managers. When given a workplace situation, respond with:
+  const [whatHappened, setWhatHappened] = useState("");
+  const [whatYouDid, setWhatYouDid] = useState("");
+  const [policyReferenced, setPolicyReferenced] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
 
-1. Relevant Policy — what the rules say
-2. Recommended Actions — concrete steps to take
-3. Risks — what could go wrong if handled poorly
-4. Next Steps — immediate actions
-5. Escalation — when or if to escalate and to whom
+  useEffect(() => {
+    loadProfile();
+  }, []);
 
-Be direct, practical, and specific. Format with clear section headers.`;
+  const loadProfile = async () => {
+    setLoadingProfile(true);
+    setError("");
 
-  const handleSubmit = async () => {
-    if (!situation.trim()) return;
-    setLoading(true);
-    setResponse(null);
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    try {
-      const text = await callClaude(
-        [{ role: "user", content: `Situation: ${situation}` }],
-        systemPrompt
-      );
-      setResponse(text);
-    } catch {
-      setResponse("Error reaching AI. Please try again.");
+    if (userError || !user) {
+      setError("You must be logged in to view the dashboard.");
+      setLoadingProfile(false);
+      return;
     }
 
-    setLoading(false);
-  };
+    const { data, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, full_name, role, company")
+      .eq("id", user.id)
+      .single();
 
-  return (
-    <div>
-      <div style={{ marginBottom: 24 }}>
-        <label style={labelStyle}>Describe the Situation</label>
-        <textarea
-          value={situation}
-          onChange={(e) => setSituation(e.target.value)}
-          placeholder="e.g. An employee called out for the 4th time this month without documentation..."
-          style={textareaStyle}
-          rows={5}
-        />
-      </div>
-
-      <button
-        onClick={handleSubmit}
-        disabled={loading || !situation.trim()}
-        style={{
-          ...primaryBtn,
-          opacity: loading || !situation.trim() ? 0.5 : 1,
-        }}
-      >
-        {loading ? "Analyzing..." : "Get Guidance"}
-      </button>
-
-      {loading && <Spinner />}
-
-      {response && (
-        <div style={responseCardStyle}>
-          <div style={sectionEyebrow}>Policy Guidance</div>
-          <div
-            style={{
-              fontSize: 14,
-              color: "#c6d0d8",
-              lineHeight: 1.75,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {response}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── DOCUMENT DECISION ────────────────────────────────────────────────────────
-function LogScreen() {
-  const [situation, setSituation] = useState("");
-  const [action, setAction] = useState("");
-  const [policy, setPolicy] = useState("");
-  const [notes, setNotes] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [confirmation, setConfirmation] = useState(null);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const handleSubmit = async () => {
-    if (!situation.trim() || !action.trim()) return;
-
-    setLoading(true);
-    setErrorMessage("");
-    setConfirmation(null);
-
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        throw new Error("No logged in user found.");
-      }
-
-      const { error: insertError } = await supabase.from("decision_logs").insert([
-        {
-          user_id: user.id,
-          situation: situation.trim(),
-          action_taken: action.trim(),
-          policy_referenced: policy.trim() || null,
-          notes: notes.trim() || null,
-        },
-      ]);
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      setSubmitted(true);
-      setConfirmation("Your decision has been documented.");
-    } catch (error) {
-      setErrorMessage(error.message || "Could not save decision log.");
-    } finally {
-      setLoading(false);
+    if (profileError) {
+      setError("Could not load your profile.");
+      setLoadingProfile(false);
+      return;
     }
+
+    setProfile(data);
+    setLoadingProfile(false);
   };
 
-  if (submitted) {
+  const handleSubmitDecision = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+    setSubmittingDecision(true);
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setError("You must be logged in.");
+      setSubmittingDecision(false);
+      return;
+    }
+
+    const { data: freshProfile, error: profileError } = await supabase
+      .from("profiles")
+      .select("full_name, role, company")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError || !freshProfile) {
+      setError("Could not load profile.");
+      setSubmittingDecision(false);
+      return;
+    }
+
+    if (!freshProfile.full_name) {
+      setError("Your profile is missing a full name.");
+      setSubmittingDecision(false);
+      return;
+    }
+
+    const payload = {
+      user_id: user.id,
+      full_name: freshProfile.full_name,
+      role: freshProfile.role || null,
+      company: freshProfile.company || null,
+      situation: whatHappened,
+      action_taken: whatYouDid,
+      policy_referenced: policyReferenced || null,
+      notes: additionalNotes || null,
+    };
+
+    const { error: insertError } = await supabase
+      .from("decision_logs")
+      .insert([payload]);
+
+    if (insertError) {
+      setError(insertError.message);
+      setSubmittingDecision(false);
+      return;
+    }
+
+    setWhatHappened("");
+    setWhatYouDid("");
+    setPolicyReferenced("");
+    setAdditionalNotes("");
+    setSuccessMessage("Decision submitted successfully.");
+    setSubmittingDecision(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  };
+
+  if (loadingProfile) {
     return (
-      <div style={{ textAlign: "center", padding: "60px 0" }}>
-        <div style={{ fontSize: 42, marginBottom: 16, color: "#8ca2b5" }}>✓</div>
-        <div
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            color: "#edf2f7",
-            marginBottom: 8,
-          }}
-        >
-          Decision Documented
+      <div style={styles.page}>
+        <div style={styles.centerCard}>
+          <h2 style={styles.loadingText}>Loading dashboard...</h2>
         </div>
-        <div style={{ color: "#98a5b3", fontSize: 14, marginBottom: 32 }}>
-          {confirmation}
-        </div>
-        <button
-          onClick={() => {
-            setSituation("");
-            setAction("");
-            setPolicy("");
-            setNotes("");
-            setSubmitted(false);
-            setConfirmation(null);
-            setErrorMessage("");
-          }}
-          style={secondaryBtn}
-        >
-          Document Another
-        </button>
       </div>
     );
   }
 
   return (
-    <div>
-      <div style={infoNoticeStyle}>
-        Log what you actually did. Be specific and accurate — this creates your
-        decision record.
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <label style={labelStyle}>What Happened</label>
-        <textarea
-          value={situation}
-          onChange={(e) => setSituation(e.target.value)}
-          placeholder="Describe the situation..."
-          style={textareaStyle}
-          rows={3}
-        />
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <label style={labelStyle}>What You Did</label>
-        <textarea
-          value={action}
-          onChange={(e) => setAction(e.target.value)}
-          placeholder="Describe your action in detail..."
-          style={textareaStyle}
-          rows={3}
-        />
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <label style={labelStyle}>
-          Policy Referenced{" "}
-          <span style={{ color: "#6f7d8b", fontWeight: 400 }}>(optional)</span>
-        </label>
-        <input
-          value={policy}
-          onChange={(e) => setPolicy(e.target.value)}
-          placeholder="e.g. Attendance Policy Section 3.2"
-          style={inputStyle}
-        />
-      </div>
-
-      <div style={{ marginBottom: 24 }}>
-        <label style={labelStyle}>
-          Additional Notes{" "}
-          <span style={{ color: "#6f7d8b", fontWeight: 400 }}>(optional)</span>
-        </label>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Any context, follow-ups, or observations..."
-          style={textareaStyle}
-          rows={2}
-        />
-      </div>
-
-      {errorMessage ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "12px 14px",
-            background: "#161317",
-            border: "1px solid #4b2d2d",
-            borderRadius: 8,
-            fontSize: 13,
-            color: "#d9a3a3",
-            lineHeight: 1.5,
-          }}
-        >
-          {errorMessage}
-        </div>
-      ) : null}
-
-      <button
-        onClick={handleSubmit}
-        disabled={loading || !situation.trim() || !action.trim()}
-        style={{
-          ...primaryBtn,
-          opacity: loading || !situation.trim() || !action.trim() ? 0.5 : 1,
-        }}
-      >
-        {loading ? "Saving..." : "Submit Decision"}
-      </button>
-
-      {loading && <Spinner />}
-    </div>
-  );
-}
-
-// ─── REQUEST COACHING ────────────────────────────────────────────────────────
-function RequestCoachingScreen() {
-  const [category, setCategory] = useState(null);
-  const [question, setQuestion] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-
-  const categories = [
-    {
-      id: "People",
-      desc: "Team dynamics, communication, and coaching conversations",
-      color: "#6f8ea8",
-    },
-    {
-      id: "Policy",
-      desc: "Rules, compliance, documentation, and approvals",
-      color: "#8a7a58",
-    },
-    {
-      id: "Procedure",
-      desc: "Step-by-step processes, operations, and protocols",
-      color: "#5c7b72",
-    },
-  ];
-
-  const handleSubmit = () => {
-    if (!category || !question.trim()) return;
-    setSubmitted(true);
-  };
-
-  if (submitted) {
-    return (
-      <div style={{ textAlign: "center", padding: "60px 0" }}>
-        <div style={{ fontSize: 42, marginBottom: 16, color: "#8ca2b5" }}>✓</div>
-        <div
-          style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: "#edf2f7",
-            marginBottom: 8,
-          }}
-        >
-          Coaching Request Submitted
-        </div>
-        <div
-          style={{
-            color: "#98a5b3",
-            fontSize: 13,
-            marginBottom: 32,
-            lineHeight: 1.6,
-          }}
-        >
-          Your request has been recorded for leadership follow-up.
-        </div>
-        <button
-          onClick={() => {
-            setCategory(null);
-            setQuestion("");
-            setSubmitted(false);
-          }}
-          style={secondaryBtn}
-        >
-          Submit Another
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div style={infoNoticeStyle}>
-        Not sure about something? Request coaching. Be specific — clearer input
-        leads to better guidance.
-      </div>
-
-      <div style={{ marginBottom: 24 }}>
-        <label style={labelStyle}>What area do you need help with?</label>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {categories.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setCategory(c.id)}
-              style={{
-                padding: "14px 16px",
-                borderRadius: 10,
-                cursor: "pointer",
-                border: `1px solid ${category === c.id ? c.color : "#2d3742"}`,
-                background: category === c.id ? "#121922" : "#0f141b",
-                transition: "all 0.2s",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: category === c.id ? c.color : "transparent",
-                    border: `2px solid ${c.color}`,
-                    flexShrink: 0,
-                  }}
-                />
-                <div>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: category === c.id ? "#edf2f7" : "#b8c2cc",
-                    }}
-                  >
-                    {c.id}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "#72808d",
-                      marginTop: 2,
-                    }}
-                  >
-                    {c.desc}
-                  </div>
-                </div>
+    <div style={styles.page}>
+      <div style={styles.shell}>
+        <aside style={styles.sidebar}>
+          <div>
+            <div style={styles.brandBlock}>
+              <div style={styles.brandBadge}>OSS</div>
+              <div>
+                <h1 style={styles.brandTitle}>Operator Support System</h1>
+                <p style={styles.brandSubtitle}>
+                  Clear decisions. Consistent standards.
+                </p>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <label style={labelStyle}>What specifically do you need help with?</label>
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Describe what you're unclear on..."
-          style={textareaStyle}
-          rows={5}
-        />
-      </div>
+            <div style={styles.profileCard}>
+              <p style={styles.sectionLabel}>Signed in as</p>
+              <h2 style={styles.profileName}>
+                {profile?.full_name || "Team Member"}
+              </h2>
+              <p style={styles.profileMeta}>
+                {profile?.role || "Manager"}
+                {profile?.company ? ` • ${profile.company}` : ""}
+              </p>
+            </div>
 
-      <button
-        onClick={handleSubmit}
-        disabled={!category || !question.trim()}
-        style={{
-          ...primaryBtn,
-          opacity: !category || !question.trim() ? 0.5 : 1,
-        }}
-      >
-        Submit Request
-      </button>
-    </div>
-  );
-}
+            <div style={styles.navBlock}>
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setError("");
+                    setSuccessMessage("");
+                  }}
+                  style={{
+                    ...styles.tabButton,
+                    ...(activeTab === tab.id ? styles.activeTabButton : {}),
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-// ─── RECENT DECISIONS ─────────────────────────────────────────────────────────
-function RecentDecisionsScreen() {
-  const ratingColor = (r) =>
-    ({ green: "#3f8cff", yellow: "#b68a3a", red: "#b54a4a" }[r]);
+          <button type="button" onClick={handleLogout} style={styles.logoutButton}>
+            Log Out
+          </button>
+        </aside>
 
-  const ratingLabel = (r) =>
-    ({ green: "Strong", yellow: "Questionable", red: "Needs Review" }[r]);
-
-  return (
-    <div>
-      <div style={sectionEyebrow}>Recent Documented Decisions</div>
-
-      {MOCK_LOGS.map((log) => (
-        <div
-          key={log.id}
-          style={{
-            marginBottom: 14,
-            padding: 18,
-            background: "#10161d",
-            borderRadius: 12,
-            border: "1px solid #26313b",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              marginBottom: 10,
-            }}
-          >
+        <main style={styles.main}>
+          <div style={styles.header}>
             <div>
-              <span
-                style={{
-                  fontWeight: 700,
-                  color: "#edf2f7",
-                  fontSize: 15,
-                }}
-              >
-                {log.user}
-              </span>
-              <span style={{ color: "#748190", fontSize: 12, marginLeft: 10 }}>
-                {log.timestamp}
-              </span>
+              <p style={styles.sectionLabel}>Dashboard</p>
+              <h2 style={styles.headerTitle}>
+                {activeTab === "policy" && "Request Policy Guidance"}
+                {activeTab === "document" && "Document Decision"}
+                {activeTab === "coaching" && "Request Coaching"}
+              </h2>
+              <p style={styles.headerText}>
+                {activeTab === "policy" &&
+                  "Describe the situation so the system can pull relevant policy guidance."}
+                {activeTab === "document" &&
+                  "Log what happened, what action you took, and any supporting notes."}
+                {activeTab === "coaching" &&
+                  "Request leadership support when you need a second layer of review."}
+              </p>
             </div>
-
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: ratingColor(log.overall),
-                background: "rgba(255,255,255,0.03)",
-                border: `1px solid ${ratingColor(log.overall)}`,
-                padding: "3px 10px",
-                borderRadius: 20,
-              }}
-            >
-              {ratingLabel(log.overall)}
-            </span>
           </div>
 
-          <div
-            style={{
-              fontSize: 13,
-              color: "#9eabb8",
-              marginBottom: 10,
-              lineHeight: 1.6,
-            }}
-          >
-            <strong style={{ color: "#d8e0e7" }}>Situation:</strong>{" "}
-            {log.situation}
-          </div>
+          {error ? <div style={styles.errorBox}>{error}</div> : null}
+          {successMessage ? (
+            <div style={styles.successBox}>{successMessage}</div>
+          ) : null}
 
-          <div
-            style={{
-              fontSize: 13,
-              color: "#9eabb8",
-              marginBottom: 10,
-              lineHeight: 1.6,
-            }}
-          >
-            <strong style={{ color: "#d8e0e7" }}>Action:</strong> {log.action}
-          </div>
-
-          {log.flag && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: "10px 14px",
-                background: "#161317",
-                border: "1px solid #4b2d2d",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "#c98e8e",
-                lineHeight: 1.5,
-              }}
-            >
-              {log.flag}
-            </div>
+          {activeTab === "policy" && (
+            <section style={styles.card}>
+              <label style={styles.label}>Describe situation for policy reference</label>
+              <textarea
+                value={policyPrompt}
+                onChange={(e) => setPolicyPrompt(e.target.value)}
+                placeholder="Describe the situation here..."
+                style={styles.textareaLarge}
+              />
+              <button type="button" style={styles.primaryButton}>
+                Pull Policy
+              </button>
+            </section>
           )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
-// ─── MAIN DASHBOARD ───────────────────────────────────────────────────────────
-export default function Dashboard() {
-  const [tab, setTab] = useState("policy");
+          {activeTab === "document" && (
+            <section style={styles.card}>
+              <form onSubmit={handleSubmitDecision} style={styles.form}>
+                <div style={styles.fieldGroup}>
+                  <label style={styles.label}>What happened?</label>
+                  <textarea
+                    value={whatHappened}
+                    onChange={(e) => setWhatHappened(e.target.value)}
+                    placeholder="Describe the situation clearly..."
+                    style={styles.textarea}
+                    required
+                  />
+                </div>
 
-  const tabs = [
-    { id: "policy", label: "Request Policy" },
-    { id: "decision", label: "Document Decision" },
-    { id: "coaching", label: "Request Coaching" },
-    { id: "recent", label: "Recent Decisions" },
-  ];
+                <div style={styles.fieldGroup}>
+                  <label style={styles.label}>What action did you take?</label>
+                  <textarea
+                    value={whatYouDid}
+                    onChange={(e) => setWhatYouDid(e.target.value)}
+                    placeholder="Explain the action you took..."
+                    style={styles.textarea}
+                    required
+                  />
+                </div>
 
-  const currentTab = tabs.find((t) => t.id === tab)?.label || "Dashboard";
+                <div style={styles.fieldGroup}>
+                  <label style={styles.label}>Policy referenced</label>
+                  <input
+                    type="text"
+                    value={policyReferenced}
+                    onChange={(e) => setPolicyReferenced(e.target.value)}
+                    placeholder="Optional policy name or section"
+                    style={styles.input}
+                  />
+                </div>
 
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0b1015",
-        fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', sans-serif",
-        color: "#edf2f7",
-      }}
-    >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+                <div style={styles.fieldGroup}>
+                  <label style={styles.label}>Additional notes</label>
+                  <textarea
+                    value={additionalNotes}
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
+                    placeholder="Optional supporting notes..."
+                    style={styles.textarea}
+                  />
+                </div>
 
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+                <button
+                  type="submit"
+                  style={styles.primaryButton}
+                  disabled={submittingDecision}
+                >
+                  {submittingDecision ? "Submitting..." : "Submit Decision"}
+                </button>
+              </form>
+            </section>
+          )}
 
-        * { box-sizing: border-box; }
-        textarea, input { outline: none; resize: vertical; }
-
-        textarea:focus, input:focus {
-          border-color: #6f8ea8 !important;
-        }
-
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #0f141b; }
-        ::-webkit-scrollbar-thumb { background: #2f3a46; border-radius: 6px; }
-      `}</style>
-
-      <div
-        style={{
-          borderBottom: "1px solid #1a232c",
-          background: "#0d1319",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 860,
-            margin: "0 auto",
-            padding: "28px 24px 24px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              color: "#7a8794",
-              textTransform: "uppercase",
-              letterSpacing: "0.14em",
-              marginBottom: 10,
-              fontWeight: 700,
-            }}
-          >
-            Operator Support System
-          </div>
-
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 600,
-              color: "#d6dde5",
-              marginBottom: 4,
-            }}
-          >
-            Ethan Odom
-          </div>
-
-          <div
-            style={{
-              fontSize: 14,
-              color: "#8d99a5",
-              marginBottom: 12,
-            }}
-          >
-            Manager • Initiative Enterprises
-          </div>
-
-          <div
-            style={{
-              fontSize: 14,
-              color: "#9eabb8",
-              fontStyle: "italic",
-            }}
-          >
-            “Consistency. Retention. Results.”
-          </div>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "30px 24px 60px" }}>
-        <div style={{ marginBottom: 24 }}>
-          <div
-            style={{
-              fontSize: 12,
-              color: "#758290",
-              textTransform: "uppercase",
-              letterSpacing: "0.12em",
-              fontWeight: 700,
-              marginBottom: 8,
-            }}
-          >
-            Workspace
-          </div>
-
-          <div
-            style={{
-              fontSize: 30,
-              fontWeight: 800,
-              color: "#f4f7fa",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            {currentTab}
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            marginBottom: 30,
-          }}
-        >
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 10,
-                border:
-                  tab === t.id ? "1px solid #6f8ea8" : "1px solid #2c3640",
-                background: tab === t.id ? "#141c24" : "#10161d",
-                color: tab === t.id ? "#edf2f7" : "#9aa6b2",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                fontFamily: "inherit",
-                transition: "all 0.2s",
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div
-          style={{
-            background: "#0f141b",
-            border: "1px solid #222d37",
-            borderRadius: 16,
-            padding: 26,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-          }}
-        >
-          {tab === "policy" && <PromptScreen />}
-          {tab === "decision" && <LogScreen />}
-          {tab === "coaching" && <RequestCoachingScreen />}
-          {tab === "recent" && <RecentDecisionsScreen />}
-        </div>
-
-        <div
-          style={{
-            marginTop: 22,
-            padding: "14px 18px",
-            border: "1px solid #222d37",
-            borderRadius: 10,
-            fontSize: 12,
-            color: "#73808d",
-            lineHeight: 1.6,
-            background: "#0d1319",
-          }}
-        >
-          Your actions are documented and reviewed. Lead with consistency and
-          record decisions clearly.
-        </div>
+          {activeTab === "coaching" && (
+            <section style={styles.card}>
+              <label style={styles.label}>Request coaching support</label>
+              <textarea
+                value={coachingPrompt}
+                onChange={(e) => setCoachingPrompt(e.target.value)}
+                placeholder="Describe where you need support..."
+                style={styles.textareaLarge}
+              />
+              <button type="button" style={styles.primaryButton}>
+                Request Coaching
+              </button>
+            </section>
+          )}
+        </main>
       </div>
     </div>
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
-const labelStyle = {
-  display: "block",
-  fontSize: 11,
-  color: "#7e8b98",
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  marginBottom: 8,
-  fontWeight: 700,
-};
-
-const textareaStyle = {
-  width: "100%",
-  background: "#111821",
-  border: "1px solid #2b3641",
-  borderRadius: 10,
-  padding: "12px 14px",
-  color: "#edf2f7",
-  fontSize: 14,
-  fontFamily: "inherit",
-  lineHeight: 1.6,
-  transition: "border 0.2s",
-};
-
-const inputStyle = {
-  width: "100%",
-  background: "#111821",
-  border: "1px solid #2b3641",
-  borderRadius: 10,
-  padding: "11px 14px",
-  color: "#edf2f7",
-  fontSize: 14,
-  fontFamily: "inherit",
-  transition: "border 0.2s",
-};
-
-const primaryBtn = {
-  padding: "12px 22px",
-  background: "#6f8ea8",
-  border: "1px solid #6f8ea8",
-  borderRadius: 10,
-  color: "#0b1015",
-  fontSize: 14,
-  fontWeight: 700,
-  cursor: "pointer",
-  fontFamily: "inherit",
-  transition: "opacity 0.2s",
-};
-
-const secondaryBtn = {
-  padding: "10px 18px",
-  background: "transparent",
-  border: "1px solid #36424f",
-  borderRadius: 10,
-  color: "#c2cbd4",
-  fontSize: 13,
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
-
-const responseCardStyle = {
-  marginTop: 28,
-  padding: 24,
-  background: "#111821",
-  borderRadius: 12,
-  border: "1px solid #27323d",
-};
-
-const sectionEyebrow = {
-  fontSize: 11,
-  color: "#7f91a1",
-  fontWeight: 700,
-  letterSpacing: "0.1em",
-  textTransform: "uppercase",
-  marginBottom: 16,
-};
-
-const infoNoticeStyle = {
-  padding: "12px 16px",
-  background: "#111821",
-  border: "1px solid #26313b",
-  borderRadius: 10,
-  marginBottom: 24,
-  fontSize: 13,
-  color: "#95a2af",
-  lineHeight: 1.6,
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#0b1020",
+    color: "#e5e7eb",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    padding: "24px",
+  },
+  shell: {
+    maxWidth: "1400px",
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "300px 1fr",
+    gap: "24px",
+  },
+  sidebar: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "24px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    minHeight: "calc(100vh - 48px)",
+  },
+  brandBlock: {
+    display: "flex",
+    gap: "14px",
+    alignItems: "center",
+    marginBottom: "24px",
+  },
+  brandBadge: {
+    width: "52px",
+    height: "52px",
+    borderRadius: "14px",
+    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: "700",
+    letterSpacing: "0.04em",
+  },
+  brandTitle: {
+    margin: 0,
+    fontSize: "18px",
+    fontWeight: 700,
+    color: "#f9fafb",
+  },
+  brandSubtitle: {
+    margin: "4px 0 0 0",
+    fontSize: "13px",
+    color: "#9ca3af",
+  },
+  profileCard: {
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: "16px",
+    padding: "18px",
+    marginBottom: "20px",
+  },
+  sectionLabel: {
+    margin: 0,
+    fontSize: "12px",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#6b7280",
+  },
+  profileName: {
+    margin: "8px 0 6px 0",
+    fontSize: "20px",
+    color: "#f9fafb",
+  },
+  profileMeta: {
+    margin: 0,
+    color: "#9ca3af",
+    fontSize: "14px",
+  },
+  navBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+  tabButton: {
+    width: "100%",
+    textAlign: "left",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    border: "1px solid #1f2937",
+    background: "#0f172a",
+    color: "#d1d5db",
+    cursor: "pointer",
+    fontSize: "15px",
+    fontWeight: 600,
+  },
+  activeTabButton: {
+    background: "#1d4ed8",
+    border: "1px solid #2563eb",
+    color: "#ffffff",
+  },
+  logoutButton: {
+    width: "100%",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    border: "1px solid #374151",
+    background: "transparent",
+    color: "#e5e7eb",
+    cursor: "pointer",
+    fontSize: "15px",
+    fontWeight: 600,
+  },
+  main: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  header: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "24px",
+  },
+  headerTitle: {
+    margin: "8px 0 8px 0",
+    fontSize: "28px",
+    color: "#f9fafb",
+  },
+  headerText: {
+    margin: 0,
+    color: "#9ca3af",
+    fontSize: "15px",
+    maxWidth: "700px",
+    lineHeight: 1.6,
+  },
+  card: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "24px",
+  },
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  },
+  fieldGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  label: {
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#f3f4f6",
+  },
+  input: {
+    width: "100%",
+    background: "#0f172a",
+    color: "#f9fafb",
+    border: "1px solid #374151",
+    borderRadius: "14px",
+    padding: "14px 16px",
+    fontSize: "15px",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  textarea: {
+    width: "100%",
+    minHeight: "120px",
+    background: "#0f172a",
+    color: "#f9fafb",
+    border: "1px solid #374151",
+    borderRadius: "14px",
+    padding: "14px 16px",
+    fontSize: "15px",
+    outline: "none",
+    resize: "vertical",
+    boxSizing: "border-box",
+  },
+  textareaLarge: {
+    width: "100%",
+    minHeight: "180px",
+    background: "#0f172a",
+    color: "#f9fafb",
+    border: "1px solid #374151",
+    borderRadius: "14px",
+    padding: "14px 16px",
+    fontSize: "15px",
+    outline: "none",
+    resize: "vertical",
+    boxSizing: "border-box",
+    marginBottom: "16px",
+  },
+  primaryButton: {
+    padding: "14px 18px",
+    borderRadius: "14px",
+    border: "none",
+    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+    color: "#ffffff",
+    fontSize: "15px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  errorBox: {
+    background: "rgba(127, 29, 29, 0.35)",
+    border: "1px solid #7f1d1d",
+    color: "#fecaca",
+    padding: "14px 16px",
+    borderRadius: "14px",
+  },
+  successBox: {
+    background: "rgba(20, 83, 45, 0.35)",
+    border: "1px solid #166534",
+    color: "#bbf7d0",
+    padding: "14px 16px",
+    borderRadius: "14px",
+  },
+  centerCard: {
+    maxWidth: "500px",
+    margin: "120px auto",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "32px",
+    textAlign: "center",
+  },
+  loadingText: {
+    margin: 0,
+    color: "#f9fafb",
+  },
 };
