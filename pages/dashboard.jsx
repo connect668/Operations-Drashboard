@@ -422,7 +422,7 @@ export default function Dashboard() {
           <div style={styles.brandCard}>
             <div style={styles.smallLabel}>SIGNED IN AS</div>
             <div style={styles.userName}>
-              {profile?.full_name || profile?.name || "User"}
+              {profile?.full_name || user?.email || "User"}
             </div>
             <div style={styles.userMeta}>{profile?.role || "Manager"}</div>
             <div style={styles.companyName}>
