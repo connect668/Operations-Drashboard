@@ -1,10 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const TABS = {
   policy: "policy",
   decision: "decision",
   coaching: "coaching",
+  teamDecisions: "team_decisions",
+  teamCoaching: "team_coaching",
+};
+
+const ROLE_LEVELS = {
+  Manager: 1,
+  "General Manager": 2,
+  "Area Coach": 3,
+  "Area Manager": 3,
 };
 
 export default function Dashboard() {
@@ -14,7 +23,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   const [policyText, setPolicyText] = useState("");
-  const [decisionText, setDecisionText] = useState("");
+  const [decisionSituation, setDecisionSituation] = useState("");
+  const [decisionAction, setDecisionAction] = useState("");
+  const [decisionReasoning, setDecisionReasoning] = useState("");
   const [coachingText, setCoachingText] = useState("");
 
   const [policyMessage, setPolicyMessage] = useState("");
@@ -22,6 +33,21 @@ export default function Dashboard() {
   const [coachingMessage, setCoachingMessage] = useState("");
 
   const [coachingLoading, setCoachingLoading] = useState(false);
+  const [decisionLoading, setDecisionLoading] = useState(false);
+
+  const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
+  const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
+  const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
+
+  const [teamDecisions, setTeamDecisions] = useState([]);
+  const [teamDecisionsLoading, setTeamDecisionsLoading] = useState(false);
+  const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
+
+  const currentRoleLevel = useMemo(() => {
+    return ROLE_LEVELS[profile?.role] || 1;
+  }, [profile]);
+
+  const canViewLeadershipTabs = currentRoleLevel >= 2;
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -32,6 +58,7 @@ export default function Dashboard() {
         } = await supabase.auth.getUser();
 
         if (userError) throw userError;
+
         if (!user) {
           window.location.href = "/";
           return;
@@ -60,12 +87,21 @@ export default function Dashboard() {
     loadDashboard();
   }, []);
 
+  useEffect(() => {
+    if (!profile?.company || !canViewLeadershipTabs) return;
+
+    fetchTeamCoachingRequests();
+    fetchTeamDecisions();
+  }, [profile?.company, canViewLeadershipTabs]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
   };
 
   const handlePullPolicy = async () => {
+    setPolicyMessage("");
+
     if (!policyText.trim()) {
       setPolicyMessage("Please describe the situation first.");
       return;
@@ -75,12 +111,56 @@ export default function Dashboard() {
   };
 
   const handleDecisionSubmit = async () => {
-    if (!decisionText.trim()) {
-      setDecisionMessage("Please document the decision first.");
+    setDecisionMessage("");
+
+    if (!decisionSituation.trim() || !decisionAction.trim()) {
+      setDecisionMessage("Please enter both the situation and the action taken.");
       return;
     }
 
-    setDecisionMessage("Decision logging section is ready for your next database step.");
+    if (!user) {
+      setDecisionMessage("You must be logged in.");
+      return;
+    }
+
+    setDecisionLoading(true);
+
+    try {
+      const { error } = await supabase.from("decision_logs").insert([
+        {
+          user_id: user.id,
+          company: profile?.company || null,
+          user_name:
+            profile?.full_name ||
+            profile?.name ||
+            user?.email ||
+            "Unknown User",
+          user_role: profile?.role || "Manager",
+          situation: decisionSituation.trim(),
+          action_taken: decisionAction.trim(),
+          reasoning: decisionReasoning.trim() || null,
+        },
+      ]);
+
+      if (error) throw error;
+
+      setDecisionSituation("");
+      setDecisionAction("");
+      setDecisionReasoning("");
+      setDecisionMessage("Decision submitted successfully.");
+
+      if (canViewLeadershipTabs) {
+        fetchTeamDecisions();
+      }
+    } catch (error) {
+      console.error("Decision submit error:", error);
+      setDecisionMessage(
+        error.message ||
+          'Failed to submit decision. If needed, the "decision_logs" table or columns may need to be matched to your database.'
+      );
+    } finally {
+      setDecisionLoading(false);
+    }
   };
 
   const handleCoachingSubmit = async () => {
@@ -108,7 +188,7 @@ export default function Dashboard() {
             profile?.name ||
             user?.email ||
             "Unknown User",
-          requester_role: profile?.role || "manager",
+          requester_role: profile?.role || "Manager",
           request_text: coachingText.trim(),
         },
       ]);
@@ -117,11 +197,96 @@ export default function Dashboard() {
 
       setCoachingText("");
       setCoachingMessage("Coaching request submitted successfully.");
+
+      if (canViewLeadershipTabs) {
+        fetchTeamCoachingRequests();
+      }
     } catch (error) {
       console.error("Coaching submit error:", error);
       setCoachingMessage(error.message || "Failed to submit coaching request.");
     } finally {
       setCoachingLoading(false);
+    }
+  };
+
+  const fetchTeamCoachingRequests = async () => {
+    if (!profile?.company) return;
+
+    setTeamCoachingLoading(true);
+    setTeamCoachingMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("coaching_requests")
+        .select("*")
+        .eq("company", profile.company)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setTeamCoachingRequests(data || []);
+    } catch (error) {
+      console.error("Fetch team coaching error:", error);
+      setTeamCoachingMessage(
+        error.message || "Failed to load team coaching requests."
+      );
+    } finally {
+      setTeamCoachingLoading(false);
+    }
+  };
+
+  const fetchTeamDecisions = async () => {
+    if (!profile?.company) return;
+
+    setTeamDecisionsLoading(true);
+    setTeamDecisionsMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("decision_logs")
+        .select("*")
+        .eq("company", profile.company)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setTeamDecisions(data || []);
+    } catch (error) {
+      console.error("Fetch team decisions error:", error);
+      setTeamDecisionsMessage(
+        error.message ||
+          'Failed to load team decisions. Your "decision_logs" structure may need to be matched.'
+      );
+    } finally {
+      setTeamDecisionsLoading(false);
+    }
+  };
+
+  const updateCoachingStatus = async (id, status) => {
+    try {
+      const { error } = await supabase
+        .from("coaching_requests")
+        .update({ status })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      fetchTeamCoachingRequests();
+    } catch (error) {
+      console.error("Update coaching status error:", error);
+      setTeamCoachingMessage(
+        error.message || "Failed to update coaching request status."
+      );
+    }
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "Unknown date";
+
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
     }
   };
 
@@ -143,8 +308,12 @@ export default function Dashboard() {
               {profile?.full_name || profile?.name || "User"}
             </div>
             <div style={styles.userMeta}>
-              {(profile?.role || "manager")} • {profile?.company || "INITIATIVE ENTERPRISES"}
+              {profile?.role || "Manager"}
             </div>
+            <div style={styles.companyName}>
+              {profile?.company || "INITIATIVE ENTERPRISES"}
+            </div>
+            <div style={styles.companyMotto}>company motto here</div>
           </div>
 
           <div style={styles.navGroup}>
@@ -177,6 +346,42 @@ export default function Dashboard() {
             >
               Request Coaching
             </button>
+
+            {canViewLeadershipTabs && (
+              <>
+                <div style={styles.navDivider} />
+
+                <button
+                  style={{
+                    ...styles.navButton,
+                    ...(activeTab === TABS.teamDecisions
+                      ? styles.navButtonActive
+                      : {}),
+                  }}
+                  onClick={() => {
+                    setActiveTab(TABS.teamDecisions);
+                    fetchTeamDecisions();
+                  }}
+                >
+                  Team Decisions
+                </button>
+
+                <button
+                  style={{
+                    ...styles.navButton,
+                    ...(activeTab === TABS.teamCoaching
+                      ? styles.navButtonActive
+                      : {}),
+                  }}
+                  onClick={() => {
+                    setActiveTab(TABS.teamCoaching);
+                    fetchTeamCoachingRequests();
+                  }}
+                >
+                  Team Coaching Requests
+                </button>
+              </>
+            )}
           </div>
 
           <div style={styles.logoutWrap}>
@@ -192,22 +397,29 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Request Policy</h1>
                 <p style={styles.subtitle}>
-                  Describe the situation for policy reference and pull the correct standard.
+                  Describe the situation and pull the applicable standard.
                 </p>
               </div>
 
               <div style={styles.panelCard}>
-                <label style={styles.label}>Describe situation for policy reference</label>
+                <label style={styles.label}>
+                  Describe situation for policy reference
+                </label>
                 <textarea
                   value={policyText}
                   onChange={(e) => setPolicyText(e.target.value)}
                   placeholder="Example: An employee showed up 30 minutes late without calling. What does company policy say I should do?"
                   style={styles.textarea}
                 />
-                <button style={styles.primaryButton} onClick={handlePullPolicy}>
+                <button
+                  style={styles.primaryButton}
+                  onClick={handlePullPolicy}
+                >
                   Pull Policy
                 </button>
-                {policyMessage ? <p style={styles.message}>{policyMessage}</p> : null}
+                {policyMessage ? (
+                  <p style={styles.message}>{policyMessage}</p>
+                ) : null}
               </div>
             </>
           )}
@@ -217,22 +429,49 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Document Decision</h1>
                 <p style={styles.subtitle}>
-                  Log a situation and the action taken for leadership visibility and future review.
+                  Record the situation, the action taken, and the reasoning.
                 </p>
               </div>
 
               <div style={styles.panelCard}>
-                <label style={styles.label}>Document leadership decision</label>
+                <label style={styles.label}>Situation</label>
                 <textarea
-                  value={decisionText}
-                  onChange={(e) => setDecisionText(e.target.value)}
-                  placeholder="Example: I adjusted deployment after two call-outs and reassigned break coverage to protect service times."
-                  style={styles.textarea}
+                  value={decisionSituation}
+                  onChange={(e) => setDecisionSituation(e.target.value)}
+                  placeholder="Describe what happened."
+                  style={styles.textareaSmall}
                 />
-                <button style={styles.primaryButton} onClick={handleDecisionSubmit}>
-                  Submit Decision
+
+                <label style={styles.label}>Action Taken</label>
+                <textarea
+                  value={decisionAction}
+                  onChange={(e) => setDecisionAction(e.target.value)}
+                  placeholder="Describe the action you took."
+                  style={styles.textareaSmall}
+                />
+
+                <label style={styles.label}>Reasoning</label>
+                <textarea
+                  value={decisionReasoning}
+                  onChange={(e) => setDecisionReasoning(e.target.value)}
+                  placeholder="Optional: explain why this was the right call."
+                  style={styles.textareaSmall}
+                />
+
+                <button
+                  style={{
+                    ...styles.primaryButton,
+                    ...(decisionLoading ? styles.buttonDisabled : {}),
+                  }}
+                  onClick={handleDecisionSubmit}
+                  disabled={decisionLoading}
+                >
+                  {decisionLoading ? "Submitting..." : "Submit Decision"}
                 </button>
-                {decisionMessage ? <p style={styles.message}>{decisionMessage}</p> : null}
+
+                {decisionMessage ? (
+                  <p style={styles.message}>{decisionMessage}</p>
+                ) : null}
               </div>
             </>
           )}
@@ -242,7 +481,8 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Request Coaching</h1>
                 <p style={styles.subtitle}>
-                  Request leadership support when you need a second layer of guidance.
+                  Ask for leadership support when a second layer of guidance is
+                  needed.
                 </p>
               </div>
 
@@ -264,7 +504,177 @@ export default function Dashboard() {
                 >
                   {coachingLoading ? "Submitting..." : "Request Coaching"}
                 </button>
-                {coachingMessage ? <p style={styles.message}>{coachingMessage}</p> : null}
+                {coachingMessage ? (
+                  <p style={styles.message}>{coachingMessage}</p>
+                ) : null}
+              </div>
+            </>
+          )}
+
+          {activeTab === TABS.teamDecisions && canViewLeadershipTabs && (
+            <>
+              <div style={styles.headerCard}>
+                <h1 style={styles.title}>Team Decisions</h1>
+                <p style={styles.subtitle}>
+                  Review submitted decisions across your company.
+                </p>
+              </div>
+
+              <div style={styles.panelCard}>
+                <div style={styles.sectionTopRow}>
+                  <div style={styles.sectionHeading}>Decision Feed</div>
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={fetchTeamDecisions}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {teamDecisionsMessage ? (
+                  <p style={styles.message}>{teamDecisionsMessage}</p>
+                ) : null}
+
+                {teamDecisionsLoading ? (
+                  <p style={styles.message}>Loading team decisions...</p>
+                ) : teamDecisions.length === 0 ? (
+                  <p style={styles.message}>No team decisions found yet.</p>
+                ) : (
+                  <div style={styles.cardList}>
+                    {teamDecisions.map((item) => (
+                      <div key={item.id} style={styles.feedCard}>
+                        <div style={styles.feedTop}>
+                          <div>
+                            <div style={styles.feedName}>
+                              {item.user_name || "Unknown User"}
+                            </div>
+                            <div style={styles.feedMeta}>
+                              {item.user_role || "Manager"} •{" "}
+                              {item.company || "No company"}
+                            </div>
+                          </div>
+                          <div style={styles.feedDate}>
+                            {formatDate(item.created_at)}
+                          </div>
+                        </div>
+
+                        <div style={styles.feedSection}>
+                          <div style={styles.feedLabel}>Situation</div>
+                          <div style={styles.feedBody}>
+                            {item.situation || "No situation found."}
+                          </div>
+                        </div>
+
+                        <div style={styles.feedSection}>
+                          <div style={styles.feedLabel}>Action Taken</div>
+                          <div style={styles.feedBody}>
+                            {item.action_taken || "No action found."}
+                          </div>
+                        </div>
+
+                        {item.reasoning ? (
+                          <div style={styles.feedSection}>
+                            <div style={styles.feedLabel}>Reasoning</div>
+                            <div style={styles.feedBody}>{item.reasoning}</div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {activeTab === TABS.teamCoaching && canViewLeadershipTabs && (
+            <>
+              <div style={styles.headerCard}>
+                <h1 style={styles.title}>Team Coaching Requests</h1>
+                <p style={styles.subtitle}>
+                  Review and manage coaching requests submitted by your team.
+                </p>
+              </div>
+
+              <div style={styles.panelCard}>
+                <div style={styles.sectionTopRow}>
+                  <div style={styles.sectionHeading}>Coaching Queue</div>
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={fetchTeamCoachingRequests}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {teamCoachingMessage ? (
+                  <p style={styles.message}>{teamCoachingMessage}</p>
+                ) : null}
+
+                {teamCoachingLoading ? (
+                  <p style={styles.message}>Loading coaching requests...</p>
+                ) : teamCoachingRequests.length === 0 ? (
+                  <p style={styles.message}>
+                    No coaching requests found yet.
+                  </p>
+                ) : (
+                  <div style={styles.cardList}>
+                    {teamCoachingRequests.map((item) => (
+                      <div key={item.id} style={styles.feedCard}>
+                        <div style={styles.feedTop}>
+                          <div>
+                            <div style={styles.feedName}>
+                              {item.requester_name || "Unknown User"}
+                            </div>
+                            <div style={styles.feedMeta}>
+                              {item.requester_role || "Manager"} •{" "}
+                              {item.company || "No company"}
+                            </div>
+                          </div>
+                          <div style={styles.feedDate}>
+                            {formatDate(item.created_at)}
+                          </div>
+                        </div>
+
+                        <div style={styles.statusRow}>
+                          <span style={styles.statusBadge}>
+                            {item.status || "open"}
+                          </span>
+                        </div>
+
+                        <div style={styles.feedBody}>
+                          {item.request_text || "No request text found."}
+                        </div>
+
+                        <div style={styles.actionRow}>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "in_progress")
+                            }
+                          >
+                            Start Review
+                          </button>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "resolved")
+                            }
+                          >
+                            Mark Resolved
+                          </button>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "open")
+                            }
+                          >
+                            Reopen
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -277,79 +687,90 @@ export default function Dashboard() {
 const styles = {
   page: {
     minHeight: "100vh",
-    background:
-      "radial-gradient(circle at top, #1e293b 0%, #0f172a 35%, #020617 100%)",
+    background: "#0b1120",
     color: "#e5e7eb",
     padding: "24px",
     fontFamily:
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   container: {
-    maxWidth: "1400px",
+    maxWidth: "1380px",
     margin: "0 auto",
     display: "grid",
-    gridTemplateColumns: "320px 1fr",
+    gridTemplateColumns: "300px 1fr",
     gap: "24px",
   },
   sidebar: {
     minHeight: "calc(100vh - 48px)",
-    background: "rgba(15, 23, 42, 0.7)",
-    border: "1px solid rgba(148, 163, 184, 0.15)",
-    borderRadius: "24px",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
     padding: "20px",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.35)",
-    backdropFilter: "blur(12px)",
   },
   brandCard: {
-    background: "rgba(255, 255, 255, 0.03)",
-    border: "1px solid rgba(148, 163, 184, 0.14)",
-    borderRadius: "20px",
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "16px",
     padding: "18px",
     marginBottom: "22px",
   },
   smallLabel: {
-    fontSize: "12px",
+    fontSize: "11px",
     letterSpacing: "0.12em",
     color: "#94a3b8",
     marginBottom: "10px",
   },
   userName: {
-    fontSize: "32px",
-    fontWeight: 800,
-    lineHeight: 1.1,
+    fontSize: "28px",
+    fontWeight: 700,
+    lineHeight: 1.15,
     marginBottom: "8px",
     color: "#f8fafc",
   },
   userMeta: {
-    fontSize: "16px",
+    fontSize: "14px",
     color: "#cbd5e1",
-    lineHeight: 1.5,
-    textTransform: "lowercase",
+    marginBottom: "10px",
+  },
+  companyName: {
+    fontSize: "16px",
+    fontWeight: 600,
+    color: "#e5e7eb",
+    marginBottom: "4px",
+  },
+  companyMotto: {
+    fontSize: "13px",
+    color: "#94a3b8",
   },
   navGroup: {
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
+    gap: "10px",
+  },
+  navDivider: {
+    height: "1px",
+    background: "#1f2937",
+    margin: "8px 0 4px",
   },
   navButton: {
     width: "100%",
-    padding: "16px 18px",
-    borderRadius: "16px",
-    border: "1px solid rgba(148, 163, 184, 0.18)",
-    background: "rgba(255, 255, 255, 0.03)",
-    color: "#f8fafc",
-    fontSize: "18px",
-    fontWeight: 700,
+    padding: "14px 16px",
+    borderRadius: "12px",
+    border: "1px solid #1f2937",
+    background: "#111827",
+    color: "#e5e7eb",
+    fontSize: "15px",
+    fontWeight: 600,
     textAlign: "left",
     cursor: "pointer",
-    transition: "0.2s ease",
+    transition: "0.15s ease",
   },
   navButtonActive: {
-    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
-    border: "1px solid rgba(96, 165, 250, 0.45)",
-    boxShadow: "0 10px 30px rgba(37, 99, 235, 0.35)",
+    background: "#1e293b",
+    border: "1px solid #334155",
+    color: "#f8fafc",
   },
   logoutWrap: {
     marginTop: "auto",
@@ -357,102 +778,206 @@ const styles = {
   },
   logoutButton: {
     width: "100%",
-    padding: "16px 18px",
-    borderRadius: "16px",
-    border: "1px solid rgba(148, 163, 184, 0.18)",
+    padding: "14px 16px",
+    borderRadius: "12px",
+    border: "1px solid #243041",
     background: "transparent",
-    color: "#e2e8f0",
-    fontSize: "18px",
-    fontWeight: 700,
+    color: "#cbd5e1",
+    fontSize: "15px",
+    fontWeight: 600,
     cursor: "pointer",
   },
   main: {
     display: "flex",
     flexDirection: "column",
-    gap: "20px",
+    gap: "18px",
   },
   headerCard: {
-    background: "rgba(15, 23, 42, 0.7)",
-    border: "1px solid rgba(148, 163, 184, 0.15)",
-    borderRadius: "24px",
-    padding: "28px",
-    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.25)",
-    backdropFilter: "blur(12px)",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "24px",
   },
   title: {
     margin: 0,
-    fontSize: "46px",
+    fontSize: "38px",
     lineHeight: 1.05,
-    fontWeight: 800,
+    fontWeight: 700,
     color: "#f8fafc",
   },
   subtitle: {
-    marginTop: "12px",
+    marginTop: "10px",
     marginBottom: 0,
-    fontSize: "18px",
-    color: "#cbd5e1",
+    fontSize: "16px",
+    color: "#94a3b8",
     lineHeight: 1.6,
     maxWidth: "760px",
   },
   panelCard: {
-    background: "rgba(15, 23, 42, 0.75)",
-    border: "1px solid rgba(148, 163, 184, 0.15)",
-    borderRadius: "24px",
-    padding: "24px",
-    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.25)",
-    backdropFilter: "blur(12px)",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
+    padding: "22px",
   },
   label: {
     display: "block",
-    marginBottom: "12px",
-    fontSize: "18px",
-    fontWeight: 700,
-    color: "#f8fafc",
+    marginBottom: "10px",
+    fontSize: "15px",
+    fontWeight: 600,
+    color: "#e5e7eb",
   },
   textarea: {
     width: "100%",
     minHeight: "220px",
-    borderRadius: "18px",
-    border: "1px solid rgba(148, 163, 184, 0.22)",
-    background: "rgba(255, 255, 255, 0.03)",
+    borderRadius: "14px",
+    border: "1px solid #273449",
+    background: "#0f172a",
     color: "#f8fafc",
-    padding: "18px",
-    fontSize: "16px",
+    padding: "16px",
+    fontSize: "15px",
     lineHeight: 1.6,
     outline: "none",
     resize: "vertical",
-    marginBottom: "18px",
+    marginBottom: "16px",
+    boxSizing: "border-box",
+  },
+  textareaSmall: {
+    width: "100%",
+    minHeight: "130px",
+    borderRadius: "14px",
+    border: "1px solid #273449",
+    background: "#0f172a",
+    color: "#f8fafc",
+    padding: "16px",
+    fontSize: "15px",
+    lineHeight: 1.6,
+    outline: "none",
+    resize: "vertical",
+    marginBottom: "16px",
     boxSizing: "border-box",
   },
   primaryButton: {
-    padding: "16px 24px",
-    borderRadius: "16px",
-    border: "none",
-    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
-    color: "#ffffff",
-    fontSize: "18px",
-    fontWeight: 800,
+    padding: "13px 20px",
+    borderRadius: "12px",
+    border: "1px solid #334155",
+    background: "#1e293b",
+    color: "#f8fafc",
+    fontSize: "15px",
+    fontWeight: 600,
     cursor: "pointer",
-    boxShadow: "0 10px 30px rgba(37, 99, 235, 0.35)",
+  },
+  secondaryButton: {
+    padding: "10px 14px",
+    borderRadius: "12px",
+    border: "1px solid #334155",
+    background: "#0f172a",
+    color: "#e5e7eb",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: "pointer",
   },
   buttonDisabled: {
-    opacity: 0.7,
+    opacity: 0.65,
     cursor: "not-allowed",
   },
   message: {
-    marginTop: "14px",
-    fontSize: "15px",
-    color: "#cbd5e1",
+    marginTop: "12px",
+    fontSize: "14px",
+    color: "#94a3b8",
   },
   loadingCard: {
     maxWidth: "600px",
     margin: "120px auto",
-    background: "rgba(15, 23, 42, 0.75)",
-    border: "1px solid rgba(148, 163, 184, 0.15)",
-    borderRadius: "24px",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "20px",
     padding: "32px",
     textAlign: "center",
+    fontSize: "18px",
+    color: "#e5e7eb",
+  },
+  sectionTopRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    marginBottom: "16px",
+  },
+  sectionHeading: {
     fontSize: "20px",
-    color: "#e2e8f0",
+    fontWeight: 700,
+    color: "#f8fafc",
+  },
+  cardList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  feedCard: {
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: "16px",
+    padding: "16px",
+  },
+  feedTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "16px",
+    marginBottom: "12px",
+  },
+  feedName: {
+    fontSize: "16px",
+    fontWeight: 700,
+    color: "#f8fafc",
+    marginBottom: "4px",
+  },
+  feedMeta: {
+    fontSize: "13px",
+    color: "#94a3b8",
+  },
+  feedDate: {
+    fontSize: "12px",
+    color: "#94a3b8",
+    whiteSpace: "nowrap",
+  },
+  feedSection: {
+    marginTop: "12px",
+  },
+  feedLabel: {
+    fontSize: "12px",
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "#94a3b8",
+    marginBottom: "6px",
+  },
+  feedBody: {
+    fontSize: "14px",
+    lineHeight: 1.6,
+    color: "#e5e7eb",
+    whiteSpace: "pre-wrap",
+  },
+  statusRow: {
+    marginBottom: "10px",
+  },
+  statusBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "5px 10px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    background: "#1e293b",
+    color: "#cbd5e1",
+    border: "1px solid #334155",
+  },
+  actionRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px",
+    marginTop: "14px",
   },
 };
