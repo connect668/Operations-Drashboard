@@ -7,6 +7,7 @@ const TABS = {
   coaching: "coaching",
   teamDecisions: "team_decisions",
   teamCoaching: "team_coaching",
+  managers: "managers",
 };
 
 const ROLE_LEVELS = {
@@ -37,17 +38,24 @@ export default function Dashboard() {
   const [policyMessage, setPolicyMessage] = useState("");
   const [decisionMessage, setDecisionMessage] = useState("");
   const [coachingMessage, setCoachingMessage] = useState("");
+  const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
+  const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
+  const [managersMessage, setManagersMessage] = useState("");
 
   const [decisionLoading, setDecisionLoading] = useState(false);
   const [coachingLoading, setCoachingLoading] = useState(false);
+  const [teamDecisionsLoading, setTeamDecisionsLoading] = useState(false);
+  const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
+  const [managersLoading, setManagersLoading] = useState(false);
+  const [guidanceLoadingId, setGuidanceLoadingId] = useState(null);
 
   const [teamDecisions, setTeamDecisions] = useState([]);
-  const [teamDecisionsLoading, setTeamDecisionsLoading] = useState(false);
-  const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
-
   const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
-  const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
-  const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
+  const [managers, setManagers] = useState([]);
+  const [selectedManager, setSelectedManager] = useState(null);
+  const [selectedManagerDecisions, setSelectedManagerDecisions] = useState([]);
+  const [selectedManagerCoaching, setSelectedManagerCoaching] = useState([]);
+  const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
 
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
@@ -99,6 +107,7 @@ export default function Dashboard() {
 
     fetchTeamDecisions();
     fetchTeamCoachingRequests();
+    fetchManagers();
   }, [profile?.company, profile?.role, canViewLeadershipTabs]);
 
   const handleLogout = async () => {
@@ -148,6 +157,7 @@ export default function Dashboard() {
           situation: decisionSituation.trim(),
           action_taken: decisionAction.trim(),
           reasoning: decisionReasoning.trim() || null,
+          is_read: false,
         },
       ]);
 
@@ -159,9 +169,7 @@ export default function Dashboard() {
       setDecisionMessage("Decision submitted successfully.");
     } catch (error) {
       console.error("Decision submit error:", error);
-      setDecisionMessage(
-        error.message || "Failed to submit decision."
-      );
+      setDecisionMessage(error.message || "Failed to submit decision.");
     } finally {
       setDecisionLoading(false);
     }
@@ -225,6 +233,7 @@ export default function Dashboard() {
         .eq("company", profile.company)
         .eq("visible_to_role", profile.role)
         .neq("user_id", user?.id || "")
+        .order("is_read", { ascending: true })
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -268,21 +277,121 @@ export default function Dashboard() {
     }
   };
 
+  const fetchManagers = async () => {
+    if (!profile?.company) return;
+
+    setManagersLoading(true);
+    setManagersMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, name, role, company")
+        .eq("company", profile.company)
+        .eq("role", "Manager")
+        .order("full_name", { ascending: true });
+
+      if (error) throw error;
+
+      setManagers(data || []);
+    } catch (error) {
+      console.error("Fetch managers error:", error);
+      setManagersMessage(error.message || "Failed to load managers.");
+    } finally {
+      setManagersLoading(false);
+    }
+  };
+
+  const openManagerFile = async (manager) => {
+    setSelectedManager(manager);
+    setSelectedManagerLoading(true);
+
+    try {
+      const { data: decisionData, error: decisionError } = await supabase
+        .from("decision_logs")
+        .select("*")
+        .eq("user_id", manager.id)
+        .order("created_at", { ascending: false });
+
+      if (decisionError) throw decisionError;
+
+      const { data: coachingData, error: coachingError } = await supabase
+        .from("coaching_requests")
+        .select("*")
+        .eq("user_id", manager.id)
+        .order("created_at", { ascending: false });
+
+      if (coachingError) throw coachingError;
+
+      setSelectedManagerDecisions(decisionData || []);
+      setSelectedManagerCoaching(coachingData || []);
+    } catch (error) {
+      console.error("Open manager file error:", error);
+      setManagersMessage(error.message || "Failed to open manager file.");
+    } finally {
+      setSelectedManagerLoading(false);
+    }
+  };
+
+  const markDecisionAsRead = async (id) => {
+    try {
+      const { error } = await supabase
+        .from("decision_logs")
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString(),
+          read_by: user.id,
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      fetchTeamDecisions();
+      if (selectedManager) {
+        openManagerFile(selectedManager);
+      }
+    } catch (error) {
+      console.error("Mark as read error:", error);
+      setTeamDecisionsMessage(error.message || "Failed to mark as read.");
+    }
+  };
+
   const updateCoachingStatus = async (id, status) => {
     try {
       const { error } = await supabase
         .from("coaching_requests")
-        .update({ status })
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", id);
 
       if (error) throw error;
 
       fetchTeamCoachingRequests();
+      if (selectedManager) {
+        openManagerFile(selectedManager);
+      }
     } catch (error) {
       console.error("Update coaching status error:", error);
       setTeamCoachingMessage(
         error.message || "Failed to update coaching request status."
       );
+    }
+  };
+
+  const handleRequestCoachingGuidance = async (requestId) => {
+    setGuidanceLoadingId(requestId);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      setTeamCoachingMessage(
+        "AI coaching guidance will connect here next. Button is in place."
+      );
+    } catch (error) {
+      console.error("Guidance placeholder error:", error);
+    } finally {
+      setGuidanceLoadingId(null);
     }
   };
 
@@ -294,6 +403,9 @@ export default function Dashboard() {
       return value;
     }
   };
+
+  const getManagerDisplayName = (manager) =>
+    manager?.full_name || manager?.name || "Unnamed Manager";
 
   if (loading) {
     return (
@@ -312,9 +424,7 @@ export default function Dashboard() {
             <div style={styles.userName}>
               {profile?.full_name || profile?.name || "User"}
             </div>
-            <div style={styles.userMeta}>
-              {profile?.role || "Manager"}
-            </div>
+            <div style={styles.userMeta}>{profile?.role || "Manager"}</div>
             <div style={styles.companyName}>
               {profile?.company || "INITIATIVE ENTERPRISES"}
             </div>
@@ -384,6 +494,21 @@ export default function Dashboard() {
                   }}
                 >
                   Team Coaching Requests
+                </button>
+
+                <button
+                  style={{
+                    ...styles.navButton,
+                    ...(activeTab === TABS.managers
+                      ? styles.navButtonActive
+                      : {}),
+                  }}
+                  onClick={() => {
+                    setActiveTab(TABS.managers);
+                    fetchManagers();
+                  }}
+                >
+                  Managers
                 </button>
               </>
             )}
@@ -483,7 +608,8 @@ export default function Dashboard() {
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Request Coaching</h1>
                 <p style={styles.subtitle}>
-                  Ask for leadership support when a second layer of guidance is needed.
+                  Ask for leadership support when a second layer of guidance is
+                  needed.
                 </p>
               </div>
 
@@ -543,19 +669,32 @@ export default function Dashboard() {
                 ) : (
                   <div style={styles.cardList}>
                     {teamDecisions.map((item) => (
-                      <div key={item.id} style={styles.feedCard}>
+                      <div
+                        key={item.id}
+                        style={{
+                          ...styles.feedCard,
+                          ...(item.is_read ? styles.feedCardRead : {}),
+                        }}
+                      >
                         <div style={styles.feedTop}>
                           <div>
                             <div style={styles.feedName}>
                               {item.user_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.user_role || "Manager"} • {item.company || "No company"}
+                              {item.user_role || "Manager"} •{" "}
+                              {item.company || "No company"}
                             </div>
                           </div>
                           <div style={styles.feedDate}>
                             {formatDate(item.created_at)}
                           </div>
+                        </div>
+
+                        <div style={styles.statusRow}>
+                          <span style={styles.statusBadge}>
+                            {item.is_read ? "read" : "unread"}
+                          </span>
                         </div>
 
                         <div style={styles.feedSection}>
@@ -578,6 +717,16 @@ export default function Dashboard() {
                             <div style={styles.feedBody}>{item.reasoning}</div>
                           </div>
                         ) : null}
+
+                        <div style={styles.actionRow}>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={() => markDecisionAsRead(item.id)}
+                            disabled={item.is_read}
+                          >
+                            {item.is_read ? "Already Read" : "Mark as Read"}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -624,7 +773,8 @@ export default function Dashboard() {
                               {item.requester_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.requester_role || "Manager"} • {item.company || "No company"}
+                              {item.requester_role || "Manager"} •{" "}
+                              {item.company || "No company"}
                             </div>
                           </div>
                           <div style={styles.feedDate}>
@@ -642,30 +792,227 @@ export default function Dashboard() {
                           {item.request_text || "No request text found."}
                         </div>
 
+                        {item.leadership_notes ? (
+                          <div style={styles.feedSection}>
+                            <div style={styles.feedLabel}>Leadership Notes</div>
+                            <div style={styles.feedBody}>
+                              {item.leadership_notes}
+                            </div>
+                          </div>
+                        ) : null}
+
                         <div style={styles.actionRow}>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() => updateCoachingStatus(item.id, "in_progress")}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "in_progress")
+                            }
                           >
                             Start Review
                           </button>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() => updateCoachingStatus(item.id, "resolved")}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "resolved")
+                            }
                           >
                             Mark Resolved
                           </button>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() => updateCoachingStatus(item.id, "open")}
+                            onClick={() =>
+                              updateCoachingStatus(item.id, "open")
+                            }
                           >
                             Reopen
+                          </button>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={() =>
+                              handleRequestCoachingGuidance(item.id)
+                            }
+                            disabled={guidanceLoadingId === item.id}
+                          >
+                            {guidanceLoadingId === item.id
+                              ? "Loading..."
+                              : "Request Coaching Guidance"}
                           </button>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
+            </>
+          )}
+
+          {activeTab === TABS.managers && canViewLeadershipTabs && (
+            <>
+              <div style={styles.headerCard}>
+                <h1 style={styles.title}>Managers</h1>
+                <p style={styles.subtitle}>
+                  Review managers and open their documentation history.
+                </p>
+              </div>
+
+              <div style={styles.managersLayout}>
+                <div style={styles.panelCard}>
+                  <div style={styles.sectionTopRow}>
+                    <div style={styles.sectionHeading}>Manager Directory</div>
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={fetchManagers}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {managersMessage ? (
+                    <p style={styles.message}>{managersMessage}</p>
+                  ) : null}
+
+                  {managersLoading ? (
+                    <p style={styles.message}>Loading managers...</p>
+                  ) : managers.length === 0 ? (
+                    <p style={styles.message}>No managers found yet.</p>
+                  ) : (
+                    <div style={styles.cardList}>
+                      {managers.map((manager) => (
+                        <button
+                          key={manager.id}
+                          style={{
+                            ...styles.managerRowButton,
+                            ...(selectedManager?.id === manager.id
+                              ? styles.managerRowButtonActive
+                              : {}),
+                          }}
+                          onClick={() => openManagerFile(manager)}
+                        >
+                          <div style={styles.managerRowName}>
+                            {getManagerDisplayName(manager)}
+                          </div>
+                          <div style={styles.managerRowMeta}>
+                            {manager.role} • {manager.company}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={styles.panelCard}>
+                  <div style={styles.sectionTopRow}>
+                    <div style={styles.sectionHeading}>
+                      {selectedManager
+                        ? `${getManagerDisplayName(selectedManager)} File`
+                        : "Manager File"}
+                    </div>
+                  </div>
+
+                  {!selectedManager ? (
+                    <p style={styles.message}>
+                      Select a manager to view their documentation.
+                    </p>
+                  ) : selectedManagerLoading ? (
+                    <p style={styles.message}>Loading manager file...</p>
+                  ) : (
+                    <div style={styles.managerFileWrap}>
+                      <div style={styles.managerFileSection}>
+                        <div style={styles.managerFileTitle}>Decisions</div>
+                        {selectedManagerDecisions.length === 0 ? (
+                          <p style={styles.message}>No decisions found.</p>
+                        ) : (
+                          <div style={styles.cardList}>
+                            {selectedManagerDecisions.map((item) => (
+                              <div key={item.id} style={styles.feedCard}>
+                                <div style={styles.feedTop}>
+                                  <div>
+                                    <div style={styles.feedName}>
+                                      {formatDate(item.created_at)}
+                                    </div>
+                                    <div style={styles.feedMeta}>
+                                      {item.is_read ? "Read" : "Unread"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={styles.feedSection}>
+                                  <div style={styles.feedLabel}>Situation</div>
+                                  <div style={styles.feedBody}>
+                                    {item.situation || "No situation found."}
+                                  </div>
+                                </div>
+
+                                <div style={styles.feedSection}>
+                                  <div style={styles.feedLabel}>
+                                    Action Taken
+                                  </div>
+                                  <div style={styles.feedBody}>
+                                    {item.action_taken || "No action found."}
+                                  </div>
+                                </div>
+
+                                {item.reasoning ? (
+                                  <div style={styles.feedSection}>
+                                    <div style={styles.feedLabel}>
+                                      Reasoning
+                                    </div>
+                                    <div style={styles.feedBody}>
+                                      {item.reasoning}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={styles.managerFileSection}>
+                        <div style={styles.managerFileTitle}>
+                          Coaching Requests
+                        </div>
+                        {selectedManagerCoaching.length === 0 ? (
+                          <p style={styles.message}>
+                            No coaching requests found.
+                          </p>
+                        ) : (
+                          <div style={styles.cardList}>
+                            {selectedManagerCoaching.map((item) => (
+                              <div key={item.id} style={styles.feedCard}>
+                                <div style={styles.feedTop}>
+                                  <div>
+                                    <div style={styles.feedName}>
+                                      {formatDate(item.created_at)}
+                                    </div>
+                                    <div style={styles.feedMeta}>
+                                      {item.status || "open"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={styles.feedBody}>
+                                  {item.request_text || "No request text found."}
+                                </div>
+
+                                {item.leadership_notes ? (
+                                  <div style={styles.feedSection}>
+                                    <div style={styles.feedLabel}>
+                                      Leadership Notes
+                                    </div>
+                                    <div style={styles.feedBody}>
+                                      {item.leadership_notes}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -685,7 +1032,7 @@ const styles = {
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   container: {
-    maxWidth: "1380px",
+    maxWidth: "1440px",
     margin: "0 auto",
     display: "grid",
     gridTemplateColumns: "300px 1fr",
@@ -810,6 +1157,11 @@ const styles = {
     borderRadius: "20px",
     padding: "22px",
   },
+  managersLayout: {
+    display: "grid",
+    gridTemplateColumns: "360px 1fr",
+    gap: "18px",
+  },
   label: {
     display: "block",
     marginBottom: "10px",
@@ -910,6 +1262,9 @@ const styles = {
     borderRadius: "16px",
     padding: "16px",
   },
+  feedCardRead: {
+    opacity: 0.82,
+  },
   feedTop: {
     display: "flex",
     justifyContent: "space-between",
@@ -970,5 +1325,43 @@ const styles = {
     flexWrap: "wrap",
     gap: "10px",
     marginTop: "14px",
+  },
+  managerRowButton: {
+    width: "100%",
+    textAlign: "left",
+    borderRadius: "14px",
+    border: "1px solid #1f2937",
+    background: "#0f172a",
+    padding: "14px",
+    cursor: "pointer",
+  },
+  managerRowButtonActive: {
+    border: "1px solid #334155",
+    background: "#162033",
+  },
+  managerRowName: {
+    fontSize: "15px",
+    fontWeight: 700,
+    color: "#f8fafc",
+    marginBottom: "4px",
+  },
+  managerRowMeta: {
+    fontSize: "13px",
+    color: "#94a3b8",
+  },
+  managerFileWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  managerFileSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  managerFileTitle: {
+    fontSize: "18px",
+    fontWeight: 700,
+    color: "#f8fafc",
   },
 };
