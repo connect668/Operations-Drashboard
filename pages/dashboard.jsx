@@ -424,7 +424,7 @@ export default function Dashboard() {
             <div style={styles.userName}>
               {profile?.full_name || user?.email || "User"}
             </div>
-            <div style={styles.userMeta}>{profile?.role || "Manager"}</div>
+            <div style={styles.userMeta}>{profile ? profile.role : "No profile loaded"}</div>
             <div style={styles.companyName}>
               {profile?.company || "INITIATIVE ENTERPRISES"}
             </div>
