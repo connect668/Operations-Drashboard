@@ -30,7 +30,7 @@ export default function Home() {
 
     setMessage('Login successful.')
     setLoading(false)
-    router.push('/dashboard')
+    router.push("/dashboard");
   }
 
   return (
