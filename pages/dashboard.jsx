@@ -47,6 +47,7 @@ export default function Dashboard() {
   const [teamDecisionsLoading, setTeamDecisionsLoading] = useState(false);
   const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
   const [managersLoading, setManagersLoading] = useState(false);
+  const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
   const [guidanceLoadingId, setGuidanceLoadingId] = useState(null);
 
   const [teamDecisions, setTeamDecisions] = useState([]);
@@ -55,7 +56,6 @@ export default function Dashboard() {
   const [selectedManager, setSelectedManager] = useState(null);
   const [selectedManagerDecisions, setSelectedManagerDecisions] = useState([]);
   const [selectedManagerCoaching, setSelectedManagerCoaching] = useState([]);
-  const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
 
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
@@ -86,6 +86,10 @@ export default function Dashboard() {
           .select("*")
           .eq("id", user.id)
           .single();
+
+        console.log("AUTH USER ID:", user.id);
+        console.log("PROFILE DATA:", profileData);
+        console.log("PROFILE ERROR:", profileError);
 
         if (profileError) {
           console.error("Profile load error:", profileError);
@@ -146,11 +150,7 @@ export default function Dashboard() {
         {
           user_id: user.id,
           company: profile?.company || null,
-          user_name:
-            {profile?.full_name || user?.email || "User"} ||
-            profile?.name ||
-            user?.email ||
-            "Unknown User",
+          user_name: profile?.full_name || user?.email || "Unknown User",
           user_role: profile?.role || "Manager",
           submitted_by_role: profile?.role || "Manager",
           visible_to_role: nextRole,
@@ -195,11 +195,7 @@ export default function Dashboard() {
         {
           user_id: user.id,
           company: profile?.company || null,
-          requester_name:
-            {profile?.full_name || user?.email || "User"} ||
-            profile?.name ||
-            user?.email ||
-            "Unknown User",
+          requester_name: profile?.full_name || user?.email || "Unknown User",
           requester_role: profile?.role || "Manager",
           submitted_by_role: profile?.role || "Manager",
           visible_to_role: nextRole,
@@ -232,8 +228,8 @@ export default function Dashboard() {
         .select("*")
         .eq("company", profile.company)
         .eq("visible_to_role", profile.role)
+        .eq("is_read", false)
         .neq("user_id", user?.id || "")
-        .order("is_read", { ascending: true })
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -305,6 +301,7 @@ export default function Dashboard() {
   const openManagerFile = async (manager) => {
     setSelectedManager(manager);
     setSelectedManagerLoading(true);
+    setManagersMessage("");
 
     try {
       const { data: decisionData, error: decisionError } = await supabase
@@ -346,9 +343,10 @@ export default function Dashboard() {
 
       if (error) throw error;
 
-      fetchTeamDecisions();
+      await fetchTeamDecisions();
+
       if (selectedManager) {
-        openManagerFile(selectedManager);
+        await openManagerFile(selectedManager);
       }
     } catch (error) {
       console.error("Mark as read error:", error);
@@ -368,9 +366,10 @@ export default function Dashboard() {
 
       if (error) throw error;
 
-      fetchTeamCoachingRequests();
+      await fetchTeamCoachingRequests();
+
       if (selectedManager) {
-        openManagerFile(selectedManager);
+        await openManagerFile(selectedManager);
       }
     } catch (error) {
       console.error("Update coaching status error:", error);
@@ -384,7 +383,7 @@ export default function Dashboard() {
     setGuidanceLoadingId(requestId);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 250));
       setTeamCoachingMessage(
         "AI coaching guidance will connect here next. Button is in place."
       );
@@ -397,6 +396,7 @@ export default function Dashboard() {
 
   const formatDate = (value) => {
     if (!value) return "Unknown date";
+
     try {
       return new Date(value).toLocaleString();
     } catch {
@@ -405,7 +405,7 @@ export default function Dashboard() {
   };
 
   const getManagerDisplayName = (manager) =>
-    manager?.full_name || manager?.name || "Unnamed Manager";
+    manager?.full_name || "Unnamed Manager";
 
   if (loading) {
     return (
@@ -424,7 +424,9 @@ export default function Dashboard() {
             <div style={styles.userName}>
               {profile?.full_name || user?.email || "User"}
             </div>
-            <div style={styles.userMeta}>{profile ? profile.role : "No profile loaded"}</div>
+            <div style={styles.userMeta}>
+              {profile ? profile.role : "No profile loaded"}
+            </div>
             <div style={styles.companyName}>
               {profile?.company || "INITIATIVE ENTERPRISES"}
             </div>
@@ -669,13 +671,7 @@ export default function Dashboard() {
                 ) : (
                   <div style={styles.cardList}>
                     {teamDecisions.map((item) => (
-                      <div
-                        key={item.id}
-                        style={{
-                          ...styles.feedCard,
-                          ...(item.is_read ? styles.feedCardRead : {}),
-                        }}
-                      >
+                      <div key={item.id} style={styles.feedCard}>
                         <div style={styles.feedTop}>
                           <div>
                             <div style={styles.feedName}>
@@ -689,12 +685,6 @@ export default function Dashboard() {
                           <div style={styles.feedDate}>
                             {formatDate(item.created_at)}
                           </div>
-                        </div>
-
-                        <div style={styles.statusRow}>
-                          <span style={styles.statusBadge}>
-                            {item.is_read ? "read" : "unread"}
-                          </span>
                         </div>
 
                         <div style={styles.feedSection}>
@@ -722,9 +712,8 @@ export default function Dashboard() {
                           <button
                             style={styles.secondaryButton}
                             onClick={() => markDecisionAsRead(item.id)}
-                            disabled={item.is_read}
                           >
-                            {item.is_read ? "Already Read" : "Mark as Read"}
+                            Mark as Read
                           </button>
                         </div>
                       </div>
@@ -944,9 +933,7 @@ export default function Dashboard() {
                                 </div>
 
                                 <div style={styles.feedSection}>
-                                  <div style={styles.feedLabel}>
-                                    Action Taken
-                                  </div>
+                                  <div style={styles.feedLabel}>Action Taken</div>
                                   <div style={styles.feedBody}>
                                     {item.action_taken || "No action found."}
                                   </div>
@@ -954,9 +941,7 @@ export default function Dashboard() {
 
                                 {item.reasoning ? (
                                   <div style={styles.feedSection}>
-                                    <div style={styles.feedLabel}>
-                                      Reasoning
-                                    </div>
+                                    <div style={styles.feedLabel}>Reasoning</div>
                                     <div style={styles.feedBody}>
                                       {item.reasoning}
                                     </div>
@@ -1261,9 +1246,6 @@ const styles = {
     border: "1px solid #1f2937",
     borderRadius: "16px",
     padding: "16px",
-  },
-  feedCardRead: {
-    opacity: 0.82,
   },
   feedTop: {
     display: "flex",
