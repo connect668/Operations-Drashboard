@@ -9,6 +9,7 @@ const TABS = {
   teamDecisions: "team_decisions",
   teamCoaching: "team_coaching",
   managers: "managers",
+  facilities: "facilities",
 };
 
 const ROLE_LEVELS = {
@@ -70,11 +71,25 @@ export default function Dashboard() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Area Manager – Facilities
+  const [facilities, setFacilities] = useState([]);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
+  const [facilitiesMessage, setFacilitiesMessage] = useState("");
+  const [selectedFacility, setSelectedFacility] = useState(null);
+  const [facilityGMs, setFacilityGMs] = useState([]);
+  const [facilityGMsLoading, setFacilityGMsLoading] = useState(false);
+  const [selectedGM, setSelectedGM] = useState(null);
+  const [gmManagers, setGmManagers] = useState([]);
+  const [gmDecisionLogs, setGmDecisionLogs] = useState([]);
+  const [gmCoachingRequests, setGmCoachingRequests] = useState([]);
+  const [gmDataLoading, setGmDataLoading] = useState(false);
+
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
   }, [profile]);
 
   const canViewLeadershipTabs = currentRoleLevel >= 2;
+  const isAreaManager = profile?.role === "Area Manager";
   const nextRole = getNextRole(profile?.role);
 
   useEffect(() => {
@@ -468,6 +483,93 @@ export default function Dashboard() {
     }
   };
 
+  const fetchFacilities = async () => {
+    if (!user) return;
+    setFacilitiesLoading(true);
+    setFacilitiesMessage("");
+    setSelectedFacility(null);
+    setSelectedGM(null);
+    try {
+      const { data, error } = await supabase
+        .from("area_manager_facilities")
+        .select("facility_number, company")
+        .eq("area_manager_id", user.id);
+      if (error) throw error;
+      setFacilities(data || []);
+      if ((data || []).length === 0) setFacilitiesMessage("No facilities assigned to your account.");
+    } catch (err) {
+      console.error("Fetch facilities error:", err);
+      setFacilitiesMessage(err.message || "Failed to load facilities.");
+    } finally {
+      setFacilitiesLoading(false);
+    }
+  };
+
+  const fetchFacilityGMs = async (facility) => {
+    setSelectedFacility(facility);
+    setSelectedGM(null);
+    setFacilityGMs([]);
+    setGmDecisionLogs([]);
+    setGmCoachingRequests([]);
+    setFacilityGMsLoading(true);
+    setFacilitiesMessage("");
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, role, company, facility_number")
+        .eq("role", "General Manager")
+        .eq("company", facility.company)
+        .eq("facility_number", facility.facility_number);
+      if (error) throw error;
+      setFacilityGMs(data || []);
+      if ((data || []).length === 0) setFacilitiesMessage("No General Managers found in this facility.");
+    } catch (err) {
+      console.error("Fetch facility GMs error:", err);
+      setFacilitiesMessage(err.message || "Failed to load GMs.");
+    } finally {
+      setFacilityGMsLoading(false);
+    }
+  };
+
+  const fetchGMData = async (gm) => {
+    setSelectedGM(gm);
+    setGmDataLoading(true);
+    setGmManagers([]);
+    setGmDecisionLogs([]);
+    setGmCoachingRequests([]);
+    setFacilitiesMessage("");
+    try {
+      const { data: assignments, error: aErr } = await supabase
+        .from("gm_manager_assignments")
+        .select("manager_id")
+        .eq("gm_id", gm.id);
+      if (aErr) throw aErr;
+
+      const managerIds = (assignments || []).map((a) => a.manager_id);
+      setGmManagers(managerIds);
+
+      if (managerIds.length === 0) {
+        setFacilitiesMessage("No managers assigned to this GM yet.");
+        return;
+      }
+
+      const [{ data: decisions, error: dErr }, { data: coaching, error: cErr }] =
+        await Promise.all([
+          supabase.from("decision_logs").select("*").in("user_id", managerIds).order("created_at", { ascending: false }),
+          supabase.from("coaching_requests").select("*").in("user_id", managerIds).order("created_at", { ascending: false }),
+        ]);
+      if (dErr) throw dErr;
+      if (cErr) throw cErr;
+      setGmDecisionLogs(decisions || []);
+      setGmCoachingRequests(coaching || []);
+    } catch (err) {
+      console.error("Fetch GM data error:", err);
+      setFacilitiesMessage(err.message || "Failed to load GM data.");
+    } finally {
+      setGmDataLoading(false);
+    }
+  };
+
   const fetchMyLogs = async () => {
     if (!user) return;
     setMyLogsLoading(true);
@@ -550,6 +652,12 @@ export default function Dashboard() {
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.managers); fetchManagers(); })}>Managers</button>
               </>
             )}
+            {isAreaManager && (
+              <>
+                <div style={styles.navDivider} />
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.facilities ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.facilities); fetchFacilities(); })}>Facilities</button>
+              </>
+            )}
             <div style={styles.navDivider} />
             <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
           </div>
@@ -586,6 +694,12 @@ export default function Dashboard() {
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.teamDecisions ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamDecisions); fetchTeamDecisions(); }}>Team Decisions</button>
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.teamCoaching ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamCoaching); fetchTeamCoachingRequests(); }}>Team Coaching Requests</button>
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.managers); fetchManagers(); }}>Managers</button>
+              </>
+            )}
+            {isAreaManager && (
+              <>
+                <div style={styles.navDivider} />
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.facilities ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.facilities); fetchFacilities(); }}>Facilities</button>
               </>
             )}
           </div>
@@ -1200,6 +1314,236 @@ export default function Dashboard() {
               </div>
             </>
           )}
+          {activeTab === TABS.facilities && isAreaManager && (() => {
+            const policyRefPct = gmDecisionLogs.length > 0
+              ? Math.round(gmDecisionLogs.filter((l) => l.policy_referenced?.trim()).length / gmDecisionLogs.length * 100)
+              : null;
+            const totalActivity = gmDecisionLogs.length + gmCoachingRequests.length;
+            const compliancePct = 87; // mock — replace with real calculation when available
+
+            return (
+              <>
+                <div style={styles.headerCard}>
+                  <h1 style={styles.title}>Facilities</h1>
+                  <p style={styles.subtitle}>
+                    Select a facility, then a General Manager to review operational performance.
+                  </p>
+                  {/* Mobile breadcrumb */}
+                  {isMobile && (selectedFacility || selectedGM) && (
+                    <div style={styles.breadcrumb}>
+                      <button style={styles.breadcrumbLink} onClick={() => { setSelectedFacility(null); setSelectedGM(null); }}>Facilities</button>
+                      {selectedFacility && (
+                        <>
+                          <span style={styles.breadcrumbSep}>›</span>
+                          <button style={styles.breadcrumbLink} onClick={() => setSelectedGM(null)}>
+                            Facility {selectedFacility.facility_number}
+                          </button>
+                        </>
+                      )}
+                      {selectedGM && (
+                        <>
+                          <span style={styles.breadcrumbSep}>›</span>
+                          <span style={styles.breadcrumbCurrent}>{selectedGM.full_name}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {facilitiesMessage && <p style={styles.message}>{facilitiesMessage}</p>}
+
+                <div style={isMobile ? {} : styles.facilitiesLayout}>
+
+                  {/* ── PANEL 1: Facilities list ── */}
+                  {(!isMobile || (!selectedFacility && !selectedGM)) && (
+                    <div style={styles.panelCard}>
+                      <div style={styles.sectionHeading}>Your Facilities</div>
+                      {facilitiesLoading ? (
+                        <p style={styles.message}>Loading facilities...</p>
+                      ) : facilities.length === 0 ? (
+                        <p style={styles.message}>No facilities assigned.</p>
+                      ) : (
+                        <div style={styles.cardList}>
+                          {facilities.map((f) => (
+                            <button
+                              key={`${f.company}-${f.facility_number}`}
+                              style={{
+                                ...styles.managerRowButton,
+                                ...(selectedFacility?.facility_number === f.facility_number && selectedFacility?.company === f.company ? styles.managerRowButtonActive : {}),
+                              }}
+                              onClick={() => fetchFacilityGMs(f)}
+                            >
+                              <div style={styles.managerRowName}>Facility {f.facility_number}</div>
+                              <div style={styles.managerRowMeta}>{f.company}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── PANEL 2: GM list ── */}
+                  {(!isMobile || (selectedFacility && !selectedGM)) && (
+                    <div style={styles.panelCard}>
+                      <div style={styles.sectionHeading}>
+                        {selectedFacility ? `GMs — Facility ${selectedFacility.facility_number}` : "General Managers"}
+                      </div>
+                      {!selectedFacility ? (
+                        <p style={styles.message}>Select a facility first.</p>
+                      ) : facilityGMsLoading ? (
+                        <p style={styles.message}>Loading GMs...</p>
+                      ) : facilityGMs.length === 0 ? (
+                        <p style={styles.message}>No GMs found in this facility.</p>
+                      ) : (
+                        <div style={styles.cardList}>
+                          {facilityGMs.map((gm) => (
+                            <button
+                              key={gm.id}
+                              style={{
+                                ...styles.managerRowButton,
+                                ...(selectedGM?.id === gm.id ? styles.managerRowButtonActive : {}),
+                              }}
+                              onClick={() => fetchGMData(gm)}
+                            >
+                              <div style={styles.managerRowName}>{gm.full_name}</div>
+                              <div style={styles.managerRowMeta}>General Manager</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── PANEL 3: GM detail ── */}
+                  {(!isMobile || selectedGM) && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                      {!selectedGM ? (
+                        <div style={styles.panelCard}>
+                          <p style={styles.message}>Select a GM to view their performance overview.</p>
+                        </div>
+                      ) : gmDataLoading ? (
+                        <div style={styles.panelCard}>
+                          <p style={styles.message}>Loading GM data...</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* GM header */}
+                          <div style={styles.panelCard}>
+                            <div style={styles.sectionHeading}>{selectedGM.full_name}</div>
+                            <div style={{ color: "#94a3b8", fontSize: "14px", marginTop: "4px" }}>
+                              General Manager · {selectedFacility?.company} · Facility {selectedFacility?.facility_number}
+                            </div>
+                            <div style={{ color: "#6b7280", fontSize: "13px", marginTop: "4px" }}>
+                              {gmManagers.length} manager{gmManagers.length !== 1 ? "s" : ""} assigned
+                            </div>
+                          </div>
+
+                          {/* Metrics row */}
+                          <div style={isMobile ? styles.metricsStackMobile : styles.metricsRow}>
+                            <div style={styles.metricCard}>
+                              <div style={styles.metricValue}>
+                                {policyRefPct !== null ? `${policyRefPct}%` : "—"}
+                              </div>
+                              <div style={styles.metricLabel}>Policy Reference Rate</div>
+                              <div style={styles.metricSub}>
+                                {gmDecisionLogs.filter((l) => l.policy_referenced?.trim()).length} of {gmDecisionLogs.length} decision logs
+                              </div>
+                            </div>
+
+                            <div style={styles.metricCard}>
+                              <div style={styles.metricValue}>{totalActivity}</div>
+                              <div style={styles.metricLabel}>Total Activity</div>
+                              <div style={styles.metricSub}>
+                                {gmDecisionLogs.length} decisions · {gmCoachingRequests.length} coaching
+                              </div>
+                            </div>
+
+                            <div style={{ ...styles.metricCard, position: "relative" }}>
+                              <div style={styles.metricValue}>{compliancePct}%</div>
+                              <div style={styles.metricLabel}>Policy Compliance</div>
+                              <div style={styles.metricSub}>Placeholder — real calc pending</div>
+                              <div style={styles.mockBadge}>MOCK</div>
+                            </div>
+                          </div>
+
+                          {/* Decision log preview */}
+                          <div style={styles.panelCard}>
+                            <div style={styles.sectionTopRow}>
+                              <div style={styles.sectionHeading}>Recent Decision Logs</div>
+                              <div style={{ fontSize: "13px", color: "#6b7280" }}>{gmDecisionLogs.length} total</div>
+                            </div>
+                            {gmDecisionLogs.length === 0 ? (
+                              <p style={styles.message}>No decision logs from this GM's managers.</p>
+                            ) : (
+                              <div style={styles.cardList}>
+                                {gmDecisionLogs.slice(0, 5).map((item) => (
+                                  <div key={item.id} style={styles.feedCard}>
+                                    <div style={styles.feedTop}>
+                                      <div style={styles.feedName}>{item.user_name || "Unknown"}</div>
+                                      <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                                    </div>
+                                    <div style={styles.feedSection}>
+                                      <div style={styles.feedLabel}>Situation</div>
+                                      <div style={styles.feedBody}>{item.situation || "—"}</div>
+                                    </div>
+                                    <div style={styles.feedSection}>
+                                      <div style={styles.feedLabel}>Action Taken</div>
+                                      <div style={styles.feedBody}>{item.action_taken || "—"}</div>
+                                    </div>
+                                    {item.policy_referenced ? (
+                                      <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                                {gmDecisionLogs.length > 5 && (
+                                  <p style={{ ...styles.message, textAlign: "center" }}>
+                                    + {gmDecisionLogs.length - 5} more
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Coaching log preview */}
+                          <div style={styles.panelCard}>
+                            <div style={styles.sectionTopRow}>
+                              <div style={styles.sectionHeading}>Coaching Requests</div>
+                              <div style={{ fontSize: "13px", color: "#6b7280" }}>{gmCoachingRequests.length} total</div>
+                            </div>
+                            {gmCoachingRequests.length === 0 ? (
+                              <p style={styles.message}>No coaching requests from this GM's managers.</p>
+                            ) : (
+                              <div style={styles.cardList}>
+                                {gmCoachingRequests.slice(0, 5).map((item) => (
+                                  <div key={item.id} style={styles.feedCard}>
+                                    <div style={styles.feedTop}>
+                                      <div style={styles.feedName}>{item.requester_name || "Unknown"}</div>
+                                      <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                                    </div>
+                                    <div style={styles.feedBody}>{item.request_text || "—"}</div>
+                                    <div style={{ marginTop: "8px" }}>
+                                      <span style={{ ...styles.statusBadge, background: item.guidance_given ? "#052e16" : "#1c1917", color: item.guidance_given ? "#4ade80" : "#a8a29e", border: `1px solid ${item.guidance_given ? "#166534" : "#292524"}` }}>
+                                        {item.guidance_given ? "Guidance Given" : item.status || "open"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                                {gmCoachingRequests.length > 5 && (
+                                  <p style={{ ...styles.message, textAlign: "center" }}>
+                                    + {gmCoachingRequests.length - 5} more
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </main>
       </div>
     </div>
@@ -1630,6 +1974,83 @@ const styles = {
     borderRadius: "16px",
     padding: "16px",
     marginBottom: "16px",
+  },
+  facilitiesLayout: {
+    display: "grid",
+    gridTemplateColumns: "240px 260px 1fr",
+    gap: "18px",
+    alignItems: "start",
+  },
+  metricsRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: "14px",
+  },
+  metricsStackMobile: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  metricCard: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "16px",
+    padding: "22px 18px",
+    textAlign: "center",
+    position: "relative",
+  },
+  metricValue: {
+    fontSize: "42px",
+    fontWeight: 800,
+    color: "#f8fafc",
+    lineHeight: 1,
+    marginBottom: "8px",
+  },
+  metricLabel: {
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#cbd5e1",
+    marginBottom: "4px",
+  },
+  metricSub: {
+    fontSize: "12px",
+    color: "#6b7280",
+  },
+  mockBadge: {
+    position: "absolute",
+    top: "10px",
+    right: "10px",
+    fontSize: "10px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    color: "#78716c",
+    background: "#1c1917",
+    border: "1px solid #292524",
+    borderRadius: "4px",
+    padding: "2px 6px",
+  },
+  breadcrumb: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    marginTop: "12px",
+    flexWrap: "wrap",
+  },
+  breadcrumbLink: {
+    background: "transparent",
+    border: "none",
+    color: "#60a5fa",
+    cursor: "pointer",
+    fontSize: "13px",
+    padding: 0,
+  },
+  breadcrumbSep: {
+    color: "#4b5563",
+    fontSize: "13px",
+  },
+  breadcrumbCurrent: {
+    fontSize: "13px",
+    color: "#94a3b8",
   },
   logTypeSelector: {
     display: "grid",
