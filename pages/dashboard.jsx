@@ -83,19 +83,19 @@ export default function Dashboard() {
 
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("*")
+          .select("id, full_name, role, company")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
-        console.log("AUTH USER ID:", user.id);
+        console.log("AUTH USER:", user);
         console.log("PROFILE DATA:", profileData);
         console.log("PROFILE ERROR:", profileError);
 
         if (profileError) {
           console.error("Profile load error:", profileError);
-        } else {
-          setProfile(profileData);
         }
+
+        setProfile(profileData || null);
       } catch (error) {
         console.error("Dashboard load error:", error);
       } finally {
@@ -150,7 +150,7 @@ export default function Dashboard() {
         {
           user_id: user.id,
           company: profile?.company || null,
-          user_name: profile?.full_name || user?.email || "Unknown User",
+          user_name: profile?.full_name || "Unknown User",
           user_role: profile?.role || "Manager",
           submitted_by_role: profile?.role || "Manager",
           visible_to_role: nextRole,
@@ -195,7 +195,7 @@ export default function Dashboard() {
         {
           user_id: user.id,
           company: profile?.company || null,
-          requester_name: profile?.full_name || user?.email || "Unknown User",
+          requester_name: profile?.full_name || "Unknown User",
           requester_role: profile?.role || "Manager",
           submitted_by_role: profile?.role || "Manager",
           visible_to_role: nextRole,
@@ -422,13 +422,13 @@ export default function Dashboard() {
           <div style={styles.brandCard}>
             <div style={styles.smallLabel}>SIGNED IN AS</div>
             <div style={styles.userName}>
-              {profile?.full_name || user?.email || "User"}
+              {profile?.full_name || "No name found"}
             </div>
             <div style={styles.userMeta}>
-              {profile ? profile.role : "No profile loaded"}
+              {profile?.role || "No role assigned"}
             </div>
             <div style={styles.companyName}>
-              {profile?.company || "INITIATIVE ENTERPRISES"}
+              {profile?.company || "No company assigned"}
             </div>
             <div style={styles.companyMotto}>company motto here</div>
           </div>
