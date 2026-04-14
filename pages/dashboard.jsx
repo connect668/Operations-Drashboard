@@ -49,7 +49,9 @@ export default function Dashboard() {
   const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
   const [managersLoading, setManagersLoading] = useState(false);
   const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
-  const [guidanceLoadingId, setGuidanceLoadingId] = useState(null);
+  const [guidanceActiveId, setGuidanceActiveId] = useState(null);
+  const [guidanceText, setGuidanceText] = useState("");
+  const [guidanceSubmittingId, setGuidanceSubmittingId] = useState(null);
 
   const [teamDecisions, setTeamDecisions] = useState([]);
   const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
@@ -395,18 +397,46 @@ export default function Dashboard() {
     }
   };
 
-  const handleRequestCoachingGuidance = async (requestId) => {
-    setGuidanceLoadingId(requestId);
+  const handleGiveGuidance = async (requestId, userId) => {
+    if (!guidanceText.trim()) return;
+
+    setGuidanceSubmittingId(requestId);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      setTeamCoachingMessage(
-        "AI coaching guidance will connect here next. Button is in place."
-      );
+      const { error } = await supabase
+        .from("coaching_requests")
+        .update({
+          leadership_notes: guidanceText.trim(),
+          status: "resolved",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", requestId);
+
+      if (error) throw error;
+
+      setGuidanceActiveId(null);
+      setGuidanceText("");
+      await fetchTeamCoachingRequests();
+
+      // Navigate to that manager's file
+      let manager = managers.find((m) => m.id === userId);
+      if (!manager) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("id, full_name, role, company")
+          .eq("id", userId)
+          .maybeSingle();
+        manager = data;
+      }
+      if (manager) {
+        setActiveTab(TABS.managers);
+        await openManagerFile(manager);
+      }
     } catch (error) {
-      console.error("Guidance placeholder error:", error);
+      console.error("Give guidance error:", error);
+      setTeamCoachingMessage(error.message || "Failed to save guidance.");
     } finally {
-      setGuidanceLoadingId(null);
+      setGuidanceSubmittingId(null);
     }
   };
 
@@ -821,41 +851,38 @@ export default function Dashboard() {
                         ) : null}
 
                         <div style={styles.actionRow}>
-                          <button
-                            style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "in_progress")
-                            }
-                          >
-                            Start Review
-                          </button>
-                          <button
-                            style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "resolved")
-                            }
-                          >
-                            Mark Resolved
-                          </button>
-                          <button
-                            style={styles.secondaryButton}
-                            onClick={() =>
-                              updateCoachingStatus(item.id, "open")
-                            }
-                          >
-                            Reopen
-                          </button>
-                          <button
-                            style={styles.secondaryButton}
-                            onClick={() =>
-                              handleRequestCoachingGuidance(item.id)
-                            }
-                            disabled={guidanceLoadingId === item.id}
-                          >
-                            {guidanceLoadingId === item.id
-                              ? "Loading..."
-                              : "Request Coaching Guidance"}
-                          </button>
+                          {guidanceActiveId === item.id ? (
+                            <div style={styles.guidancePrompt}>
+                              <textarea
+                                value={guidanceText}
+                                onChange={(e) => setGuidanceText(e.target.value)}
+                                placeholder="What should this manager do? Be specific..."
+                                style={styles.guidanceTextarea}
+                              />
+                              <div style={styles.guidanceButtons}>
+                                <button
+                                  style={styles.primaryButton}
+                                  onClick={() => handleGiveGuidance(item.id, item.user_id)}
+                                  disabled={guidanceSubmittingId === item.id || !guidanceText.trim()}
+                                >
+                                  {guidanceSubmittingId === item.id ? "Sending..." : "Send to Manager File"}
+                                </button>
+                                <button
+                                  style={styles.secondaryButton}
+                                  onClick={() => { setGuidanceActiveId(null); setGuidanceText(""); }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              style={styles.secondaryButton}
+                              onClick={() => { setGuidanceActiveId(item.id); setGuidanceText(""); }}
+                            >
+                              Give Operational Guidance
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1401,5 +1428,27 @@ const styles = {
     color: "#60a5fa",
     fontSize: "12px",
     display: "inline-block",
+  },
+  guidancePrompt: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+    width: "100%",
+  },
+  guidanceTextarea: {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "10px",
+    border: "1px solid #334155",
+    backgroundColor: "#0f172a",
+    color: "#e5e7eb",
+    fontSize: "14px",
+    resize: "vertical",
+    minHeight: "90px",
+    outline: "none",
+  },
+  guidanceButtons: {
+    display: "flex",
+    gap: "10px",
   },
 };
