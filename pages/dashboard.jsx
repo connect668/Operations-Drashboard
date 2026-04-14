@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [decisionSituation, setDecisionSituation] = useState("");
   const [decisionAction, setDecisionAction] = useState("");
   const [decisionReasoning, setDecisionReasoning] = useState("");
+  const [decisionPolicy, setDecisionPolicy] = useState("");
   const [coachingText, setCoachingText] = useState("");
 
   const [policyMessage, setPolicyMessage] = useState("");
@@ -157,6 +158,7 @@ export default function Dashboard() {
           situation: decisionSituation.trim(),
           action_taken: decisionAction.trim(),
           reasoning: decisionReasoning.trim() || null,
+          policy_referenced: decisionPolicy.trim() || null,
           is_read: false,
         },
       ]);
@@ -166,6 +168,7 @@ export default function Dashboard() {
       setDecisionSituation("");
       setDecisionAction("");
       setDecisionReasoning("");
+      setDecisionPolicy("");
       setDecisionMessage("Decision submitted successfully.");
     } catch (error) {
       console.error("Decision submit error:", error);
@@ -330,7 +333,7 @@ export default function Dashboard() {
     }
   };
 
-  const markDecisionAsRead = async (id) => {
+  const markDecisionAsRead = async (id, userId) => {
     try {
       const { error } = await supabase
         .from("decision_logs")
@@ -345,8 +348,21 @@ export default function Dashboard() {
 
       await fetchTeamDecisions();
 
-      if (selectedManager) {
-        await openManagerFile(selectedManager);
+      // Find or fetch the manager then open their file
+      let manager = managers.find((m) => m.id === userId);
+
+      if (!manager) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("id, full_name, role, company")
+          .eq("id", userId)
+          .maybeSingle();
+        manager = data;
+      }
+
+      if (manager) {
+        setActiveTab(TABS.managers);
+        await openManagerFile(manager);
       }
     } catch (error) {
       console.error("Mark as read error:", error);
@@ -587,6 +603,14 @@ export default function Dashboard() {
                   style={styles.textareaSmall}
                 />
 
+                <input
+                  type="text"
+                  value={decisionPolicy}
+                  onChange={(e) => setDecisionPolicy(e.target.value)}
+                  placeholder="Policy referenced (optional)"
+                  style={styles.policyInput}
+                />
+
                 <button
                   style={{
                     ...styles.primaryButton,
@@ -708,10 +732,16 @@ export default function Dashboard() {
                           </div>
                         ) : null}
 
+                        {item.policy_referenced ? (
+                          <div style={styles.policyTag}>
+                            Policy Referenced: {item.policy_referenced}
+                          </div>
+                        ) : null}
+
                         <div style={styles.actionRow}>
                           <button
                             style={styles.secondaryButton}
-                            onClick={() => markDecisionAsRead(item.id)}
+                            onClick={() => markDecisionAsRead(item.id, item.user_id)}
                           >
                             Mark as Read
                           </button>
@@ -945,6 +975,12 @@ export default function Dashboard() {
                                     <div style={styles.feedBody}>
                                       {item.reasoning}
                                     </div>
+                                  </div>
+                                ) : null}
+
+                                {item.policy_referenced ? (
+                                  <div style={styles.policyTag}>
+                                    Policy Referenced: {item.policy_referenced}
                                   </div>
                                 ) : null}
                               </div>
@@ -1345,5 +1381,25 @@ const styles = {
     fontSize: "18px",
     fontWeight: 700,
     color: "#f8fafc",
+  },
+  policyInput: {
+    padding: "8px 12px",
+    borderRadius: "8px",
+    border: "1px solid #1f2937",
+    backgroundColor: "#0f172a",
+    color: "#cbd5e1",
+    fontSize: "13px",
+    width: "100%",
+    outline: "none",
+  },
+  policyTag: {
+    marginTop: "10px",
+    padding: "5px 10px",
+    borderRadius: "6px",
+    border: "1px solid #1e3a5f",
+    backgroundColor: "#0c1e35",
+    color: "#60a5fa",
+    fontSize: "12px",
+    display: "inline-block",
   },
 };
