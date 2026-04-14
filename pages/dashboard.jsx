@@ -1662,6 +1662,8 @@ const styles = {
     color: "#e5e7eb",
     padding: "24px",
     boxSizing: "border-box",
+    overflowX: "hidden",
+    maxWidth: "100vw",
     fontFamily:
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
