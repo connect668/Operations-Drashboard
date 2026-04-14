@@ -75,6 +75,7 @@ export default function Dashboard() {
   const [facilities, setFacilities] = useState([]);
   const [facilitiesLoading, setFacilitiesLoading] = useState(false);
   const [facilitiesMessage, setFacilitiesMessage] = useState("");
+  const [gmActivityTab, setGmActivityTab] = useState("decisions");
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [facilityGMs, setFacilityGMs] = useState([]);
   const [facilityGMsLoading, setFacilityGMsLoading] = useState(false);
@@ -534,6 +535,7 @@ export default function Dashboard() {
   const fetchGMData = async (gm) => {
     setSelectedGM(gm);
     setGmDataLoading(true);
+    setGmActivityTab("decisions");
     setGmManagers([]);
     setGmDecisionLogs([]);
     setGmCoachingRequests([]);
@@ -1315,14 +1317,16 @@ export default function Dashboard() {
             </>
           )}
           {activeTab === TABS.facilities && isAreaManager && (() => {
-            // Deterministic mock metrics from GM name — replace with real data when available
+            // Mock metrics from GM name hash
             const getMockMetrics = (gm) => {
               const h = (gm.full_name || "GM").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-              return {
-                policyRef:  40 + (h % 55),
-                activity:    8 + (h % 38),
-                compliance: 50 + ((h * 7) % 44),
-              };
+              return { policyRef: 40 + (h % 55), activity: 8 + (h % 38), compliance: 50 + ((h * 7) % 44) };
+            };
+
+            // Mock overall metric for facility card display
+            const getFacilityMetric = (f) => {
+              const h = (f.facility_number || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+              return 55 + (h % 40); // 55–94%
             };
 
             // Real metrics for selected GM
@@ -1330,9 +1334,8 @@ export default function Dashboard() {
               ? Math.round(gmDecisionLogs.filter((l) => l.policy_referenced?.trim()).length / gmDecisionLogs.length * 100)
               : null;
             const totalActivity = gmDecisionLogs.length + gmCoachingRequests.length;
-            const compliancePct = 87; // mock — structured for real replacement
+            const compliancePct = 87;
 
-            // Professional color-coded badge helper (not childish)
             const metricColor = (val) => {
               if (val >= 80) return { text: "#4ade80", bg: "rgba(74,222,128,0.07)", border: "rgba(74,222,128,0.2)" };
               if (val >= 60) return { text: "#fbbf24", bg: "rgba(251,191,36,0.07)", border: "rgba(251,191,36,0.2)" };
@@ -1400,6 +1403,8 @@ export default function Dashboard() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "14px" }}>
                           {facilities.map((f, i) => {
                             const isSelected = selectedFacility?.facility_number === f.facility_number && selectedFacility?.company === f.company;
+                            const facilityPct = getFacilityMetric(f);
+                            const fc = metricColor(facilityPct);
                             return (
                               <button
                                 key={`${f.company}-${f.facility_number}`}
@@ -1408,11 +1413,19 @@ export default function Dashboard() {
                                   ...styles.managerRowButton,
                                   ...(isSelected ? { ...styles.managerRowButtonActive, borderColor: "#3b82f6" } : {}),
                                   animationDelay: `${i * 0.04}s`,
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
                                 }}
                                 onClick={() => fetchFacilityGMs(f)}
                               >
-                                <div style={styles.managerRowName}>Facility {f.facility_number}</div>
-                                <div style={styles.managerRowMeta}>{f.company}</div>
+                                <div>
+                                  <div style={styles.managerRowName}>Facility {f.facility_number}</div>
+                                  <div style={styles.managerRowMeta}>{f.company}</div>
+                                </div>
+                                <span style={{ padding: "3px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: fc.bg, color: fc.text, border: `1px solid ${fc.border}`, flexShrink: 0 }}>
+                                  {facilityPct}%
+                                </span>
                               </button>
                             );
                           })}
@@ -1525,75 +1538,107 @@ export default function Dashboard() {
                             </div>
                           </div>
 
-                          {/* Decision logs */}
+                          {/* Facility Activity — tabbed */}
                           <div style={styles.panelCard} className="am-fade">
-                            <div style={styles.sectionTopRow}>
-                              <div style={styles.sectionHeading}>Decision Logs</div>
-                              <div style={{ fontSize: "13px", color: "#6b7280" }}>{gmDecisionLogs.length} total</div>
+                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "14px" }}>
+                              Facility Activity
                             </div>
-                            {gmDecisionLogs.length === 0 ? (
-                              <p style={styles.message}>No decision logs from this GM's managers.</p>
-                            ) : (
-                              <div style={styles.cardList}>
-                                {gmDecisionLogs.slice(0, 5).map((item) => (
-                                  <div key={item.id} className="am-feed-card" style={styles.feedCard}>
-                                    <div style={styles.feedTop}>
-                                      <div style={styles.feedName}>{item.user_name || "Unknown"}</div>
-                                      <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
-                                    </div>
-                                    <div style={styles.feedSection}>
-                                      <div style={styles.feedLabel}>Situation</div>
-                                      <div style={styles.feedBody}>{item.situation || "—"}</div>
-                                    </div>
-                                    <div style={styles.feedSection}>
-                                      <div style={styles.feedLabel}>Action Taken</div>
-                                      <div style={styles.feedBody}>{item.action_taken || "—"}</div>
-                                    </div>
-                                    {item.policy_referenced && (
-                                      <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
-                                    )}
-                                  </div>
-                                ))}
-                                {gmDecisionLogs.length > 5 && (
-                                  <p style={{ ...styles.message, textAlign: "center" }}>+{gmDecisionLogs.length - 5} more records</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                            {/* Tab row */}
+                            <div style={{ display: "flex", gap: "8px", marginBottom: "18px" }}>
+                              {[
+                                { key: "decisions", label: "Decision Logs", count: gmDecisionLogs.length },
+                                { key: "coaching",  label: "Coaching Requests", count: gmCoachingRequests.length },
+                              ].map(({ key, label, count }) => (
+                                <button
+                                  key={key}
+                                  onClick={() => setGmActivityTab(key)}
+                                  style={{
+                                    flex: 1,
+                                    padding: "10px 12px",
+                                    borderRadius: "10px",
+                                    border: `1px solid ${gmActivityTab === key ? "#3b82f6" : "#1f2937"}`,
+                                    background: gmActivityTab === key ? "rgba(59,130,246,0.1)" : "transparent",
+                                    color: gmActivityTab === key ? "#60a5fa" : "#6b7280",
+                                    fontSize: "13px",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  {label}
+                                  <span style={{ marginLeft: "6px", fontSize: "11px", opacity: 0.7 }}>({count})</span>
+                                </button>
+                              ))}
+                            </div>
 
-                          {/* Coaching requests */}
-                          <div style={styles.panelCard} className="am-fade">
-                            <div style={styles.sectionTopRow}>
-                              <div style={styles.sectionHeading}>Coaching Requests</div>
-                              <div style={{ fontSize: "13px", color: "#6b7280" }}>{gmCoachingRequests.length} total</div>
-                            </div>
-                            {gmCoachingRequests.length === 0 ? (
-                              <p style={styles.message}>No coaching requests from this GM's managers.</p>
-                            ) : (
-                              <div style={styles.cardList}>
-                                {gmCoachingRequests.slice(0, 5).map((item) => (
-                                  <div key={item.id} className="am-feed-card" style={styles.feedCard}>
-                                    <div style={styles.feedTop}>
-                                      <div style={styles.feedName}>{item.requester_name || "Unknown"}</div>
-                                      <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                            {/* Decision Logs content */}
+                            {gmActivityTab === "decisions" && (
+                              gmDecisionLogs.length === 0 ? (
+                                <p style={styles.message}>No decision logs from this GM's managers.</p>
+                              ) : (
+                                <div style={styles.cardList}>
+                                  {gmDecisionLogs.map((item) => (
+                                    <div key={item.id} className="am-feed-card" style={styles.feedCard}>
+                                      <div style={styles.feedTop}>
+                                        <div style={styles.feedName}>{item.user_name || "Unknown"}</div>
+                                        <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                                      </div>
+                                      <div style={styles.feedSection}>
+                                        <div style={styles.feedLabel}>Situation</div>
+                                        <div style={styles.feedBody}>{item.situation || "—"}</div>
+                                      </div>
+                                      <div style={styles.feedSection}>
+                                        <div style={styles.feedLabel}>Action Taken</div>
+                                        <div style={styles.feedBody}>{item.action_taken || "—"}</div>
+                                      </div>
+                                      {item.reasoning && (
+                                        <div style={styles.feedSection}>
+                                          <div style={styles.feedLabel}>Reasoning</div>
+                                          <div style={styles.feedBody}>{item.reasoning}</div>
+                                        </div>
+                                      )}
+                                      {item.policy_referenced && (
+                                        <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
+                                      )}
                                     </div>
-                                    <div style={styles.feedBody}>{item.request_text || "—"}</div>
-                                    <div style={{ marginTop: "10px" }}>
-                                      <span style={{
-                                        ...styles.statusBadge,
-                                        background: item.guidance_given ? "rgba(74,222,128,0.07)" : "#1c1917",
-                                        color: item.guidance_given ? "#4ade80" : "#a8a29e",
-                                        border: `1px solid ${item.guidance_given ? "rgba(74,222,128,0.2)" : "#292524"}`,
-                                      }}>
-                                        {item.guidance_given ? "Guidance Given" : item.status || "open"}
-                                      </span>
+                                  ))}
+                                </div>
+                              )
+                            )}
+
+                            {/* Coaching Requests content */}
+                            {gmActivityTab === "coaching" && (
+                              gmCoachingRequests.length === 0 ? (
+                                <p style={styles.message}>No coaching requests from this GM's managers.</p>
+                              ) : (
+                                <div style={styles.cardList}>
+                                  {gmCoachingRequests.map((item) => (
+                                    <div key={item.id} className="am-feed-card" style={styles.feedCard}>
+                                      <div style={styles.feedTop}>
+                                        <div style={styles.feedName}>{item.requester_name || "Unknown"}</div>
+                                        <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                                      </div>
+                                      <div style={styles.feedBody}>{item.request_text || "—"}</div>
+                                      {item.leadership_notes && (
+                                        <div style={{ ...styles.feedSection, borderLeft: "3px solid #2563eb", paddingLeft: "12px", marginTop: "12px" }}>
+                                          <div style={{ ...styles.feedLabel, color: "#60a5fa" }}>GM Guidance</div>
+                                          <div style={styles.feedBody}>{item.leadership_notes}</div>
+                                        </div>
+                                      )}
+                                      <div style={{ marginTop: "10px" }}>
+                                        <span style={{
+                                          ...styles.statusBadge,
+                                          background: item.guidance_given ? "rgba(74,222,128,0.07)" : "#1c1917",
+                                          color: item.guidance_given ? "#4ade80" : "#a8a29e",
+                                          border: `1px solid ${item.guidance_given ? "rgba(74,222,128,0.2)" : "#292524"}`,
+                                        }}>
+                                          {item.guidance_given ? "Guidance Given" : item.status || "open"}
+                                        </span>
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
-                                {gmCoachingRequests.length > 5 && (
-                                  <p style={{ ...styles.message, textAlign: "center" }}>+{gmCoachingRequests.length - 5} more records</p>
-                                )}
-                              </div>
+                                  ))}
+                                </div>
+                              )
                             )}
                           </div>
                         </>
