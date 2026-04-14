@@ -5,6 +5,7 @@ const TABS = {
   policy: "policy",
   decision: "decision",
   coaching: "coaching",
+  myLogs: "my_logs",
   teamDecisions: "team_decisions",
   teamCoaching: "team_coaching",
   managers: "managers",
@@ -61,6 +62,14 @@ export default function Dashboard() {
   const [selectedManagerCoaching, setSelectedManagerCoaching] = useState([]);
   const [managerFileTab, setManagerFileTab] = useState(null);
 
+  const [myLogType, setMyLogType] = useState(null);
+  const [myDecisions, setMyDecisions] = useState([]);
+  const [myCoaching, setMyCoaching] = useState([]);
+  const [myLogsLoading, setMyLogsLoading] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
   }, [profile]);
@@ -108,6 +117,13 @@ export default function Dashboard() {
     };
 
     loadDashboard();
+  }, []);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
   useEffect(() => {
@@ -264,6 +280,7 @@ export default function Dashboard() {
         .eq("company", profile.company)
         .eq("visible_to_role", profile.role)
         .neq("user_id", user?.id || "")
+        .or("guidance_given.is.null,guidance_given.eq.false")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -451,6 +468,31 @@ export default function Dashboard() {
     }
   };
 
+  const fetchMyLogs = async () => {
+    if (!user) return;
+    setMyLogsLoading(true);
+    try {
+      const [{ data: decisions }, { data: coaching }] = await Promise.all([
+        supabase
+          .from("decision_logs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("coaching_requests")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+      ]);
+      setMyDecisions(decisions || []);
+      setMyCoaching(coaching || []);
+    } catch (error) {
+      console.error("Fetch my logs error:", error);
+    } finally {
+      setMyLogsLoading(false);
+    }
+  };
+
   const formatDate = (value) => {
     if (!value) return "Unknown date";
 
@@ -472,9 +514,51 @@ export default function Dashboard() {
     );
   }
 
+  const navClick = (fn) => {
+    fn();
+    if (isMobile) setMobileMenuOpen(false);
+  };
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
+    <div style={{ ...styles.page, padding: isMobile ? "16px" : "24px" }}>
+      {/* Mobile top bar */}
+      {isMobile && (
+        <div style={styles.mobileTopBar}>
+          <div>
+            <div style={styles.mobileTopName}>{profile?.full_name || "Dashboard"}</div>
+            <div style={styles.mobileTopRole}>{profile?.role} · {profile?.company}</div>
+          </div>
+          <button style={styles.mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
+            {mobileMenuOpen ? "✕" : "☰"}
+          </button>
+        </div>
+      )}
+
+      {/* Mobile nav overlay */}
+      {isMobile && mobileMenuOpen && (
+        <div style={styles.mobileOverlay}>
+          <div style={styles.navGroup}>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.policy ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.policy))}>Request Policy</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.decision ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.decision))}>Document Decision</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.coaching ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.coaching))}>Request Coaching</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.myLogs ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.myLogs); fetchMyLogs(); })}>My Logs</button>
+            {canViewLeadershipTabs && (
+              <>
+                <div style={styles.navDivider} />
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamDecisions ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.teamDecisions); fetchTeamDecisions(); })}>Team Decisions</button>
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamCoaching ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.teamCoaching); fetchTeamCoachingRequests(); })}>Team Coaching</button>
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.managers); fetchManagers(); })}>Managers</button>
+              </>
+            )}
+            <div style={styles.navDivider} />
+            <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
+          </div>
+        </div>
+      )}
+
+      <div style={isMobile ? styles.containerMobile : styles.container}>
+        {/* Desktop sidebar only */}
+        {!isMobile && (
         <aside style={styles.sidebar}>
           <div style={styles.brandCard}>
             <div style={styles.smallLabel}>SIGNED IN AS</div>
@@ -491,84 +575,17 @@ export default function Dashboard() {
           </div>
 
           <div style={styles.navGroup}>
-            <button
-              style={{
-                ...styles.navButton,
-                ...(activeTab === TABS.policy ? styles.navButtonActive : {}),
-              }}
-              onClick={() => setActiveTab(TABS.policy)}
-            >
-              Request Policy
-            </button>
-
-            <button
-              style={{
-                ...styles.navButton,
-                ...(activeTab === TABS.decision ? styles.navButtonActive : {}),
-              }}
-              onClick={() => setActiveTab(TABS.decision)}
-            >
-              Document Decision
-            </button>
-
-            <button
-              style={{
-                ...styles.navButton,
-                ...(activeTab === TABS.coaching ? styles.navButtonActive : {}),
-              }}
-              onClick={() => setActiveTab(TABS.coaching)}
-            >
-              Request Coaching
-            </button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.policy ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.policy)}>Request Policy</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.decision ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.decision)}>Document Decision</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.coaching ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.coaching)}>Request Coaching</button>
+            <button style={{ ...styles.navButton, ...(activeTab === TABS.myLogs ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}>My Logs</button>
 
             {canViewLeadershipTabs && (
               <>
                 <div style={styles.navDivider} />
-
-                <button
-                  style={{
-                    ...styles.navButton,
-                    ...(activeTab === TABS.teamDecisions
-                      ? styles.navButtonActive
-                      : {}),
-                  }}
-                  onClick={() => {
-                    setActiveTab(TABS.teamDecisions);
-                    fetchTeamDecisions();
-                  }}
-                >
-                  Team Decisions
-                </button>
-
-                <button
-                  style={{
-                    ...styles.navButton,
-                    ...(activeTab === TABS.teamCoaching
-                      ? styles.navButtonActive
-                      : {}),
-                  }}
-                  onClick={() => {
-                    setActiveTab(TABS.teamCoaching);
-                    fetchTeamCoachingRequests();
-                  }}
-                >
-                  Team Coaching Requests
-                </button>
-
-                <button
-                  style={{
-                    ...styles.navButton,
-                    ...(activeTab === TABS.managers
-                      ? styles.navButtonActive
-                      : {}),
-                  }}
-                  onClick={() => {
-                    setActiveTab(TABS.managers);
-                    fetchManagers();
-                  }}
-                >
-                  Managers
-                </button>
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamDecisions ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamDecisions); fetchTeamDecisions(); }}>Team Decisions</button>
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamCoaching ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamCoaching); fetchTeamCoachingRequests(); }}>Team Coaching Requests</button>
+                <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.managers); fetchManagers(); }}>Managers</button>
               </>
             )}
           </div>
@@ -579,6 +596,7 @@ export default function Dashboard() {
             </button>
           </div>
         </aside>
+        )}
 
         <main style={styles.main}>
           {activeTab === TABS.policy && (
@@ -912,7 +930,7 @@ export default function Dashboard() {
                 </p>
               </div>
 
-              <div style={styles.managersLayout}>
+              <div style={{ ...styles.managersLayout, gridTemplateColumns: isMobile ? "1fr" : "360px 1fr" }}>
                 <div style={styles.panelCard}>
                   <div style={styles.sectionTopRow}>
                     <div style={styles.sectionHeading}>Manager Directory</div>
@@ -1094,6 +1112,94 @@ export default function Dashboard() {
               </div>
             </>
           )}
+          {activeTab === TABS.myLogs && (
+            <>
+              <div style={styles.headerCard}>
+                <h1 style={styles.title}>My Logs</h1>
+                <p style={styles.subtitle}>Your personal decision and coaching history.</p>
+              </div>
+
+              <div style={styles.panelCard}>
+                <div style={styles.sectionTopRow}>
+                  <div style={styles.sectionHeading}>
+                    {myLogType === "decisions" ? "My Decision Logs" : myLogType === "coaching" ? "My Coaching Logs" : "Select Log Type"}
+                  </div>
+                  {myLogType && (
+                    <button style={styles.secondaryButton} onClick={() => setMyLogType(null)}>← Back</button>
+                  )}
+                </div>
+
+                {myLogsLoading ? (
+                  <p style={styles.message}>Loading your logs...</p>
+                ) : !myLogType ? (
+                  <div style={styles.logTypeSelector}>
+                    <button style={styles.logTypeButton} onClick={() => setMyLogType("decisions")}>
+                      <div style={styles.logTypeTitle}>Decision Logs</div>
+                      <div style={styles.logTypeMeta}>{myDecisions.length} record{myDecisions.length !== 1 ? "s" : ""}</div>
+                    </button>
+                    <button style={styles.logTypeButton} onClick={() => setMyLogType("coaching")}>
+                      <div style={styles.logTypeTitle}>Coaching Logs</div>
+                      <div style={styles.logTypeMeta}>{myCoaching.length} record{myCoaching.length !== 1 ? "s" : ""}</div>
+                    </button>
+                  </div>
+                ) : myLogType === "decisions" ? (
+                  <div style={styles.cardList}>
+                    {myDecisions.length === 0 ? (
+                      <p style={styles.message}>No decision logs yet.</p>
+                    ) : myDecisions.map((item) => (
+                      <div key={item.id} style={styles.feedCard}>
+                        <div style={styles.feedTop}>
+                          <div style={styles.feedName}>{formatDate(item.created_at)}</div>
+                          <div style={styles.feedMeta}>{item.is_read ? "Reviewed by leadership" : "Pending review"}</div>
+                        </div>
+                        <div style={styles.feedSection}>
+                          <div style={styles.feedLabel}>Situation</div>
+                          <div style={styles.feedBody}>{item.situation || "—"}</div>
+                        </div>
+                        <div style={styles.feedSection}>
+                          <div style={styles.feedLabel}>Action Taken</div>
+                          <div style={styles.feedBody}>{item.action_taken || "—"}</div>
+                        </div>
+                        {item.reasoning ? (
+                          <div style={styles.feedSection}>
+                            <div style={styles.feedLabel}>Reasoning</div>
+                            <div style={styles.feedBody}>{item.reasoning}</div>
+                          </div>
+                        ) : null}
+                        {item.policy_referenced ? (
+                          <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={styles.cardList}>
+                    {myCoaching.length === 0 ? (
+                      <p style={styles.message}>No coaching requests yet.</p>
+                    ) : myCoaching.map((item) => (
+                      <div key={item.id} style={styles.feedCard}>
+                        <div style={styles.feedTop}>
+                          <div style={styles.feedName}>{formatDate(item.created_at)}</div>
+                          <div style={styles.feedMeta}>{item.status || "open"}</div>
+                        </div>
+                        <div style={styles.feedBody}>{item.request_text || "—"}</div>
+                        {item.leadership_notes ? (
+                          <div style={{ ...styles.feedSection, borderLeft: "3px solid #2563eb", paddingLeft: "12px", marginTop: "12px" }}>
+                            <div style={{ ...styles.feedLabel, color: "#60a5fa" }}>GM Guidance</div>
+                            <div style={styles.feedBody}>{item.leadership_notes}</div>
+                          </div>
+                        ) : (
+                          <div style={styles.feedSection}>
+                            <div style={{ ...styles.feedLabel, color: "#6b7280" }}>Awaiting guidance</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </main>
       </div>
     </div>
@@ -1106,6 +1212,7 @@ const styles = {
     background: "#0b1120",
     color: "#e5e7eb",
     padding: "24px",
+    boxSizing: "border-box",
     fontFamily:
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
@@ -1480,6 +1587,49 @@ const styles = {
   guidanceButtons: {
     display: "flex",
     gap: "10px",
+  },
+  containerMobile: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    padding: "0",
+  },
+  mobileTopBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "16px",
+    padding: "14px 18px",
+    marginBottom: "16px",
+  },
+  mobileTopName: {
+    fontSize: "16px",
+    fontWeight: 700,
+    color: "#f8fafc",
+  },
+  mobileTopRole: {
+    fontSize: "12px",
+    color: "#94a3b8",
+    marginTop: "2px",
+  },
+  mobileMenuBtn: {
+    background: "transparent",
+    border: "1px solid #334155",
+    color: "#e5e7eb",
+    padding: "8px 14px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    fontSize: "18px",
+    lineHeight: 1,
+  },
+  mobileOverlay: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "16px",
+    padding: "16px",
+    marginBottom: "16px",
   },
   logTypeSelector: {
     display: "grid",
