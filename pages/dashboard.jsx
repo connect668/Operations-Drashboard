@@ -378,7 +378,7 @@ export default function Dashboard() {
         .from("coaching_requests")
         .update({
           status,
-          updated_at: new Date().toISOString(),
+          // updated_at is set automatically by DB trigger
         })
         .eq("id", id);
 
@@ -403,12 +403,21 @@ export default function Dashboard() {
     setGuidanceSubmittingId(requestId);
 
     try {
+      const now = new Date().toISOString();
+
       const { error } = await supabase
         .from("coaching_requests")
         .update({
           leadership_notes: guidanceText.trim(),
+          guidance_response: guidanceText.trim(),
+          guidance_given: true,
+          guidance_given_at: now,
+          guidance_given_by: user.id,
+          sent_to_manager_file: true,
+          sent_to_manager_file_at: now,
+          sent_to_manager_file_by: user.id,
           status: "resolved",
-          updated_at: new Date().toISOString(),
+          // updated_at is set automatically by DB trigger
         })
         .eq("id", requestId);
 
