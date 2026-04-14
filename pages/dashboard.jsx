@@ -286,7 +286,7 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, name, role, company")
+        .select("id, full_name, role, company")
         .eq("company", profile.company)
         .eq("role", "Manager")
         .order("full_name", { ascending: true });
