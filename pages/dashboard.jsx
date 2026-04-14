@@ -91,7 +91,10 @@ export default function Dashboard() {
 
   const canViewLeadershipTabs = currentRoleLevel >= 2;
   const isAreaManager = profile?.role === "Area Manager";
+  const canViewFacilities = profile?.role === "Area Manager" || profile?.role === "Area Coach";
   const nextRole = getNextRole(profile?.role);
+
+  const [complianceDisplay, setComplianceDisplay] = useState(0);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -141,6 +144,23 @@ export default function Dashboard() {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  useEffect(() => {
+    if (!selectedGM || gmDataLoading) { setComplianceDisplay(0); return; }
+    setComplianceDisplay(0);
+    const target = 92;
+    const duration = 1800;
+    const startTime = performance.now();
+    let raf;
+    const animate = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+      setComplianceDisplay(Math.round(eased * target));
+      if (progress < 1) raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [selectedGM?.id, gmDataLoading]);
 
   useEffect(() => {
     if (!profile?.company || !profile?.role || !canViewLeadershipTabs) return;
@@ -654,7 +674,7 @@ export default function Dashboard() {
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.managers); fetchManagers(); })}>Managers</button>
               </>
             )}
-            {isAreaManager && (
+            {canViewFacilities && (
               <>
                 <div style={styles.navDivider} />
                 <button style={{ ...styles.navButton, ...(activeTab === TABS.facilities ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.facilities); fetchFacilities(); })}>Facilities</button>
@@ -1316,31 +1336,11 @@ export default function Dashboard() {
               </div>
             </>
           )}
-          {activeTab === TABS.facilities && isAreaManager && (() => {
-            // Mock metrics from GM name hash
-            const getMockMetrics = (gm) => {
-              const h = (gm.full_name || "GM").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-              return { policyRef: 40 + (h % 55), activity: 8 + (h % 38), compliance: 50 + ((h * 7) % 44) };
-            };
-
-            // Mock overall metric for facility card display
-            const getFacilityMetric = (f) => {
-              const h = (f.facility_number || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-              return 55 + (h % 40); // 55–94%
-            };
-
-            // Real metrics for selected GM
-            const policyRefPct = gmDecisionLogs.length > 0
-              ? Math.round(gmDecisionLogs.filter((l) => l.policy_referenced?.trim()).length / gmDecisionLogs.length * 100)
-              : null;
-            const totalActivity = gmDecisionLogs.length + gmCoachingRequests.length;
-            const compliancePct = 87;
-
-            const metricColor = (val) => {
-              if (val >= 80) return { text: "#4ade80", bg: "rgba(74,222,128,0.07)", border: "rgba(74,222,128,0.2)" };
-              if (val >= 60) return { text: "#fbbf24", bg: "rgba(251,191,36,0.07)", border: "rgba(251,191,36,0.2)" };
-              return { text: "#f87171", bg: "rgba(248,113,113,0.07)", border: "rgba(248,113,113,0.2)" };
-            };
+          {activeTab === TABS.facilities && canViewFacilities && (() => {
+            // Compliance animation color — transitions red → yellow → green
+            const complianceColor = complianceDisplay >= 80 ? "#4ade80"
+              : complianceDisplay >= 60 ? "#fbbf24"
+              : "#f87171";
 
             return (
               <>
@@ -1403,8 +1403,6 @@ export default function Dashboard() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "14px" }}>
                           {facilities.map((f, i) => {
                             const isSelected = selectedFacility?.facility_number === f.facility_number && selectedFacility?.company === f.company;
-                            const facilityPct = getFacilityMetric(f);
-                            const fc = metricColor(facilityPct);
                             return (
                               <button
                                 key={`${f.company}-${f.facility_number}`}
@@ -1413,19 +1411,11 @@ export default function Dashboard() {
                                   ...styles.managerRowButton,
                                   ...(isSelected ? { ...styles.managerRowButtonActive, borderColor: "#3b82f6" } : {}),
                                   animationDelay: `${i * 0.04}s`,
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
                                 }}
                                 onClick={() => fetchFacilityGMs(f)}
                               >
-                                <div>
-                                  <div style={styles.managerRowName}>Facility {f.facility_number}</div>
-                                  <div style={styles.managerRowMeta}>{f.company}</div>
-                                </div>
-                                <span style={{ padding: "3px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: fc.bg, color: fc.text, border: `1px solid ${fc.border}`, flexShrink: 0 }}>
-                                  {facilityPct}%
-                                </span>
+                                <div style={styles.managerRowName}>Facility {f.facility_number}</div>
+                                <div style={styles.managerRowMeta}>{f.company}</div>
                               </button>
                             );
                           })}
@@ -1449,10 +1439,7 @@ export default function Dashboard() {
                       ) : (
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "14px" }}>
                           {facilityGMs.map((gm, i) => {
-                            const mock = getMockMetrics(gm);
                             const isSelected = selectedGM?.id === gm.id;
-                            const pr = metricColor(mock.policyRef);
-                            const cp = metricColor(mock.compliance);
                             return (
                               <div
                                 key={gm.id}
@@ -1466,23 +1453,12 @@ export default function Dashboard() {
                                 }}
                                 onClick={() => fetchGMData(gm)}
                               >
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                   <div>
                                     <div style={{ fontSize: "15px", fontWeight: 700, color: "#f8fafc" }}>{gm.full_name}</div>
                                     <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>General Manager</div>
                                   </div>
                                   {isSelected && <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }} />}
-                                </div>
-                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                                  <span className="am-metric-mini" style={{ padding: "3px 9px", borderRadius: "5px", fontSize: "11px", fontWeight: 600, background: pr.bg, color: pr.text, border: `1px solid ${pr.border}` }}>
-                                    {mock.policyRef}% policy
-                                  </span>
-                                  <span className="am-metric-mini" style={{ padding: "3px 9px", borderRadius: "5px", fontSize: "11px", fontWeight: 600, background: "rgba(148,163,184,0.06)", color: "#94a3b8", border: "1px solid rgba(148,163,184,0.14)" }}>
-                                    {mock.activity} actions
-                                  </span>
-                                  <span className="am-metric-mini" style={{ padding: "3px 9px", borderRadius: "5px", fontSize: "11px", fontWeight: 600, background: cp.bg, color: cp.text, border: `1px solid ${cp.border}` }}>
-                                    {mock.compliance}% compliance
-                                  </span>
                                 </div>
                               </div>
                             );
@@ -1505,36 +1481,45 @@ export default function Dashboard() {
                         </div>
                       ) : (
                         <>
-                          {/* GM header + inline metrics */}
+                          {/* GM header */}
                           <div style={{ ...styles.panelCard, borderColor: "#1e3a5f" }} className="am-fade">
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap" }}>
-                              <div>
-                                <div style={{ fontSize: "22px", fontWeight: 700, color: "#f8fafc" }}>{selectedGM.full_name}</div>
-                                <div style={{ fontSize: "13px", color: "#94a3b8", marginTop: "4px" }}>
-                                  General Manager · {selectedFacility?.company} · Facility {selectedFacility?.facility_number}
-                                </div>
-                                <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "2px" }}>
-                                  {gmManagers.length} manager{gmManagers.length !== 1 ? "s" : ""} assigned
-                                </div>
-                              </div>
-                              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                                {[
-                                  { label: "Policy Rate", val: policyRefPct !== null ? `${policyRefPct}%` : "—", color: policyRefPct !== null ? metricColor(policyRefPct) : null, mock: false },
-                                  { label: "Activity",    val: totalActivity, color: null, mock: false },
-                                  { label: "Compliance",  val: `${compliancePct}%`, color: metricColor(compliancePct), mock: true },
-                                ].map(({ label, val, color, mock }) => (
-                                  <div key={label} className="am-metric-mini" style={{
-                                    ...styles.metricCard,
-                                    minWidth: "88px",
-                                    padding: "14px 16px",
-                                    ...(color ? { borderColor: color.border, background: color.bg } : {}),
-                                  }}>
-                                    <div style={{ ...styles.metricValue, fontSize: "24px", color: color ? color.text : "#f8fafc" }}>{val}</div>
-                                    <div style={{ ...styles.metricLabel, fontSize: "11px" }}>{label}</div>
-                                    {mock && <div style={styles.mockBadge}>MOCK</div>}
-                                  </div>
-                                ))}
-                              </div>
+                            <div style={{ fontSize: "22px", fontWeight: 700, color: "#f8fafc" }}>{selectedGM.full_name}</div>
+                            <div style={{ fontSize: "13px", color: "#94a3b8", marginTop: "4px" }}>
+                              General Manager · {selectedFacility?.company} · Facility {selectedFacility?.facility_number}
+                            </div>
+                            <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "2px" }}>
+                              {gmManagers.length} manager{gmManagers.length !== 1 ? "s" : ""} assigned
+                            </div>
+                          </div>
+
+                          {/* Policy Compliance animated card */}
+                          <div style={{ ...styles.panelCard, textAlign: "center", padding: "28px 22px" }} className="am-fade">
+                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "16px" }}>
+                              Policy Compliance
+                            </div>
+                            <div style={{
+                              fontSize: "64px",
+                              fontWeight: 800,
+                              lineHeight: 1,
+                              color: complianceColor,
+                              transition: "color 0.3s ease",
+                              marginBottom: "16px",
+                              fontVariantNumeric: "tabular-nums",
+                            }}>
+                              {complianceDisplay}%
+                            </div>
+                            {/* Progress bar */}
+                            <div style={{ background: "#1f2937", borderRadius: "999px", height: "6px", overflow: "hidden" }}>
+                              <div style={{
+                                height: "100%",
+                                width: `${complianceDisplay}%`,
+                                background: complianceColor,
+                                borderRadius: "999px",
+                                transition: "background 0.3s ease",
+                              }} />
+                            </div>
+                            <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "10px" }}>
+                              Target: 92%
                             </div>
                           </div>
 
