@@ -59,6 +59,7 @@ export default function Dashboard() {
   const [selectedManager, setSelectedManager] = useState(null);
   const [selectedManagerDecisions, setSelectedManagerDecisions] = useState([]);
   const [selectedManagerCoaching, setSelectedManagerCoaching] = useState([]);
+  const [managerFileTab, setManagerFileTab] = useState(null);
 
   const currentRoleLevel = useMemo(() => {
     return ROLE_LEVELS[profile?.role] || 1;
@@ -307,6 +308,7 @@ export default function Dashboard() {
     setSelectedManager(manager);
     setSelectedManagerLoading(true);
     setManagersMessage("");
+    setManagerFileTab(null);
 
     try {
       const { data: decisionData, error: decisionError } = await supabase
@@ -959,9 +961,23 @@ export default function Dashboard() {
                   <div style={styles.sectionTopRow}>
                     <div style={styles.sectionHeading}>
                       {selectedManager
-                        ? `${getManagerDisplayName(selectedManager)} File`
+                        ? `${getManagerDisplayName(selectedManager)} — ${
+                            managerFileTab === "decisions"
+                              ? "Decision Logs"
+                              : managerFileTab === "coaching"
+                              ? "Coaching Logs"
+                              : "Select Log Type"
+                          }`
                         : "Manager File"}
                     </div>
+                    {managerFileTab && (
+                      <button
+                        style={styles.secondaryButton}
+                        onClick={() => setManagerFileTab(null)}
+                      >
+                        ← Back
+                      </button>
+                    )}
                   </div>
 
                   {!selectedManager ? (
@@ -970,103 +986,108 @@ export default function Dashboard() {
                     </p>
                   ) : selectedManagerLoading ? (
                     <p style={styles.message}>Loading manager file...</p>
-                  ) : (
-                    <div style={styles.managerFileWrap}>
-                      <div style={styles.managerFileSection}>
-                        <div style={styles.managerFileTitle}>Decisions</div>
-                        {selectedManagerDecisions.length === 0 ? (
-                          <p style={styles.message}>No decisions found.</p>
-                        ) : (
-                          <div style={styles.cardList}>
-                            {selectedManagerDecisions.map((item) => (
-                              <div key={item.id} style={styles.feedCard}>
-                                <div style={styles.feedTop}>
-                                  <div>
-                                    <div style={styles.feedName}>
-                                      {formatDate(item.created_at)}
-                                    </div>
-                                    <div style={styles.feedMeta}>
-                                      {item.is_read ? "Read" : "Unread"}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div style={styles.feedSection}>
-                                  <div style={styles.feedLabel}>Situation</div>
-                                  <div style={styles.feedBody}>
-                                    {item.situation || "No situation found."}
-                                  </div>
-                                </div>
-
-                                <div style={styles.feedSection}>
-                                  <div style={styles.feedLabel}>Action Taken</div>
-                                  <div style={styles.feedBody}>
-                                    {item.action_taken || "No action found."}
-                                  </div>
-                                </div>
-
-                                {item.reasoning ? (
-                                  <div style={styles.feedSection}>
-                                    <div style={styles.feedLabel}>Reasoning</div>
-                                    <div style={styles.feedBody}>
-                                      {item.reasoning}
-                                    </div>
-                                  </div>
-                                ) : null}
-
-                                {item.policy_referenced ? (
-                                  <div style={styles.policyTag}>
-                                    Policy Referenced: {item.policy_referenced}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={styles.managerFileSection}>
-                        <div style={styles.managerFileTitle}>
-                          Coaching Requests
+                  ) : !managerFileTab ? (
+                    <div style={styles.logTypeSelector}>
+                      <button
+                        style={styles.logTypeButton}
+                        onClick={() => setManagerFileTab("decisions")}
+                      >
+                        <div style={styles.logTypeTitle}>Decision Logs</div>
+                        <div style={styles.logTypeMeta}>
+                          {selectedManagerDecisions.length} record{selectedManagerDecisions.length !== 1 ? "s" : ""}
                         </div>
-                        {selectedManagerCoaching.length === 0 ? (
-                          <p style={styles.message}>
-                            No coaching requests found.
-                          </p>
-                        ) : (
-                          <div style={styles.cardList}>
-                            {selectedManagerCoaching.map((item) => (
-                              <div key={item.id} style={styles.feedCard}>
-                                <div style={styles.feedTop}>
-                                  <div>
-                                    <div style={styles.feedName}>
-                                      {formatDate(item.created_at)}
-                                    </div>
-                                    <div style={styles.feedMeta}>
-                                      {item.status || "open"}
-                                    </div>
-                                  </div>
+                      </button>
+                      <button
+                        style={styles.logTypeButton}
+                        onClick={() => setManagerFileTab("coaching")}
+                      >
+                        <div style={styles.logTypeTitle}>Coaching Logs</div>
+                        <div style={styles.logTypeMeta}>
+                          {selectedManagerCoaching.length} record{selectedManagerCoaching.length !== 1 ? "s" : ""}
+                        </div>
+                      </button>
+                    </div>
+                  ) : managerFileTab === "decisions" ? (
+                    <div style={styles.cardList}>
+                      {selectedManagerDecisions.length === 0 ? (
+                        <p style={styles.message}>No decision logs found.</p>
+                      ) : (
+                        selectedManagerDecisions.map((item) => (
+                          <div key={item.id} style={styles.feedCard}>
+                            <div style={styles.feedTop}>
+                              <div>
+                                <div style={styles.feedName}>
+                                  {formatDate(item.created_at)}
                                 </div>
-
-                                <div style={styles.feedBody}>
-                                  {item.request_text || "No request text found."}
+                                <div style={styles.feedMeta}>
+                                  {item.is_read ? "Read" : "Unread"}
                                 </div>
-
-                                {item.leadership_notes ? (
-                                  <div style={styles.feedSection}>
-                                    <div style={styles.feedLabel}>
-                                      Leadership Notes
-                                    </div>
-                                    <div style={styles.feedBody}>
-                                      {item.leadership_notes}
-                                    </div>
-                                  </div>
-                                ) : null}
                               </div>
-                            ))}
+                            </div>
+
+                            <div style={styles.feedSection}>
+                              <div style={styles.feedLabel}>Situation</div>
+                              <div style={styles.feedBody}>
+                                {item.situation || "No situation found."}
+                              </div>
+                            </div>
+
+                            <div style={styles.feedSection}>
+                              <div style={styles.feedLabel}>Action Taken</div>
+                              <div style={styles.feedBody}>
+                                {item.action_taken || "No action found."}
+                              </div>
+                            </div>
+
+                            {item.reasoning ? (
+                              <div style={styles.feedSection}>
+                                <div style={styles.feedLabel}>Reasoning</div>
+                                <div style={styles.feedBody}>{item.reasoning}</div>
+                              </div>
+                            ) : null}
+
+                            {item.policy_referenced ? (
+                              <div style={styles.policyTag}>
+                                Policy Referenced: {item.policy_referenced}
+                              </div>
+                            ) : null}
                           </div>
-                        )}
-                      </div>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div style={styles.cardList}>
+                      {selectedManagerCoaching.length === 0 ? (
+                        <p style={styles.message}>No coaching logs found.</p>
+                      ) : (
+                        selectedManagerCoaching.map((item) => (
+                          <div key={item.id} style={styles.feedCard}>
+                            <div style={styles.feedTop}>
+                              <div>
+                                <div style={styles.feedName}>
+                                  {formatDate(item.created_at)}
+                                </div>
+                                <div style={styles.feedMeta}>
+                                  {item.status || "open"}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={styles.feedBody}>
+                              {item.request_text || "No request text found."}
+                            </div>
+
+                            {item.leadership_notes ? (
+                              <div style={styles.feedSection}>
+                                <div style={styles.feedLabel}>Operational Guidance</div>
+                                <div style={styles.feedBody}>
+                                  {item.leadership_notes}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -1459,5 +1480,31 @@ const styles = {
   guidanceButtons: {
     display: "flex",
     gap: "10px",
+  },
+  logTypeSelector: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "16px",
+    marginTop: "8px",
+  },
+  logTypeButton: {
+    padding: "24px 20px",
+    borderRadius: "16px",
+    border: "1px solid #1f2937",
+    background: "#0f172a",
+    color: "#e5e7eb",
+    cursor: "pointer",
+    textAlign: "left",
+    transition: "border-color 0.15s ease, background 0.15s ease",
+  },
+  logTypeTitle: {
+    fontSize: "18px",
+    fontWeight: 700,
+    color: "#f8fafc",
+    marginBottom: "6px",
+  },
+  logTypeMeta: {
+    fontSize: "13px",
+    color: "#94a3b8",
   },
 };
