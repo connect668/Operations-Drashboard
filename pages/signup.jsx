@@ -267,3 +267,11 @@ export default function Signup() {
     </div>
   )
 }
+await supabase.from("profiles").insert([
+  {
+    id: user.id,
+    email: user.email,
+    full_name: name,
+    role: "pending",
+  },
+]);
