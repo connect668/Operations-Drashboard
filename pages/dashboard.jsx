@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { supabase } from "../lib/supabaseClient";
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const MOCK_LOGS = [
@@ -171,32 +172,46 @@ function LogScreen() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const handleSubmit = async () => {
     if (!situation.trim() || !action.trim()) return;
+
     setLoading(true);
+    setErrorMessage("");
+    setConfirmation(null);
 
     try {
-      await callClaude(
-        [
-          {
-            role: "user",
-            content: `Situation: ${situation}\nAction taken: ${action}\nPolicy cited: ${
-              policy || "none"
-            }\nNotes: ${notes || "none"}`,
-          },
-        ],
-        `You are a hidden leadership evaluation AI. Privately score this manager's decision on 4 dimensions (1-5 each): policy_alignment, judgment_quality, documentation, escalation_correctness. Also give overall rating: green/yellow/red and a one-sentence flag if red/yellow. Respond ONLY in JSON: {"policy":N,"judgment":N,"documentation":N,"escalation":N,"overall":"green|yellow|red","flag":"...or null"}`
-      );
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error("No logged in user found.");
+      }
+
+      const { error: insertError } = await supabase.from("decision_logs").insert([
+        {
+          user_id: user.id,
+          situation: situation.trim(),
+          action_taken: action.trim(),
+          policy_referenced: policy.trim() || null,
+          notes: notes.trim() || null,
+        },
+      ]);
+
+      if (insertError) {
+        throw insertError;
+      }
 
       setSubmitted(true);
       setConfirmation("Your decision has been documented.");
-    } catch {
-      setSubmitted(true);
-      setConfirmation("Logged successfully.");
+    } catch (error) {
+      setErrorMessage(error.message || "Could not save decision log.");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   if (submitted) {
@@ -223,6 +238,8 @@ function LogScreen() {
             setPolicy("");
             setNotes("");
             setSubmitted(false);
+            setConfirmation(null);
+            setErrorMessage("");
           }}
           style={secondaryBtn}
         >
@@ -287,6 +304,23 @@ function LogScreen() {
           rows={2}
         />
       </div>
+
+      {errorMessage ? (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "12px 14px",
+            background: "#161317",
+            border: "1px solid #4b2d2d",
+            borderRadius: 8,
+            fontSize: 13,
+            color: "#d9a3a3",
+            lineHeight: 1.5,
+          }}
+        >
+          {errorMessage}
+        </div>
+      ) : null}
 
       <button
         onClick={handleSubmit}
@@ -573,7 +607,7 @@ export default function Dashboard() {
     { id: "recent", label: "Recent Decisions" },
   ];
 
-  const currentTab = tabs.find((t) => t.id === tab)?.label || "OSS";
+  const currentTab = tabs.find((t) => t.id === tab)?.label || "Dashboard";
 
   return (
     <div
@@ -627,18 +661,6 @@ export default function Dashboard() {
             }}
           >
             Operator Support System
-          </div>
-
-          <div
-            style={{
-              fontSize: 34,
-              fontWeight: 800,
-              color: "#f5f7fa",
-              marginBottom: 10,
-              letterSpacing: "-0.03em",
-            }}
-          >
-            OSS
           </div>
 
           <div
