@@ -147,7 +147,7 @@ export default function Dashboard() {
           user_id: user.id,
           company: profile?.company || null,
           user_name:
-            profile?.full_name ||
+            {profile?.full_name || user?.email || "User"} ||
             profile?.name ||
             user?.email ||
             "Unknown User",
@@ -196,7 +196,7 @@ export default function Dashboard() {
           user_id: user.id,
           company: profile?.company || null,
           requester_name:
-            profile?.full_name ||
+            {profile?.full_name || user?.email || "User"} ||
             profile?.name ||
             user?.email ||
             "Unknown User",
