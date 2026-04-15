@@ -25,6 +25,33 @@ function getNextRole(role) {
   return null;
 }
 
+function formatDate(value) {
+  if (!value) return "Unknown date";
+
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function getManagerDisplayName(manager) {
+  return manager?.full_name || "Unnamed Manager";
+}
+
+function calculateCompliance(decisionLogs) {
+  if (!decisionLogs || decisionLogs.length === 0) return 92;
+
+  const referencedCount = decisionLogs.filter((item) =>
+    String(item?.policy_referenced || "").trim()
+  ).length;
+
+  return Math.max(
+    0,
+    Math.min(100, Math.round((referencedCount / decisionLogs.length) * 100))
+  );
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState(TABS.coaching);
   const [user, setUser] = useState(null);
@@ -44,6 +71,7 @@ export default function Dashboard() {
   const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
   const [teamCoachingMessage, setTeamCoachingMessage] = useState("");
   const [managersMessage, setManagersMessage] = useState("");
+  const [facilitiesMessage, setFacilitiesMessage] = useState("");
 
   const [decisionLoading, setDecisionLoading] = useState(false);
   const [coachingLoading, setCoachingLoading] = useState(false);
@@ -51,12 +79,17 @@ export default function Dashboard() {
   const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
   const [managersLoading, setManagersLoading] = useState(false);
   const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
+  const [facilityGMsLoading, setFacilityGMsLoading] = useState(false);
+  const [gmDataLoading, setGmDataLoading] = useState(false);
+
   const [guidanceActiveId, setGuidanceActiveId] = useState(null);
   const [guidanceText, setGuidanceText] = useState("");
   const [guidanceSubmittingId, setGuidanceSubmittingId] = useState(null);
 
   const [teamDecisions, setTeamDecisions] = useState([]);
   const [teamCoachingRequests, setTeamCoachingRequests] = useState([]);
+
   const [managers, setManagers] = useState([]);
   const [selectedManager, setSelectedManager] = useState(null);
   const [selectedManagerDecisions, setSelectedManagerDecisions] = useState([]);
@@ -69,59 +102,53 @@ export default function Dashboard() {
   const [myLogsLoading, setMyLogsLoading] = useState(false);
 
   const [isMobile, setIsMobile] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Area Manager – Facilities
   const [facilities, setFacilities] = useState([]);
-  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
-  const [facilitiesMessage, setFacilitiesMessage] = useState("");
-  const [gmActivityTab, setGmActivityTab] = useState("decisions");
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [facilityGMs, setFacilityGMs] = useState([]);
-  const [facilityGMsLoading, setFacilityGMsLoading] = useState(false);
   const [selectedGM, setSelectedGM] = useState(null);
-  const [gmManagers, setGmManagers] = useState([]);
-  const [gmDecisionLogs, setGmDecisionLogs] = useState([]);
-  const [gmCoachingRequests, setGmCoachingRequests] = useState([]);
-  const [gmDataLoading, setGmDataLoading] = useState(false);
 
-  const currentRoleLevel = useMemo(() => {
-    return ROLE_LEVELS[profile?.role] || 1;
-  }, [profile]);
+  const [gmOwnDecisionLogs, setGmOwnDecisionLogs] = useState([]);
+  const [gmOwnCoachingRequests, setGmOwnCoachingRequests] = useState([]);
+  const [facilityManagerSummaries, setFacilityManagerSummaries] = useState([]);
+  const [gmManagerIds, setGmManagerIds] = useState([]);
+
+  const [complianceTarget, setComplianceTarget] = useState(92);
+  const [complianceDisplay, setComplianceDisplay] = useState(0);
+
+  const currentRoleLevel = useMemo(
+    () => ROLE_LEVELS[profile?.role] || 1,
+    [profile]
+  );
 
   const canViewLeadershipTabs = currentRoleLevel >= 2;
   const isAreaManager = profile?.role === "Area Manager";
-  const canViewFacilities = profile?.role === "Area Manager" || profile?.role === "Area Coach";
+  const canViewFacilities =
+    profile?.role === "Area Manager" || profile?.role === "Area Coach";
   const nextRole = getNextRole(profile?.role);
-
-  const [complianceDisplay, setComplianceDisplay] = useState(0);
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
         const {
-          data: { user },
+          data: { user: authUser },
           error: userError,
         } = await supabase.auth.getUser();
 
         if (userError) throw userError;
 
-        if (!user) {
+        if (!authUser) {
           window.location.href = "/";
           return;
         }
 
-        setUser(user);
+        setUser(authUser);
 
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id, full_name, role, company")
-          .eq("id", user.id)
+          .select("id, full_name, role, company, facility_number")
+          .eq("id", authUser.id)
           .maybeSingle();
-
-        console.log("AUTH USER:", user);
-        console.log("PROFILE DATA:", profileData);
-        console.log("PROFILE ERROR:", profileError);
 
         if (profileError) {
           console.error("Profile load error:", profileError);
@@ -139,40 +166,80 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   useEffect(() => {
-    if (!selectedGM || gmDataLoading) { setComplianceDisplay(0); return; }
-    setComplianceDisplay(0);
-    const target = 92;
-    const duration = 1800;
-    const startTime = performance.now();
-    let raf;
-    const animate = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
-      setComplianceDisplay(Math.round(eased * target));
-      if (progress < 1) raf = requestAnimationFrame(animate);
-    };
-    raf = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(raf);
-  }, [selectedGM?.id, gmDataLoading]);
+    if (!profile?.role) return;
+
+    if (profile.role === "Area Manager") {
+      setActiveTab(TABS.facilities);
+    }
+  }, [profile?.role]);
 
   useEffect(() => {
-    if (!profile?.company || !profile?.role || !canViewLeadershipTabs) return;
+    if (
+      profile?.role === "Area Manager" &&
+      activeTab === TABS.facilities &&
+      user?.id
+    ) {
+      fetchFacilities();
+    }
+  }, [profile?.role, activeTab, user?.id]);
 
-    fetchTeamDecisions();
-    fetchTeamCoachingRequests();
-    fetchManagers();
-  }, [profile?.company, profile?.role, canViewLeadershipTabs]);
+  useEffect(() => {
+    const target = complianceTarget ?? 0;
+    setComplianceDisplay(0);
+
+    const duration = 900;
+    const startTime = performance.now();
+    let rafId;
+
+    const animate = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setComplianceDisplay(Math.round(target * eased));
+
+      if (progress < 1) {
+        rafId = requestAnimationFrame(animate);
+      }
+    };
+
+    rafId = requestAnimationFrame(animate);
+
+    return () => cancelAnimationFrame(rafId);
+  }, [complianceTarget, selectedGM?.id]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+
+    if (tab === TABS.myLogs) {
+      fetchMyLogs();
+    }
+
+    if (tab === TABS.teamDecisions) {
+      fetchTeamDecisions();
+    }
+
+    if (tab === TABS.teamCoaching) {
+      fetchTeamCoachingRequests();
+    }
+
+    if (tab === TABS.managers) {
+      fetchManagers();
+    }
+
+    if (tab === TABS.facilities) {
+      fetchFacilities();
+    }
   };
 
   const handlePullPolicy = async () => {
@@ -275,7 +342,7 @@ export default function Dashboard() {
   };
 
   const fetchTeamDecisions = async () => {
-    if (!profile?.company || !profile?.role) return;
+    if (!profile?.company || !profile?.role || !user?.id) return;
 
     setTeamDecisionsLoading(true);
     setTeamDecisionsMessage("");
@@ -287,7 +354,7 @@ export default function Dashboard() {
         .eq("company", profile.company)
         .eq("visible_to_role", profile.role)
         .eq("is_read", false)
-        .neq("user_id", user?.id || "")
+        .neq("user_id", user.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -304,7 +371,7 @@ export default function Dashboard() {
   };
 
   const fetchTeamCoachingRequests = async () => {
-    if (!profile?.company || !profile?.role) return;
+    if (!profile?.company || !profile?.role || !user?.id) return;
 
     setTeamCoachingLoading(true);
     setTeamCoachingMessage("");
@@ -315,7 +382,7 @@ export default function Dashboard() {
         .select("*")
         .eq("company", profile.company)
         .eq("visible_to_role", profile.role)
-        .neq("user_id", user?.id || "")
+        .neq("user_id", user.id)
         .or("guidance_given.is.null,guidance_given.eq.false")
         .order("created_at", { ascending: false });
 
@@ -364,20 +431,21 @@ export default function Dashboard() {
     setManagerFileTab(null);
 
     try {
-      const { data: decisionData, error: decisionError } = await supabase
-        .from("decision_logs")
-        .select("*")
-        .eq("user_id", manager.id)
-        .order("created_at", { ascending: false });
+      const [{ data: decisionData, error: decisionError }, { data: coachingData, error: coachingError }] =
+        await Promise.all([
+          supabase
+            .from("decision_logs")
+            .select("*")
+            .eq("user_id", manager.id)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("coaching_requests")
+            .select("*")
+            .eq("user_id", manager.id)
+            .order("created_at", { ascending: false }),
+        ]);
 
       if (decisionError) throw decisionError;
-
-      const { data: coachingData, error: coachingError } = await supabase
-        .from("coaching_requests")
-        .select("*")
-        .eq("user_id", manager.id)
-        .order("created_at", { ascending: false });
-
       if (coachingError) throw coachingError;
 
       setSelectedManagerDecisions(decisionData || []);
@@ -405,8 +473,7 @@ export default function Dashboard() {
 
       await fetchTeamDecisions();
 
-      // Find or fetch the manager then open their file
-      let manager = managers.find((m) => m.id === userId);
+      let manager = managers.find((item) => item.id === userId);
 
       if (!manager) {
         const { data } = await supabase
@@ -414,6 +481,7 @@ export default function Dashboard() {
           .select("id, full_name, role, company")
           .eq("id", userId)
           .maybeSingle();
+
         manager = data;
       }
 
@@ -424,31 +492,6 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Mark as read error:", error);
       setTeamDecisionsMessage(error.message || "Failed to mark as read.");
-    }
-  };
-
-  const updateCoachingStatus = async (id, status) => {
-    try {
-      const { error } = await supabase
-        .from("coaching_requests")
-        .update({
-          status,
-          // updated_at is set automatically by DB trigger
-        })
-        .eq("id", id);
-
-      if (error) throw error;
-
-      await fetchTeamCoachingRequests();
-
-      if (selectedManager) {
-        await openManagerFile(selectedManager);
-      }
-    } catch (error) {
-      console.error("Update coaching status error:", error);
-      setTeamCoachingMessage(
-        error.message || "Failed to update coaching request status."
-      );
     }
   };
 
@@ -472,7 +515,6 @@ export default function Dashboard() {
           sent_to_manager_file_at: now,
           sent_to_manager_file_by: user.id,
           status: "resolved",
-          // updated_at is set automatically by DB trigger
         })
         .eq("id", requestId);
 
@@ -482,16 +524,18 @@ export default function Dashboard() {
       setGuidanceText("");
       await fetchTeamCoachingRequests();
 
-      // Navigate to that manager's file
-      let manager = managers.find((m) => m.id === userId);
+      let manager = managers.find((item) => item.id === userId);
+
       if (!manager) {
         const { data } = await supabase
           .from("profiles")
           .select("id, full_name, role, company")
           .eq("id", userId)
           .maybeSingle();
+
         manager = data;
       }
+
       if (manager) {
         setActiveTab(TABS.managers);
         await openManagerFile(manager);
@@ -504,97 +548,11 @@ export default function Dashboard() {
     }
   };
 
-  const fetchFacilities = async () => {
-    if (!user) return;
-    setFacilitiesLoading(true);
-    setFacilitiesMessage("");
-    setSelectedFacility(null);
-    setSelectedGM(null);
-    try {
-      const { data, error } = await supabase
-        .from("area_manager_facilities")
-        .select("facility_number, company")
-        .eq("area_manager_id", user.id);
-      if (error) throw error;
-      setFacilities(data || []);
-      if ((data || []).length === 0) setFacilitiesMessage("No facilities assigned to your account.");
-    } catch (err) {
-      console.error("Fetch facilities error:", err);
-      setFacilitiesMessage(err.message || "Failed to load facilities.");
-    } finally {
-      setFacilitiesLoading(false);
-    }
-  };
-
-  const fetchFacilityGMs = async (facility) => {
-    setSelectedFacility(facility);
-    setSelectedGM(null);
-    setFacilityGMs([]);
-    setGmDecisionLogs([]);
-    setGmCoachingRequests([]);
-    setFacilityGMsLoading(true);
-    setFacilitiesMessage("");
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, role, company, facility_number")
-        .eq("role", "General Manager")
-        .eq("company", facility.company)
-        .eq("facility_number", facility.facility_number);
-      if (error) throw error;
-      setFacilityGMs(data || []);
-      if ((data || []).length === 0) setFacilitiesMessage("No General Managers found in this facility.");
-    } catch (err) {
-      console.error("Fetch facility GMs error:", err);
-      setFacilitiesMessage(err.message || "Failed to load GMs.");
-    } finally {
-      setFacilityGMsLoading(false);
-    }
-  };
-
-  const fetchGMData = async (gm) => {
-    setSelectedGM(gm);
-    setGmDataLoading(true);
-    setGmActivityTab("decisions");
-    setGmManagers([]);
-    setGmDecisionLogs([]);
-    setGmCoachingRequests([]);
-    setFacilitiesMessage("");
-    try {
-      const { data: assignments, error: aErr } = await supabase
-        .from("gm_manager_assignments")
-        .select("manager_id")
-        .eq("gm_id", gm.id);
-      if (aErr) throw aErr;
-
-      const managerIds = (assignments || []).map((a) => a.manager_id);
-      setGmManagers(managerIds);
-
-      if (managerIds.length === 0) {
-        setFacilitiesMessage("No managers assigned to this GM yet.");
-        return;
-      }
-
-      const [{ data: decisions, error: dErr }, { data: coaching, error: cErr }] =
-        await Promise.all([
-          supabase.from("decision_logs").select("*").in("user_id", managerIds).order("created_at", { ascending: false }),
-          supabase.from("coaching_requests").select("*").in("user_id", managerIds).order("created_at", { ascending: false }),
-        ]);
-      if (dErr) throw dErr;
-      if (cErr) throw cErr;
-      setGmDecisionLogs(decisions || []);
-      setGmCoachingRequests(coaching || []);
-    } catch (err) {
-      console.error("Fetch GM data error:", err);
-      setFacilitiesMessage(err.message || "Failed to load GM data.");
-    } finally {
-      setGmDataLoading(false);
-    }
-  };
-
   const fetchMyLogs = async () => {
-    if (!user) return;
+    if (!user?.id) return;
+
     setMyLogsLoading(true);
+
     try {
       const [{ data: decisions }, { data: coaching }] = await Promise.all([
         supabase
@@ -608,6 +566,7 @@ export default function Dashboard() {
           .eq("user_id", user.id)
           .order("created_at", { ascending: false }),
       ]);
+
       setMyDecisions(decisions || []);
       setMyCoaching(coaching || []);
     } catch (error) {
@@ -617,18 +576,216 @@ export default function Dashboard() {
     }
   };
 
-  const formatDate = (value) => {
-    if (!value) return "Unknown date";
+  const fetchFacilities = async () => {
+    if (!user?.id) return;
+
+    setFacilitiesLoading(true);
+    setFacilitiesMessage("");
+    setSelectedFacility(null);
+    setFacilityGMs([]);
+    setSelectedGM(null);
+    setGmOwnDecisionLogs([]);
+    setGmOwnCoachingRequests([]);
+    setFacilityManagerSummaries([]);
+    setGmManagerIds([]);
+    setComplianceTarget(92);
 
     try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return value;
+      const { data, error } = await supabase
+        .from("area_manager_facilities")
+        .select("facility_number, company")
+        .eq("area_manager_id", user.id);
+
+      if (error) throw error;
+
+      setFacilities(data || []);
+
+      if (!data || data.length === 0) {
+        setFacilitiesMessage("No facilities assigned to your account.");
+      }
+    } catch (error) {
+      console.error("Fetch facilities error:", error);
+      setFacilitiesMessage(error.message || "Failed to load facilities.");
+    } finally {
+      setFacilitiesLoading(false);
     }
   };
 
-  const getManagerDisplayName = (manager) =>
-    manager?.full_name || "Unnamed Manager";
+  const fetchFacilityGMs = async (facility) => {
+    if (!facility) return;
+
+    setSelectedFacility(facility);
+    setSelectedGM(null);
+    setFacilityGMs([]);
+    setGmOwnDecisionLogs([]);
+    setGmOwnCoachingRequests([]);
+    setFacilityManagerSummaries([]);
+    setGmManagerIds([]);
+    setComplianceTarget(92);
+    setFacilitiesMessage("");
+    setFacilityGMsLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, role, company, facility_number")
+        .eq("role", "General Manager")
+        .eq("company", facility.company)
+        .eq("facility_number", facility.facility_number)
+        .order("full_name", { ascending: true });
+
+      if (error) throw error;
+
+      setFacilityGMs(data || []);
+
+      if (!data || data.length === 0) {
+        setFacilitiesMessage("No General Managers found in this facility.");
+      }
+    } catch (error) {
+      console.error("Fetch facility GMs error:", error);
+      setFacilitiesMessage(error.message || "Failed to load general managers.");
+    } finally {
+      setFacilityGMsLoading(false);
+    }
+  };
+
+  const fetchGMData = async (gm) => {
+    if (!gm?.id) return;
+
+    setSelectedGM(gm);
+    setFacilitiesMessage("");
+    setGmOwnDecisionLogs([]);
+    setGmOwnCoachingRequests([]);
+    setFacilityManagerSummaries([]);
+    setGmManagerIds([]);
+    setComplianceTarget(92);
+    setGmDataLoading(true);
+
+    try {
+      const [
+        { data: assignmentRows, error: assignmentError },
+        { data: gmDecisionRows, error: gmDecisionError },
+        { data: gmCoachingRows, error: gmCoachingError },
+      ] = await Promise.all([
+        supabase
+          .from("gm_manager_assignments")
+          .select("manager_id")
+          .eq("gm_id", gm.id),
+        supabase
+          .from("decision_logs")
+          .select("id, user_id, created_at, policy_referenced")
+          .eq("user_id", gm.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("coaching_requests")
+          .select("id, user_id, created_at, status")
+          .eq("user_id", gm.id)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (assignmentError) throw assignmentError;
+      if (gmDecisionError) throw gmDecisionError;
+      if (gmCoachingError) throw gmCoachingError;
+
+      const managerIds = (assignmentRows || [])
+        .map((row) => row.manager_id)
+        .filter(Boolean);
+
+      setGmManagerIds(managerIds);
+      setGmOwnDecisionLogs(gmDecisionRows || []);
+      setGmOwnCoachingRequests(gmCoachingRows || []);
+
+      let managerProfiles = [];
+      let managerDecisionRows = [];
+      let managerCoachingRows = [];
+
+      if (managerIds.length > 0) {
+        const [
+          { data: managerProfileRows, error: managerProfileError },
+          { data: managerDecisionData, error: managerDecisionDataError },
+          { data: managerCoachingData, error: managerCoachingDataError },
+        ] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, full_name, role, company, facility_number")
+            .in("id", managerIds)
+            .order("full_name", { ascending: true }),
+          supabase
+            .from("decision_logs")
+            .select("id, user_id, created_at, policy_referenced")
+            .in("user_id", managerIds),
+          supabase
+            .from("coaching_requests")
+            .select("id, user_id, created_at, status")
+            .in("user_id", managerIds),
+        ]);
+
+        if (managerProfileError) throw managerProfileError;
+        if (managerDecisionDataError) throw managerDecisionDataError;
+        if (managerCoachingDataError) throw managerCoachingDataError;
+
+        managerProfiles = managerProfileRows || [];
+        managerDecisionRows = managerDecisionData || [];
+        managerCoachingRows = managerCoachingData || [];
+      }
+
+      const decisionCountMap = managerDecisionRows.reduce((acc, item) => {
+        acc[item.user_id] = (acc[item.user_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      const coachingCountMap = managerCoachingRows.reduce((acc, item) => {
+        acc[item.user_id] = (acc[item.user_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      const summaries = managerProfiles.map((manager) => ({
+        id: manager.id,
+        full_name: manager.full_name,
+        role: manager.role || "Manager",
+        company: manager.company,
+        facility_number: manager.facility_number,
+        decisionCount: decisionCountMap[manager.id] || 0,
+        coachingCount: coachingCountMap[manager.id] || 0,
+      }));
+
+      setFacilityManagerSummaries(summaries);
+
+      const complianceSource = [...(gmDecisionRows || []), ...managerDecisionRows];
+      setComplianceTarget(calculateCompliance(complianceSource));
+
+      if (managerIds.length === 0) {
+        setFacilitiesMessage("No managers assigned to this GM yet.");
+      }
+    } catch (error) {
+      console.error("Fetch GM data error:", error);
+      setFacilitiesMessage(error.message || "Failed to load GM data.");
+    } finally {
+      setGmDataLoading(false);
+    }
+  };
+
+  const complianceColor =
+    complianceDisplay >= 80
+      ? "#4ade80"
+      : complianceDisplay >= 60
+      ? "#fbbf24"
+      : "#f87171";
+
+  const navItems = [
+    { key: TABS.policy, label: "Request Policy" },
+    { key: TABS.decision, label: "Document Decision" },
+    { key: TABS.coaching, label: "Request Coaching" },
+    { key: TABS.myLogs, label: "My Logs" },
+    ...(canViewLeadershipTabs && !isAreaManager
+      ? [
+          { key: TABS.teamDecisions, label: "Team Decisions" },
+          { key: TABS.teamCoaching, label: "Team Coaching" },
+          { key: TABS.managers, label: "Managers" },
+        ]
+      : []),
+    ...(canViewFacilities ? [{ key: TABS.facilities, label: "Facilities" }] : []),
+  ];
 
   if (loading) {
     return (
@@ -638,103 +795,54 @@ export default function Dashboard() {
     );
   }
 
-  const navClick = (fn) => {
-    fn();
-    if (isMobile) setMobileMenuOpen(false);
-  };
-
   return (
-    <div className="dashboard-page" style={{ ...styles.page, padding: isMobile ? "16px" : "24px" }}>
-      {/* Mobile top bar */}
-      {isMobile && (
-        <div style={styles.mobileTopBar}>
-          <div>
-            <div style={styles.mobileTopName}>{profile?.full_name || "Dashboard"}</div>
-            <div style={styles.mobileTopRole}>{profile?.role} · {profile?.company}</div>
-          </div>
-          <button style={styles.mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
-            {mobileMenuOpen ? "✕" : "☰"}
-          </button>
-        </div>
-      )}
-
-      {/* Mobile nav overlay */}
-      {isMobile && mobileMenuOpen && (
-        <div style={styles.mobileOverlay}>
-          <div style={styles.navGroup}>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.policy ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.policy))}>Request Policy</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.decision ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.decision))}>Document Decision</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.coaching ? styles.navButtonActive : {}) }} onClick={() => navClick(() => setActiveTab(TABS.coaching))}>Request Coaching</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.myLogs ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.myLogs); fetchMyLogs(); })}>My Logs</button>
-            {canViewLeadershipTabs && !isAreaManager && (
-              <>
-                <div style={styles.navDivider} />
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamDecisions ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.teamDecisions); fetchTeamDecisions(); })}>Team Decisions</button>
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamCoaching ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.teamCoaching); fetchTeamCoachingRequests(); })}>Team Coaching</button>
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.managers); fetchManagers(); })}>Managers</button>
-              </>
-            )}
-            {canViewFacilities && (
-              <>
-                <div style={styles.navDivider} />
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.facilities ? styles.navButtonActive : {}) }} onClick={() => navClick(() => { setActiveTab(TABS.facilities); fetchFacilities(); })}>Facilities</button>
-              </>
-            )}
-            <div style={styles.navDivider} />
-            <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
-          </div>
-        </div>
-      )}
-
-      <div className="dashboard-container" style={isMobile ? styles.containerMobile : styles.container}>
-        {/* Desktop sidebar only */}
-        {!isMobile && (
-        <aside className="dashboard-sidebar" style={styles.sidebar}>
-          <div style={styles.brandCard}>
+    <div style={styles.page}>
+      <div style={styles.shell}>
+        <header style={styles.topHeader}>
+          <div style={styles.headerIdentity}>
             <div style={styles.smallLabel}>SIGNED IN AS</div>
-            <div style={styles.userName}>
+            <div style={styles.topName}>
               {profile?.full_name || "No name found"}
             </div>
-            <div style={styles.userMeta}>
+            <div style={styles.topMeta}>
               {profile?.role || "No role assigned"}
             </div>
-            <div style={styles.companyName}>
+            <div style={styles.topCompany}>
               {profile?.company || "No company assigned"}
             </div>
             <div style={styles.companyMotto}>company motto here</div>
           </div>
 
-          <div style={styles.navGroup}>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.policy ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.policy)}>Request Policy</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.decision ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.decision)}>Document Decision</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.coaching ? styles.navButtonActive : {}) }} onClick={() => setActiveTab(TABS.coaching)}>Request Coaching</button>
-            <button style={{ ...styles.navButton, ...(activeTab === TABS.myLogs ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}>My Logs</button>
-
-            {canViewLeadershipTabs && !isAreaManager && (
-              <>
-                <div style={styles.navDivider} />
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamDecisions ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamDecisions); fetchTeamDecisions(); }}>Team Decisions</button>
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.teamCoaching ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.teamCoaching); fetchTeamCoachingRequests(); }}>Team Coaching Requests</button>
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.managers ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.managers); fetchManagers(); }}>Managers</button>
-              </>
-            )}
-            {isAreaManager && (
-              <>
-                <div style={styles.navDivider} />
-                <button style={{ ...styles.navButton, ...(activeTab === TABS.facilities ? styles.navButtonActive : {}) }} onClick={() => { setActiveTab(TABS.facilities); fetchFacilities(); }}>Facilities</button>
-              </>
-            )}
-          </div>
-
-          <div style={styles.logoutWrap}>
+          <div style={styles.headerActions}>
             <button style={styles.logoutButton} onClick={handleLogout}>
               Log Out
             </button>
           </div>
-        </aside>
-        )}
+        </header>
 
-        <main className="dashboard-main" style={styles.main}>
+        <div
+          style={{
+            ...styles.navWrap,
+            flexWrap: isMobile ? "nowrap" : "wrap",
+            overflowX: isMobile ? "auto" : "visible",
+          }}
+        >
+          {navItems.map((item) => (
+            <button
+              key={item.key}
+              style={{
+                ...styles.navButton,
+                ...(activeTab === item.key ? styles.navButtonActive : {}),
+                flex: isMobile ? "0 0 auto" : "0 0 auto",
+              }}
+              onClick={() => handleTabChange(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <main style={styles.main}>
           {activeTab === TABS.policy && (
             <>
               <div style={styles.headerCard}>
@@ -803,7 +911,7 @@ export default function Dashboard() {
                   value={decisionPolicy}
                   onChange={(e) => setDecisionPolicy(e.target.value)}
                   placeholder="Policy referenced (optional)"
-                  style={styles.policyInput}
+                  style={styles.textInput}
                 />
 
                 <button
@@ -859,7 +967,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {activeTab === TABS.teamDecisions && canViewLeadershipTabs && (
+          {activeTab === TABS.teamDecisions && canViewLeadershipTabs && !isAreaManager && (
             <>
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Team Decisions</h1>
@@ -871,10 +979,7 @@ export default function Dashboard() {
               <div style={styles.panelCard}>
                 <div style={styles.sectionTopRow}>
                   <div style={styles.sectionHeading}>Decision Feed</div>
-                  <button
-                    style={styles.secondaryButton}
-                    onClick={fetchTeamDecisions}
-                  >
+                  <button style={styles.secondaryButton} onClick={fetchTeamDecisions}>
                     Refresh
                   </button>
                 </div>
@@ -897,13 +1002,10 @@ export default function Dashboard() {
                               {item.user_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.user_role || "Manager"} •{" "}
-                              {item.company || "No company"}
+                              {item.user_role || "Manager"} • {item.company || "No company"}
                             </div>
                           </div>
-                          <div style={styles.feedDate}>
-                            {formatDate(item.created_at)}
-                          </div>
+                          <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
                         </div>
 
                         <div style={styles.feedSection}>
@@ -949,7 +1051,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {activeTab === TABS.teamCoaching && canViewLeadershipTabs && (
+          {activeTab === TABS.teamCoaching && canViewLeadershipTabs && !isAreaManager && (
             <>
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Team Coaching Requests</h1>
@@ -987,16 +1089,13 @@ export default function Dashboard() {
                               {item.requester_name || "Unknown User"}
                             </div>
                             <div style={styles.feedMeta}>
-                              {item.requester_role || "Manager"} •{" "}
-                              {item.company || "No company"}
+                              {item.requester_role || "Manager"} • {item.company || "No company"}
                             </div>
                           </div>
-                          <div style={styles.feedDate}>
-                            {formatDate(item.created_at)}
-                          </div>
+                          <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
                         </div>
 
-                        <div style={styles.statusRow}>
+                        <div style={{ marginBottom: "10px" }}>
                           <span style={styles.statusBadge}>
                             {item.status || "open"}
                           </span>
@@ -1009,32 +1108,38 @@ export default function Dashboard() {
                         {item.leadership_notes ? (
                           <div style={styles.feedSection}>
                             <div style={styles.feedLabel}>Leadership Notes</div>
-                            <div style={styles.feedBody}>
-                              {item.leadership_notes}
-                            </div>
+                            <div style={styles.feedBody}>{item.leadership_notes}</div>
                           </div>
                         ) : null}
 
                         <div style={styles.actionRow}>
                           {guidanceActiveId === item.id ? (
-                            <div style={styles.guidancePrompt}>
+                            <div style={{ width: "100%" }}>
                               <textarea
                                 value={guidanceText}
                                 onChange={(e) => setGuidanceText(e.target.value)}
                                 placeholder="What should this manager do? Be specific..."
-                                style={styles.guidanceTextarea}
+                                style={styles.textareaSmall}
                               />
-                              <div style={styles.guidanceButtons}>
+                              <div style={styles.actionRow}>
                                 <button
                                   style={styles.primaryButton}
                                   onClick={() => handleGiveGuidance(item.id, item.user_id)}
-                                  disabled={guidanceSubmittingId === item.id || !guidanceText.trim()}
+                                  disabled={
+                                    guidanceSubmittingId === item.id ||
+                                    !guidanceText.trim()
+                                  }
                                 >
-                                  {guidanceSubmittingId === item.id ? "Sending..." : "Send to Manager File"}
+                                  {guidanceSubmittingId === item.id
+                                    ? "Sending..."
+                                    : "Send to Manager File"}
                                 </button>
                                 <button
                                   style={styles.secondaryButton}
-                                  onClick={() => { setGuidanceActiveId(null); setGuidanceText(""); }}
+                                  onClick={() => {
+                                    setGuidanceActiveId(null);
+                                    setGuidanceText("");
+                                  }}
                                 >
                                   Cancel
                                 </button>
@@ -1043,7 +1148,10 @@ export default function Dashboard() {
                           ) : (
                             <button
                               style={styles.secondaryButton}
-                              onClick={() => { setGuidanceActiveId(item.id); setGuidanceText(""); }}
+                              onClick={() => {
+                                setGuidanceActiveId(item.id);
+                                setGuidanceText("");
+                              }}
                             >
                               Give Operational Guidance
                             </button>
@@ -1057,7 +1165,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {activeTab === TABS.managers && canViewLeadershipTabs && (
+          {activeTab === TABS.managers && canViewLeadershipTabs && !isAreaManager && (
             <>
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Managers</h1>
@@ -1066,14 +1174,16 @@ export default function Dashboard() {
                 </p>
               </div>
 
-              <div className="managers-layout" style={{ ...styles.managersLayout, gridTemplateColumns: isMobile ? "1fr" : "360px 1fr" }}>
+              <div
+                style={{
+                  ...styles.splitLayout,
+                  gridTemplateColumns: isMobile ? "1fr" : "340px minmax(0, 1fr)",
+                }}
+              >
                 <div style={styles.panelCard}>
                   <div style={styles.sectionTopRow}>
                     <div style={styles.sectionHeading}>Manager Directory</div>
-                    <button
-                      style={styles.secondaryButton}
-                      onClick={fetchManagers}
-                    >
+                    <button style={styles.secondaryButton} onClick={fetchManagers}>
                       Refresh
                     </button>
                   </div>
@@ -1092,17 +1202,17 @@ export default function Dashboard() {
                         <button
                           key={manager.id}
                           style={{
-                            ...styles.managerRowButton,
+                            ...styles.rowButton,
                             ...(selectedManager?.id === manager.id
-                              ? styles.managerRowButtonActive
+                              ? styles.rowButtonActive
                               : {}),
                           }}
                           onClick={() => openManagerFile(manager)}
                         >
-                          <div style={styles.managerRowName}>
+                          <div style={styles.rowName}>
                             {getManagerDisplayName(manager)}
                           </div>
-                          <div style={styles.managerRowMeta}>
+                          <div style={styles.rowMeta}>
                             {manager.role} • {manager.company}
                           </div>
                         </button>
@@ -1124,40 +1234,44 @@ export default function Dashboard() {
                           }`
                         : "Manager File"}
                     </div>
-                    {managerFileTab && (
+
+                    {managerFileTab ? (
                       <button
                         style={styles.secondaryButton}
                         onClick={() => setManagerFileTab(null)}
                       >
                         ← Back
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   {!selectedManager ? (
-                    <p style={styles.message}>
+                    <div style={styles.emptyCard}>
                       Select a manager to view their documentation.
-                    </p>
+                    </div>
                   ) : selectedManagerLoading ? (
                     <p style={styles.message}>Loading manager file...</p>
                   ) : !managerFileTab ? (
-                    <div className="log-type-selector" style={styles.logTypeSelector}>
+                    <div style={styles.chooserGrid}>
                       <button
-                        style={styles.logTypeButton}
+                        style={styles.chooserCard}
                         onClick={() => setManagerFileTab("decisions")}
                       >
-                        <div style={styles.logTypeTitle}>Decision Logs</div>
-                        <div style={styles.logTypeMeta}>
-                          {selectedManagerDecisions.length} record{selectedManagerDecisions.length !== 1 ? "s" : ""}
+                        <div style={styles.chooserTitle}>Decision Logs</div>
+                        <div style={styles.chooserMeta}>
+                          {selectedManagerDecisions.length} record
+                          {selectedManagerDecisions.length !== 1 ? "s" : ""}
                         </div>
                       </button>
+
                       <button
-                        style={styles.logTypeButton}
+                        style={styles.chooserCard}
                         onClick={() => setManagerFileTab("coaching")}
                       >
-                        <div style={styles.logTypeTitle}>Coaching Logs</div>
-                        <div style={styles.logTypeMeta}>
-                          {selectedManagerCoaching.length} record{selectedManagerCoaching.length !== 1 ? "s" : ""}
+                        <div style={styles.chooserTitle}>Coaching Logs</div>
+                        <div style={styles.chooserMeta}>
+                          {selectedManagerCoaching.length} record
+                          {selectedManagerCoaching.length !== 1 ? "s" : ""}
                         </div>
                       </button>
                     </div>
@@ -1233,7 +1347,9 @@ export default function Dashboard() {
 
                             {item.leadership_notes ? (
                               <div style={styles.feedSection}>
-                                <div style={styles.feedLabel}>Operational Guidance</div>
+                                <div style={styles.feedLabel}>
+                                  Operational Guidance
+                                </div>
                                 <div style={styles.feedBody}>
                                   {item.leadership_notes}
                                 </div>
@@ -1248,392 +1364,424 @@ export default function Dashboard() {
               </div>
             </>
           )}
+
           {activeTab === TABS.myLogs && (
             <>
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>My Logs</h1>
-                <p style={styles.subtitle}>Your personal decision and coaching history.</p>
+                <p style={styles.subtitle}>
+                  Your personal decision and coaching history.
+                </p>
               </div>
 
               <div style={styles.panelCard}>
                 <div style={styles.sectionTopRow}>
                   <div style={styles.sectionHeading}>
-                    {myLogType === "decisions" ? "My Decision Logs" : myLogType === "coaching" ? "My Coaching Logs" : "Select Log Type"}
+                    {myLogType === "decisions"
+                      ? "My Decision Logs"
+                      : myLogType === "coaching"
+                      ? "My Coaching Logs"
+                      : "Select Log Type"}
                   </div>
-                  {myLogType && (
-                    <button style={styles.secondaryButton} onClick={() => setMyLogType(null)}>← Back</button>
-                  )}
+
+                  {myLogType ? (
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() => setMyLogType(null)}
+                    >
+                      ← Back
+                    </button>
+                  ) : null}
                 </div>
 
                 {myLogsLoading ? (
                   <p style={styles.message}>Loading your logs...</p>
                 ) : !myLogType ? (
-                  <div style={styles.logTypeSelector}>
-                    <button style={styles.logTypeButton} onClick={() => setMyLogType("decisions")}>
-                      <div style={styles.logTypeTitle}>Decision Logs</div>
-                      <div style={styles.logTypeMeta}>{myDecisions.length} record{myDecisions.length !== 1 ? "s" : ""}</div>
+                  <div style={styles.chooserGrid}>
+                    <button
+                      style={styles.chooserCard}
+                      onClick={() => setMyLogType("decisions")}
+                    >
+                      <div style={styles.chooserTitle}>Decision Logs</div>
+                      <div style={styles.chooserMeta}>
+                        {myDecisions.length} record
+                        {myDecisions.length !== 1 ? "s" : ""}
+                      </div>
                     </button>
-                    <button style={styles.logTypeButton} onClick={() => setMyLogType("coaching")}>
-                      <div style={styles.logTypeTitle}>Coaching Logs</div>
-                      <div style={styles.logTypeMeta}>{myCoaching.length} record{myCoaching.length !== 1 ? "s" : ""}</div>
+
+                    <button
+                      style={styles.chooserCard}
+                      onClick={() => setMyLogType("coaching")}
+                    >
+                      <div style={styles.chooserTitle}>Coaching Logs</div>
+                      <div style={styles.chooserMeta}>
+                        {myCoaching.length} record
+                        {myCoaching.length !== 1 ? "s" : ""}
+                      </div>
                     </button>
                   </div>
                 ) : myLogType === "decisions" ? (
                   <div style={styles.cardList}>
                     {myDecisions.length === 0 ? (
                       <p style={styles.message}>No decision logs yet.</p>
-                    ) : myDecisions.map((item) => (
-                      <div key={item.id} style={styles.feedCard}>
-                        <div style={styles.feedTop}>
-                          <div style={styles.feedName}>{formatDate(item.created_at)}</div>
-                          <div style={styles.feedMeta}>{item.is_read ? "Reviewed by leadership" : "Pending review"}</div>
-                        </div>
-                        <div style={styles.feedSection}>
-                          <div style={styles.feedLabel}>Situation</div>
-                          <div style={styles.feedBody}>{item.situation || "—"}</div>
-                        </div>
-                        <div style={styles.feedSection}>
-                          <div style={styles.feedLabel}>Action Taken</div>
-                          <div style={styles.feedBody}>{item.action_taken || "—"}</div>
-                        </div>
-                        {item.reasoning ? (
-                          <div style={styles.feedSection}>
-                            <div style={styles.feedLabel}>Reasoning</div>
-                            <div style={styles.feedBody}>{item.reasoning}</div>
+                    ) : (
+                      myDecisions.map((item) => (
+                        <div key={item.id} style={styles.feedCard}>
+                          <div style={styles.feedTop}>
+                            <div style={styles.feedName}>
+                              {formatDate(item.created_at)}
+                            </div>
+                            <div style={styles.feedMeta}>
+                              {item.is_read ? "Reviewed by leadership" : "Pending review"}
+                            </div>
                           </div>
-                        ) : null}
-                        {item.policy_referenced ? (
-                          <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
-                        ) : null}
-                      </div>
-                    ))}
+
+                          <div style={styles.feedSection}>
+                            <div style={styles.feedLabel}>Situation</div>
+                            <div style={styles.feedBody}>{item.situation || "—"}</div>
+                          </div>
+
+                          <div style={styles.feedSection}>
+                            <div style={styles.feedLabel}>Action Taken</div>
+                            <div style={styles.feedBody}>{item.action_taken || "—"}</div>
+                          </div>
+
+                          {item.reasoning ? (
+                            <div style={styles.feedSection}>
+                              <div style={styles.feedLabel}>Reasoning</div>
+                              <div style={styles.feedBody}>{item.reasoning}</div>
+                            </div>
+                          ) : null}
+
+                          {item.policy_referenced ? (
+                            <div style={styles.policyTag}>
+                              Policy Referenced: {item.policy_referenced}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
                   </div>
                 ) : (
                   <div style={styles.cardList}>
                     {myCoaching.length === 0 ? (
                       <p style={styles.message}>No coaching requests yet.</p>
-                    ) : myCoaching.map((item) => (
-                      <div key={item.id} style={styles.feedCard}>
-                        <div style={styles.feedTop}>
-                          <div style={styles.feedName}>{formatDate(item.created_at)}</div>
-                          <div style={styles.feedMeta}>{item.status || "open"}</div>
+                    ) : (
+                      myCoaching.map((item) => (
+                        <div key={item.id} style={styles.feedCard}>
+                          <div style={styles.feedTop}>
+                            <div style={styles.feedName}>
+                              {formatDate(item.created_at)}
+                            </div>
+                            <div style={styles.feedMeta}>{item.status || "open"}</div>
+                          </div>
+
+                          <div style={styles.feedBody}>{item.request_text || "—"}</div>
+
+                          {item.leadership_notes ? (
+                            <div style={styles.feedSection}>
+                              <div style={styles.feedLabel}>GM Guidance</div>
+                              <div style={styles.feedBody}>
+                                {item.leadership_notes}
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={styles.feedSection}>
+                              <div style={styles.feedLabel}>Awaiting guidance</div>
+                            </div>
+                          )}
                         </div>
-                        <div style={styles.feedBody}>{item.request_text || "—"}</div>
-                        {item.leadership_notes ? (
-                          <div style={{ ...styles.feedSection, borderLeft: "3px solid #2563eb", paddingLeft: "12px", marginTop: "12px" }}>
-                            <div style={{ ...styles.feedLabel, color: "#60a5fa" }}>GM Guidance</div>
-                            <div style={styles.feedBody}>{item.leadership_notes}</div>
-                          </div>
-                        ) : (
-                          <div style={styles.feedSection}>
-                            <div style={{ ...styles.feedLabel, color: "#6b7280" }}>Awaiting guidance</div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </div>
             </>
           )}
-          {activeTab === TABS.facilities && canViewFacilities && (() => {
-            // Compliance animation color — transitions red → yellow → green
-            const complianceColor = complianceDisplay >= 80 ? "#4ade80"
-              : complianceDisplay >= 60 ? "#fbbf24"
-              : "#f87171";
 
-            return (
-              <>
-                {/* Animation keyframes injected once */}
-                <style dangerouslySetInnerHTML={{ __html: `
-                  @keyframes amFadeUp {
-                    from { opacity: 0; transform: translateY(10px); }
-                    to   { opacity: 1; transform: translateY(0); }
-                  }
-                  .am-fade { animation: amFadeUp 0.22s ease both; }
-                  .am-facility-btn { transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease !important; }
-                  .am-facility-btn:hover { transform: translateY(-1px) !important; }
-                  .am-gm-card { transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease !important; cursor: pointer; }
-                  .am-gm-card:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important; border-color: #334155 !important; }
-                  .am-metric-mini { transition: transform 0.15s ease !important; }
-                  .am-metric-mini:hover { transform: translateY(-1px) !important; }
-                  .am-feed-card { transition: border-color 0.15s ease !important; }
-                  .am-feed-card:hover { border-color: #334155 !important; }
-                `}} />
+          {activeTab === TABS.facilities && canViewFacilities && (
+            <>
+              <div style={styles.headerCard}>
+                <h1 style={styles.title}>Facilities</h1>
+                <p style={styles.subtitle}>
+                  Select a facility to review General Manager performance and
+                  operational activity.
+                </p>
 
-                <div style={styles.headerCard}>
-                  <h1 style={styles.title}>Facilities</h1>
-                  <p style={styles.subtitle}>
-                    Select a facility to review General Manager performance and operational activity.
-                  </p>
-                  {isMobile && (selectedFacility || selectedGM) && (
-                    <div style={styles.breadcrumb}>
-                      <button style={styles.breadcrumbLink} onClick={() => { setSelectedFacility(null); setSelectedGM(null); }}>Facilities</button>
-                      {selectedFacility && (
-                        <>
-                          <span style={styles.breadcrumbSep}>›</span>
-                          <button style={styles.breadcrumbLink} onClick={() => setSelectedGM(null)}>
-                            Facility {selectedFacility.facility_number}
+                {(selectedFacility || selectedGM) ? (
+                  <div style={styles.breadcrumb}>
+                    <button
+                      style={styles.breadcrumbLink}
+                      onClick={() => {
+                        setSelectedFacility(null);
+                        setFacilityGMs([]);
+                        setSelectedGM(null);
+                        setGmOwnDecisionLogs([]);
+                        setGmOwnCoachingRequests([]);
+                        setFacilityManagerSummaries([]);
+                        setGmManagerIds([]);
+                        setFacilitiesMessage("");
+                      }}
+                    >
+                      Facilities
+                    </button>
+
+                    {selectedFacility ? (
+                      <>
+                        <span style={styles.breadcrumbSep}>›</span>
+                        <button
+                          style={styles.breadcrumbLink}
+                          onClick={() => {
+                            setSelectedGM(null);
+                            setGmOwnDecisionLogs([]);
+                            setGmOwnCoachingRequests([]);
+                            setFacilityManagerSummaries([]);
+                            setGmManagerIds([]);
+                            setFacilitiesMessage("");
+                          }}
+                        >
+                          Facility {selectedFacility.facility_number}
+                        </button>
+                      </>
+                    ) : null}
+
+                    {selectedGM ? (
+                      <>
+                        <span style={styles.breadcrumbSep}>›</span>
+                        <span style={styles.breadcrumbCurrent}>
+                          {selectedGM.full_name}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              {facilitiesMessage ? (
+                <p style={styles.message}>{facilitiesMessage}</p>
+              ) : null}
+
+              <div
+                style={{
+                  ...styles.splitLayout,
+                  gridTemplateColumns: isMobile ? "1fr" : "320px minmax(0, 1fr)",
+                }}
+              >
+                <div style={styles.panelCard}>
+                  <div style={styles.sectionTopRow}>
+                    <div style={styles.sectionHeading}>Your Facilities</div>
+                    <button style={styles.secondaryButton} onClick={fetchFacilities}>
+                      Refresh
+                    </button>
+                  </div>
+
+                  {facilitiesLoading ? (
+                    <p style={styles.message}>Loading facilities...</p>
+                  ) : facilities.length === 0 ? (
+                    <div style={styles.emptyCard}>No facilities assigned.</div>
+                  ) : (
+                    <div style={styles.cardList}>
+                      {facilities.map((facility) => {
+                        const isActive =
+                          selectedFacility?.facility_number === facility.facility_number &&
+                          selectedFacility?.company === facility.company;
+
+                        return (
+                          <button
+                            key={`${facility.company}-${facility.facility_number}`}
+                            style={{
+                              ...styles.facilityCard,
+                              ...(isActive ? styles.facilityCardActive : {}),
+                            }}
+                            onClick={() => fetchFacilityGMs(facility)}
+                          >
+                            <div style={styles.rowName}>
+                              Facility {facility.facility_number}
+                            </div>
+                            <div style={styles.rowMeta}>{facility.company}</div>
                           </button>
-                        </>
-                      )}
-                      {selectedGM && (
-                        <>
-                          <span style={styles.breadcrumbSep}>›</span>
-                          <span style={styles.breadcrumbCurrent}>{selectedGM.full_name}</span>
-                        </>
-                      )}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {facilitiesMessage && <p style={styles.message}>{facilitiesMessage}</p>}
+                <div style={styles.panelCard}>
+                  <div style={styles.sectionTopRow}>
+                    <div style={styles.sectionHeading}>
+                      {selectedFacility
+                        ? `Facility ${selectedFacility.facility_number} — General Managers`
+                        : "General Managers"}
+                    </div>
+                  </div>
 
-                <div className="facilities-layout" style={isMobile ? { display: "flex", flexDirection: "column", gap: "16px" } : styles.facilitiesLayout}>
+                  {!selectedFacility ? (
+                    <div style={styles.emptyCard}>Select a facility first.</div>
+                  ) : facilityGMsLoading ? (
+                    <p style={styles.message}>Loading general managers...</p>
+                  ) : facilityGMs.length === 0 ? (
+                    <div style={styles.emptyCard}>No general managers in this facility.</div>
+                  ) : (
+                    <div style={styles.cardList}>
+                      {facilityGMs.map((gm) => {
+                        const isActive = selectedGM?.id === gm.id;
 
-                  {/* ── PANEL 1: Facilities ── */}
-                  {(!isMobile || (!selectedFacility && !selectedGM)) && (
-                    <div style={styles.panelCard} className="am-fade">
-                      <div style={styles.sectionHeading}>Your Facilities</div>
-                      {facilitiesLoading ? (
-                        <p style={styles.message}>Loading...</p>
-                      ) : facilities.length === 0 ? (
-                        <p style={styles.message}>No facilities assigned.</p>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "14px" }}>
-                          {facilities.map((f, i) => {
-                            const isSelected = selectedFacility?.facility_number === f.facility_number && selectedFacility?.company === f.company;
-                            return (
-                              <button
-                                key={`${f.company}-${f.facility_number}`}
-                                className="am-facility-btn"
-                                style={{
-                                  ...styles.managerRowButton,
-                                  ...(isSelected ? { ...styles.managerRowButtonActive, borderColor: "#3b82f6" } : {}),
-                                  animationDelay: `${i * 0.04}s`,
-                                }}
-                                onClick={() => fetchFacilityGMs(f)}
-                              >
-                                <div style={styles.managerRowName}>Facility {f.facility_number}</div>
-                                <div style={styles.managerRowMeta}>{f.company}</div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                        return (
+                          <button
+                            key={gm.id}
+                            style={{
+                              ...styles.rowButton,
+                              ...(isActive ? styles.rowButtonActive : {}),
+                            }}
+                            onClick={() => fetchGMData(gm)}
+                          >
+                            <div style={styles.rowName}>{gm.full_name}</div>
+                            <div style={styles.rowMeta}>
+                              General Manager • Facility {gm.facility_number}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+                </div>
+              </div>
 
-                  {/* ── PANEL 2: GM list with metric badges ── */}
-                  {(!isMobile || (selectedFacility && !selectedGM)) && (
-                    <div style={styles.panelCard} className="am-fade">
-                      <div style={styles.sectionHeading}>
-                        {selectedFacility ? `Facility ${selectedFacility.facility_number} — GMs` : "General Managers"}
+              {selectedGM ? (
+                <>
+                  <div style={styles.panelCard}>
+                    <div style={styles.sectionHeading}>{selectedGM.full_name}</div>
+                    <div style={{ ...styles.rowMeta, marginTop: "6px" }}>
+                      General Manager • {selectedFacility?.company} • Facility{" "}
+                      {selectedFacility?.facility_number}
+                    </div>
+                    <div style={{ ...styles.rowMeta, marginTop: "4px" }}>
+                      {gmManagerIds.length} manager{gmManagerIds.length !== 1 ? "s" : ""} assigned
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      ...styles.statGrid,
+                      gridTemplateColumns: isMobile
+                        ? "repeat(2, minmax(0, 1fr))"
+                        : "repeat(3, minmax(0, 1fr))",
+                    }}
+                  >
+                    <div style={styles.statCard}>
+                      <div style={{ ...styles.statValue, color: complianceColor }}>
+                        {complianceDisplay}%
                       </div>
-                      {!selectedFacility ? (
-                        <p style={styles.message}>Select a facility.</p>
-                      ) : facilityGMsLoading ? (
-                        <p style={styles.message}>Loading GMs...</p>
-                      ) : facilityGMs.length === 0 ? (
-                        <p style={styles.message}>No GMs in this facility.</p>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "14px" }}>
-                          {facilityGMs.map((gm, i) => {
-                            const isSelected = selectedGM?.id === gm.id;
-                            return (
-                              <div
-                                key={gm.id}
-                                className="am-gm-card"
-                                style={{
-                                  background: isSelected ? "#1a2740" : "#0f172a",
-                                  border: `1px solid ${isSelected ? "#3b82f6" : "#1f2937"}`,
-                                  borderRadius: "14px",
-                                  padding: "16px",
-                                  animationDelay: `${i * 0.05}s`,
-                                }}
-                                onClick={() => fetchGMData(gm)}
-                              >
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                  <div>
-                                    <div style={{ fontSize: "15px", fontWeight: 700, color: "#f8fafc" }}>{gm.full_name}</div>
-                                    <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>General Manager</div>
-                                  </div>
-                                  {isSelected && <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }} />}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <div style={styles.statLabel}>Policy Compliance</div>
                     </div>
-                  )}
 
-                  {/* ── PANEL 3: GM detail view ── */}
-                  {(!isMobile || selectedGM) && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                      {!selectedGM ? (
-                        <div style={styles.panelCard}>
-                          <p style={styles.message}>Select a GM to view their operational overview.</p>
-                        </div>
-                      ) : gmDataLoading ? (
-                        <div style={styles.panelCard}>
-                          <p style={styles.message}>Loading GM data...</p>
-                        </div>
-                      ) : (
-                        <>
-                          {/* GM header */}
-                          <div style={{ ...styles.panelCard, borderColor: "#1e3a5f" }} className="am-fade">
-                            <div style={{ fontSize: "22px", fontWeight: 700, color: "#f8fafc" }}>{selectedGM.full_name}</div>
-                            <div style={{ fontSize: "13px", color: "#94a3b8", marginTop: "4px" }}>
-                              General Manager · {selectedFacility?.company} · Facility {selectedFacility?.facility_number}
+                    <div style={styles.statCard}>
+                      <div style={styles.statValue}>{gmOwnDecisionLogs.length}</div>
+                      <div style={styles.statLabel}>GM Decision Logs</div>
+                    </div>
+
+                    <div style={styles.statCard}>
+                      <div style={styles.statValue}>{gmOwnCoachingRequests.length}</div>
+                      <div style={styles.statLabel}>GM Coaching Requests</div>
+                    </div>
+                  </div>
+
+                  <div style={styles.panelCard}>
+                    <div style={styles.sectionHeading}>Facility Activity</div>
+
+                    <div
+                      style={{
+                        ...styles.splitLayout,
+                        gridTemplateColumns: isMobile ? "1fr" : "320px minmax(0, 1fr)",
+                        marginTop: "18px",
+                      }}
+                    >
+                      <div style={styles.panelInset}>
+                        <div style={styles.feedLabel}>GM Logs & Requests</div>
+
+                        <div style={styles.cardList}>
+                          <div style={styles.feedCard}>
+                            <div style={styles.feedName}>Decision Logs</div>
+                            <div style={styles.statValueSmall}>
+                              {gmOwnDecisionLogs.length}
                             </div>
-                            <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "2px" }}>
-                              {gmManagers.length} manager{gmManagers.length !== 1 ? "s" : ""} assigned
+                            <div style={styles.rowMeta}>
+                              Submitted directly by this GM
                             </div>
                           </div>
 
-                          {/* Policy Compliance animated card */}
-                          <div style={{ ...styles.panelCard, textAlign: "center", padding: "28px 22px" }} className="am-fade">
-                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "16px" }}>
-                              Policy Compliance
+                          <div style={styles.feedCard}>
+                            <div style={styles.feedName}>Coaching Requests</div>
+                            <div style={styles.statValueSmall}>
+                              {gmOwnCoachingRequests.length}
                             </div>
-                            <div style={{
-                              fontSize: "64px",
-                              fontWeight: 800,
-                              lineHeight: 1,
-                              color: complianceColor,
-                              transition: "color 0.3s ease",
-                              marginBottom: "16px",
-                              fontVariantNumeric: "tabular-nums",
-                            }}>
-                              {complianceDisplay}%
-                            </div>
-                            {/* Progress bar */}
-                            <div style={{ background: "#1f2937", borderRadius: "999px", height: "6px", overflow: "hidden" }}>
-                              <div style={{
-                                height: "100%",
-                                width: `${complianceDisplay}%`,
-                                background: complianceColor,
-                                borderRadius: "999px",
-                                transition: "background 0.3s ease",
-                              }} />
-                            </div>
-                            <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "10px" }}>
-                              Target: 92%
+                            <div style={styles.rowMeta}>
+                              Support requests submitted by this GM
                             </div>
                           </div>
+                        </div>
+                      </div>
 
-                          {/* Facility Activity — tabbed */}
-                          <div style={styles.panelCard} className="am-fade">
-                            <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "14px" }}>
-                              Facility Activity
-                            </div>
-                            {/* Tab row */}
-                            <div style={{ display: "flex", gap: "8px", marginBottom: "18px" }}>
-                              {[
-                                { key: "decisions", label: "Decision Logs", count: gmDecisionLogs.length },
-                                { key: "coaching",  label: "Coaching Requests", count: gmCoachingRequests.length },
-                              ].map(({ key, label, count }) => (
-                                <button
-                                  key={key}
-                                  onClick={() => setGmActivityTab(key)}
+                      <div style={styles.panelInset}>
+                        <div style={styles.feedLabel}>Facility Managers</div>
+
+                        {facilityManagerSummaries.length === 0 ? (
+                          <div style={styles.emptyCard}>
+                            No managers assigned to this GM yet.
+                          </div>
+                        ) : (
+                          <div style={styles.cardList}>
+                            {facilityManagerSummaries.map((manager) => (
+                              <div key={manager.id} style={styles.managerSummaryCard}>
+                                <div style={styles.sectionTopRow}>
+                                  <div>
+                                    <div style={styles.feedName}>
+                                      {manager.full_name}
+                                    </div>
+                                    <div style={styles.feedMeta}>
+                                      {manager.role || "Manager"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div
                                   style={{
-                                    flex: 1,
-                                    padding: "10px 12px",
-                                    borderRadius: "10px",
-                                    border: `1px solid ${gmActivityTab === key ? "#3b82f6" : "#1f2937"}`,
-                                    background: gmActivityTab === key ? "rgba(59,130,246,0.1)" : "transparent",
-                                    color: gmActivityTab === key ? "#60a5fa" : "#6b7280",
-                                    fontSize: "13px",
-                                    fontWeight: 600,
-                                    cursor: "pointer",
-                                    transition: "all 0.15s ease",
+                                    ...styles.statGrid,
+                                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                    marginTop: "12px",
                                   }}
                                 >
-                                  {label}
-                                  <span style={{ marginLeft: "6px", fontSize: "11px", opacity: 0.7 }}>({count})</span>
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* Decision Logs content */}
-                            {gmActivityTab === "decisions" && (
-                              gmDecisionLogs.length === 0 ? (
-                                <p style={styles.message}>No decision logs from this GM's managers.</p>
-                              ) : (
-                                <div style={styles.cardList}>
-                                  {gmDecisionLogs.map((item) => (
-                                    <div key={item.id} className="am-feed-card" style={styles.feedCard}>
-                                      <div style={styles.feedTop}>
-                                        <div style={styles.feedName}>{item.user_name || "Unknown"}</div>
-                                        <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
-                                      </div>
-                                      <div style={styles.feedSection}>
-                                        <div style={styles.feedLabel}>Situation</div>
-                                        <div style={styles.feedBody}>{item.situation || "—"}</div>
-                                      </div>
-                                      <div style={styles.feedSection}>
-                                        <div style={styles.feedLabel}>Action Taken</div>
-                                        <div style={styles.feedBody}>{item.action_taken || "—"}</div>
-                                      </div>
-                                      {item.reasoning && (
-                                        <div style={styles.feedSection}>
-                                          <div style={styles.feedLabel}>Reasoning</div>
-                                          <div style={styles.feedBody}>{item.reasoning}</div>
-                                        </div>
-                                      )}
-                                      {item.policy_referenced && (
-                                        <div style={styles.policyTag}>Policy Referenced: {item.policy_referenced}</div>
-                                      )}
+                                  <div style={styles.statCardCompact}>
+                                    <div style={styles.statValueSmall}>
+                                      {manager.decisionCount}
                                     </div>
-                                  ))}
-                                </div>
-                              )
-                            )}
+                                    <div style={styles.statLabel}>Logs</div>
+                                  </div>
 
-                            {/* Coaching Requests content */}
-                            {gmActivityTab === "coaching" && (
-                              gmCoachingRequests.length === 0 ? (
-                                <p style={styles.message}>No coaching requests from this GM's managers.</p>
-                              ) : (
-                                <div style={styles.cardList}>
-                                  {gmCoachingRequests.map((item) => (
-                                    <div key={item.id} className="am-feed-card" style={styles.feedCard}>
-                                      <div style={styles.feedTop}>
-                                        <div style={styles.feedName}>{item.requester_name || "Unknown"}</div>
-                                        <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
-                                      </div>
-                                      <div style={styles.feedBody}>{item.request_text || "—"}</div>
-                                      {item.leadership_notes && (
-                                        <div style={{ ...styles.feedSection, borderLeft: "3px solid #2563eb", paddingLeft: "12px", marginTop: "12px" }}>
-                                          <div style={{ ...styles.feedLabel, color: "#60a5fa" }}>GM Guidance</div>
-                                          <div style={styles.feedBody}>{item.leadership_notes}</div>
-                                        </div>
-                                      )}
-                                      <div style={{ marginTop: "10px" }}>
-                                        <span style={{
-                                          ...styles.statusBadge,
-                                          background: item.guidance_given ? "rgba(74,222,128,0.07)" : "#1c1917",
-                                          color: item.guidance_given ? "#4ade80" : "#a8a29e",
-                                          border: `1px solid ${item.guidance_given ? "rgba(74,222,128,0.2)" : "#292524"}`,
-                                        }}>
-                                          {item.guidance_given ? "Guidance Given" : item.status || "open"}
-                                        </span>
-                                      </div>
+                                  <div style={styles.statCardCompact}>
+                                    <div style={styles.statValueSmall}>
+                                      {manager.coachingCount}
                                     </div>
-                                  ))}
+                                    <div style={styles.statLabel}>Requests</div>
+                                  </div>
                                 </div>
-                              )
-                            )}
+                              </div>
+                            ))}
                           </div>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
+                </>
+              ) : null}
+
+              {selectedFacility && !selectedGM ? (
+                <div style={styles.emptyCard}>
+                  Select a general manager to view facility activity.
                 </div>
-              </>
-            );
-          })()}
+              ) : null}
+            </>
+          )}
         </main>
       </div>
     </div>
@@ -1643,37 +1791,38 @@ export default function Dashboard() {
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "#0b1120",
+    background: "#07111f",
     color: "#e5e7eb",
-    padding: "24px",
-    boxSizing: "border-box",
-    overflowX: "hidden",
-    maxWidth: "100vw",
     fontFamily:
       'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    padding: "16px",
+    boxSizing: "border-box",
   },
-  container: {
-    maxWidth: "1440px",
+  shell: {
+    maxWidth: "1400px",
     margin: "0 auto",
-    display: "grid",
-    gridTemplateColumns: "300px 1fr",
-    gap: "24px",
   },
-  sidebar: {
-    minHeight: "calc(100vh - 48px)",
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "20px",
-    padding: "20px",
-    display: "flex",
-    flexDirection: "column",
-  },
-  brandCard: {
+  topHeader: {
     background: "#0f172a",
     border: "1px solid #1e293b",
-    borderRadius: "16px",
-    padding: "18px",
-    marginBottom: "22px",
+    borderRadius: "22px",
+    padding: "22px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "18px",
+    flexWrap: "wrap",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  headerIdentity: {
+    minWidth: "240px",
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "12px",
+    marginLeft: "auto",
   },
   smallLabel: {
     fontSize: "11px",
@@ -1681,87 +1830,90 @@ const styles = {
     color: "#94a3b8",
     marginBottom: "10px",
   },
-  userName: {
-    fontSize: "28px",
-    fontWeight: 700,
-    lineHeight: 1.15,
-    marginBottom: "8px",
+  topName: {
+    fontSize: "30px",
+    fontWeight: 800,
+    lineHeight: 1.05,
     color: "#f8fafc",
+    marginBottom: "8px",
   },
-  userMeta: {
-    fontSize: "14px",
+  topMeta: {
+    fontSize: "15px",
     color: "#cbd5e1",
-    marginBottom: "10px",
+    marginBottom: "8px",
   },
-  companyName: {
+  topCompany: {
     fontSize: "16px",
-    fontWeight: 600,
-    color: "#e5e7eb",
+    fontWeight: 700,
+    color: "#f8fafc",
     marginBottom: "4px",
   },
   companyMotto: {
     fontSize: "13px",
     color: "#94a3b8",
   },
-  navGroup: {
+  navWrap: {
+    marginTop: "14px",
     display: "flex",
-    flexDirection: "column",
     gap: "10px",
-  },
-  navDivider: {
-    height: "1px",
-    background: "#1f2937",
-    margin: "8px 0 4px",
+    padding: "10px 2px 2px",
   },
   navButton: {
-    width: "100%",
-    padding: "14px 16px",
-    borderRadius: "12px",
-    border: "1px solid #1f2937",
-    background: "#111827",
-    color: "#e5e7eb",
-    fontSize: "15px",
-    fontWeight: 600,
-    textAlign: "left",
+    padding: "12px 16px",
+    borderRadius: "999px",
+    border: "1px solid #22324a",
+    background: "#0f172a",
+    color: "#cbd5e1",
+    fontSize: "14px",
+    fontWeight: 700,
     cursor: "pointer",
-    transition: "0.15s ease",
+    whiteSpace: "nowrap",
   },
   navButtonActive: {
-    background: "#1e293b",
-    border: "1px solid #334155",
-    color: "#f8fafc",
-  },
-  logoutWrap: {
-    marginTop: "auto",
-    paddingTop: "20px",
+    background: "linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%)",
+    color: "#ffffff",
+    border: "1px solid #2563eb",
+    boxShadow: "0 10px 20px rgba(37,99,235,0.2)",
   },
   logoutButton: {
-    width: "100%",
-    padding: "14px 16px",
-    borderRadius: "12px",
+    padding: "12px 16px",
+    borderRadius: "14px",
     border: "1px solid #243041",
     background: "transparent",
     color: "#cbd5e1",
-    fontSize: "15px",
-    fontWeight: 600,
+    fontSize: "14px",
+    fontWeight: 700,
     cursor: "pointer",
   },
   main: {
     display: "flex",
     flexDirection: "column",
     gap: "18px",
+    marginTop: "18px",
+  },
+  loadingCard: {
+    maxWidth: "520px",
+    margin: "120px auto",
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "20px",
+    padding: "32px",
+    textAlign: "center",
+    fontSize: "18px",
+    color: "#e5e7eb",
   },
   headerCard: {
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "20px",
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "22px",
     padding: "24px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
   },
   title: {
     margin: 0,
-    fontSize: "38px",
-    lineHeight: 1.05,
-    fontWeight: 700,
+    fontSize: "42px",
+    lineHeight: 1.02,
+    fontWeight: 800,
     color: "#f8fafc",
   },
   subtitle: {
@@ -1769,33 +1921,51 @@ const styles = {
     marginBottom: 0,
     fontSize: "16px",
     color: "#94a3b8",
-    lineHeight: 1.6,
+    lineHeight: 1.65,
     maxWidth: "760px",
   },
   panelCard: {
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "20px",
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "22px",
     padding: "22px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
   },
-  managersLayout: {
+  panelInset: {
+    background: "#0b1324",
+    border: "1px solid #18283f",
+    borderRadius: "18px",
+    padding: "18px",
+  },
+  splitLayout: {
     display: "grid",
-    gridTemplateColumns: "360px 1fr",
     gap: "18px",
+  },
+  sectionTopRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+  },
+  sectionHeading: {
+    fontSize: "22px",
+    fontWeight: 800,
+    color: "#f8fafc",
   },
   label: {
     display: "block",
     marginBottom: "10px",
     fontSize: "15px",
-    fontWeight: 600,
+    fontWeight: 700,
     color: "#e5e7eb",
   },
   textarea: {
     width: "100%",
     minHeight: "220px",
-    borderRadius: "14px",
+    borderRadius: "16px",
     border: "1px solid #273449",
-    background: "#0f172a",
+    background: "#08111f",
     color: "#f8fafc",
     padding: "16px",
     fontSize: "15px",
@@ -1808,9 +1978,9 @@ const styles = {
   textareaSmall: {
     width: "100%",
     minHeight: "130px",
-    borderRadius: "14px",
+    borderRadius: "16px",
     border: "1px solid #273449",
-    background: "#0f172a",
+    background: "#08111f",
     color: "#f8fafc",
     padding: "16px",
     fontSize: "15px",
@@ -1820,24 +1990,36 @@ const styles = {
     marginBottom: "16px",
     boxSizing: "border-box",
   },
-  primaryButton: {
-    padding: "13px 20px",
-    borderRadius: "12px",
-    border: "1px solid #334155",
-    background: "#1e293b",
+  textInput: {
+    width: "100%",
+    borderRadius: "14px",
+    border: "1px solid #273449",
+    background: "#08111f",
     color: "#f8fafc",
+    padding: "14px 16px",
     fontSize: "15px",
-    fontWeight: 600,
+    outline: "none",
+    marginBottom: "16px",
+    boxSizing: "border-box",
+  },
+  primaryButton: {
+    padding: "13px 18px",
+    borderRadius: "14px",
+    border: "1px solid #2563eb",
+    background: "#1d4ed8",
+    color: "#ffffff",
+    fontSize: "14px",
+    fontWeight: 700,
     cursor: "pointer",
   },
   secondaryButton: {
-    padding: "10px 14px",
-    borderRadius: "12px",
+    padding: "11px 14px",
+    borderRadius: "14px",
     border: "1px solid #334155",
-    background: "#0f172a",
+    background: "#08111f",
     color: "#e5e7eb",
     fontSize: "14px",
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
   },
   buttonDisabled: {
@@ -1845,32 +2027,19 @@ const styles = {
     cursor: "not-allowed",
   },
   message: {
-    marginTop: "12px",
+    marginTop: "10px",
     fontSize: "14px",
     color: "#94a3b8",
+    lineHeight: 1.6,
   },
-  loadingCard: {
-    maxWidth: "600px",
-    margin: "120px auto",
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "20px",
-    padding: "32px",
-    textAlign: "center",
-    fontSize: "18px",
-    color: "#e5e7eb",
-  },
-  sectionTopRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "12px",
-    marginBottom: "16px",
-  },
-  sectionHeading: {
-    fontSize: "20px",
-    fontWeight: 700,
-    color: "#f8fafc",
+  emptyCard: {
+    background: "#08111f",
+    border: "1px dashed #243041",
+    borderRadius: "18px",
+    padding: "18px",
+    color: "#94a3b8",
+    fontSize: "14px",
+    lineHeight: 1.6,
   },
   cardList: {
     display: "flex",
@@ -1878,9 +2047,9 @@ const styles = {
     gap: "14px",
   },
   feedCard: {
-    background: "#0f172a",
-    border: "1px solid #1f2937",
-    borderRadius: "16px",
+    background: "#08111f",
+    border: "1px solid #18283f",
+    borderRadius: "18px",
     padding: "16px",
   },
   feedTop: {
@@ -1889,10 +2058,11 @@ const styles = {
     alignItems: "flex-start",
     gap: "16px",
     marginBottom: "12px",
+    flexWrap: "wrap",
   },
   feedName: {
     fontSize: "16px",
-    fontWeight: 700,
+    fontWeight: 800,
     color: "#f8fafc",
     marginBottom: "4px",
   },
@@ -1903,15 +2073,14 @@ const styles = {
   feedDate: {
     fontSize: "12px",
     color: "#94a3b8",
-    whiteSpace: "nowrap",
   },
   feedSection: {
     marginTop: "12px",
   },
   feedLabel: {
     fontSize: "12px",
-    fontWeight: 700,
-    letterSpacing: "0.04em",
+    fontWeight: 800,
+    letterSpacing: "0.06em",
     textTransform: "uppercase",
     color: "#94a3b8",
     marginBottom: "6px",
@@ -1922,8 +2091,17 @@ const styles = {
     color: "#e5e7eb",
     whiteSpace: "pre-wrap",
   },
-  statusRow: {
-    marginBottom: "10px",
+  policyTag: {
+    marginTop: "12px",
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 10px",
+    borderRadius: "999px",
+    background: "rgba(59,130,246,0.1)",
+    border: "1px solid rgba(59,130,246,0.22)",
+    color: "#93c5fd",
+    fontSize: "12px",
+    fontWeight: 700,
   },
   statusBadge: {
     display: "inline-flex",
@@ -1931,243 +2109,147 @@ const styles = {
     padding: "5px 10px",
     borderRadius: "999px",
     fontSize: "11px",
-    fontWeight: 700,
+    fontWeight: 800,
     textTransform: "uppercase",
     letterSpacing: "0.05em",
-    background: "#1e293b",
+    background: "#111827",
     color: "#cbd5e1",
     border: "1px solid #334155",
   },
   actionRow: {
     display: "flex",
-    flexWrap: "wrap",
     gap: "10px",
+    flexWrap: "wrap",
     marginTop: "14px",
   },
-  managerRowButton: {
+  rowButton: {
     width: "100%",
     textAlign: "left",
-    borderRadius: "14px",
-    border: "1px solid #1f2937",
-    background: "#0f172a",
-    padding: "14px",
-    cursor: "pointer",
-  },
-  managerRowButtonActive: {
-    border: "1px solid #334155",
-    background: "#162033",
-  },
-  managerRowName: {
-    fontSize: "15px",
-    fontWeight: 700,
-    color: "#f8fafc",
-    marginBottom: "4px",
-  },
-  managerRowMeta: {
-    fontSize: "13px",
-    color: "#94a3b8",
-  },
-  managerFileWrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "20px",
-  },
-  managerFileSection: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-  },
-  managerFileTitle: {
-    fontSize: "18px",
-    fontWeight: 700,
-    color: "#f8fafc",
-  },
-  policyInput: {
-    padding: "8px 12px",
-    borderRadius: "8px",
-    border: "1px solid #1f2937",
-    backgroundColor: "#0f172a",
-    color: "#cbd5e1",
-    fontSize: "13px",
-    width: "100%",
-    outline: "none",
-  },
-  policyTag: {
-    marginTop: "10px",
-    padding: "5px 10px",
-    borderRadius: "6px",
-    border: "1px solid #1e3a5f",
-    backgroundColor: "#0c1e35",
-    color: "#60a5fa",
-    fontSize: "12px",
-    display: "inline-block",
-  },
-  guidancePrompt: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-    width: "100%",
-  },
-  guidanceTextarea: {
-    width: "100%",
-    padding: "10px 12px",
-    borderRadius: "10px",
-    border: "1px solid #334155",
-    backgroundColor: "#0f172a",
-    color: "#e5e7eb",
-    fontSize: "14px",
-    resize: "vertical",
-    minHeight: "90px",
-    outline: "none",
-  },
-  guidanceButtons: {
-    display: "flex",
-    gap: "10px",
-  },
-  containerMobile: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "16px",
-    padding: "0",
-  },
-  mobileTopBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    background: "#111827",
-    border: "1px solid #1f2937",
     borderRadius: "16px",
-    padding: "14px 18px",
-    marginBottom: "16px",
-  },
-  mobileTopName: {
-    fontSize: "16px",
-    fontWeight: 700,
-    color: "#f8fafc",
-  },
-  mobileTopRole: {
-    fontSize: "12px",
-    color: "#94a3b8",
-    marginTop: "2px",
-  },
-  mobileMenuBtn: {
-    background: "transparent",
-    border: "1px solid #334155",
-    color: "#e5e7eb",
-    padding: "8px 14px",
-    borderRadius: "10px",
-    cursor: "pointer",
-    fontSize: "18px",
-    lineHeight: 1,
-  },
-  mobileOverlay: {
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "16px",
+    border: "1px solid #18283f",
+    background: "#08111f",
     padding: "16px",
-    marginBottom: "16px",
+    cursor: "pointer",
   },
-  facilitiesLayout: {
-    display: "grid",
-    gridTemplateColumns: "240px 260px 1fr",
-    gap: "18px",
-    alignItems: "start",
+  rowButtonActive: {
+    border: "1px solid #2563eb",
+    background: "rgba(37,99,235,0.12)",
   },
-  metricsRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
-    gap: "14px",
-  },
-  metricsStackMobile: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "14px",
-  },
-  metricCard: {
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "16px",
-    padding: "22px 18px",
-    textAlign: "center",
-    position: "relative",
-  },
-  metricValue: {
-    fontSize: "42px",
+  rowName: {
+    fontSize: "15px",
     fontWeight: 800,
     color: "#f8fafc",
-    lineHeight: 1,
-    marginBottom: "8px",
-  },
-  metricLabel: {
-    fontSize: "14px",
-    fontWeight: 600,
-    color: "#cbd5e1",
     marginBottom: "4px",
   },
-  metricSub: {
-    fontSize: "12px",
-    color: "#6b7280",
+  rowMeta: {
+    fontSize: "13px",
+    color: "#94a3b8",
   },
-  mockBadge: {
-    position: "absolute",
-    top: "10px",
-    right: "10px",
-    fontSize: "10px",
-    fontWeight: 700,
+  chooserGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "14px",
+  },
+  chooserCard: {
+    textAlign: "left",
+    borderRadius: "18px",
+    border: "1px solid #18283f",
+    background: "#08111f",
+    padding: "20px",
+    cursor: "pointer",
+  },
+  chooserTitle: {
+    fontSize: "16px",
+    fontWeight: 800,
+    color: "#f8fafc",
+    marginBottom: "8px",
+  },
+  chooserMeta: {
+    fontSize: "13px",
+    color: "#94a3b8",
+  },
+  facilityCard: {
+    width: "100%",
+    textAlign: "left",
+    borderRadius: "16px",
+    border: "1px solid #18283f",
+    background: "#08111f",
+    padding: "16px",
+    cursor: "pointer",
+  },
+  facilityCardActive: {
+    border: "1px solid #2563eb",
+    background: "rgba(37,99,235,0.12)",
+  },
+  statGrid: {
+    display: "grid",
+    gap: "14px",
+  },
+  statCard: {
+    background: "#0f172a",
+    border: "1px solid #1e293b",
+    borderRadius: "20px",
+    padding: "22px",
+    textAlign: "center",
+  },
+  statCardCompact: {
+    background: "#08111f",
+    border: "1px solid #18283f",
+    borderRadius: "16px",
+    padding: "16px",
+    textAlign: "center",
+  },
+  statValue: {
+    fontSize: "42px",
+    fontWeight: 800,
+    lineHeight: 1,
+    color: "#f8fafc",
+    marginBottom: "8px",
+  },
+  statValueSmall: {
+    fontSize: "32px",
+    fontWeight: 800,
+    lineHeight: 1,
+    color: "#f8fafc",
+    marginBottom: "8px",
+  },
+  statLabel: {
+    fontSize: "12px",
     letterSpacing: "0.08em",
-    color: "#78716c",
-    background: "#1c1917",
-    border: "1px solid #292524",
-    borderRadius: "4px",
-    padding: "2px 6px",
+    textTransform: "uppercase",
+    color: "#94a3b8",
+    fontWeight: 800,
+  },
+  managerSummaryCard: {
+    background: "#08111f",
+    border: "1px solid #18283f",
+    borderRadius: "18px",
+    padding: "16px",
   },
   breadcrumb: {
     display: "flex",
     alignItems: "center",
-    gap: "6px",
-    marginTop: "12px",
     flexWrap: "wrap",
+    gap: "8px",
+    marginTop: "16px",
   },
   breadcrumbLink: {
-    background: "transparent",
-    border: "none",
-    color: "#60a5fa",
-    cursor: "pointer",
-    fontSize: "13px",
     padding: 0,
-  },
-  breadcrumbSep: {
-    color: "#4b5563",
-    fontSize: "13px",
+    margin: 0,
+    border: "none",
+    background: "transparent",
+    color: "#60a5fa",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
   },
   breadcrumbCurrent: {
-    fontSize: "13px",
-    color: "#94a3b8",
-  },
-  logTypeSelector: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "16px",
-    marginTop: "8px",
-  },
-  logTypeButton: {
-    padding: "24px 20px",
-    borderRadius: "16px",
-    border: "1px solid #1f2937",
-    background: "#0f172a",
-    color: "#e5e7eb",
-    cursor: "pointer",
-    textAlign: "left",
-    transition: "border-color 0.15s ease, background 0.15s ease",
-  },
-  logTypeTitle: {
-    fontSize: "18px",
+    color: "#cbd5e1",
+    fontSize: "14px",
     fontWeight: 700,
-    color: "#f8fafc",
-    marginBottom: "6px",
   },
-  logTypeMeta: {
-    fontSize: "13px",
-    color: "#94a3b8",
+  breadcrumbSep: {
+    color: "#64748b",
+    fontSize: "14px",
   },
 };
