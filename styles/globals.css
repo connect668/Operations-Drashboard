@@ -16,28 +16,14 @@ body {
 
 /* ── Mobile: ≤768px ─────────────────────────────────────────── */
 @media (max-width: 768px) {
-  /* Root page wrapper: no extra padding on sides */
+  /* Root page wrapper: no padding (header is sticky) */
   .dashboard-page {
-    padding: 12px !important;
+    padding: 0 !important;
   }
 
-  /* Stack container vertically; kill the 2-col grid */
-  .dashboard-container {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 12px !important;
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* Hide desktop sidebar on mobile */
-  .dashboard-sidebar {
-    display: none !important;
-  }
-
-  /* Main content: full width, no overflow */
+  /* Main content: full width, tighter padding */
   .dashboard-main {
-    width: 100% !important;
+    padding: 14px 14px 32px !important;
     max-width: 100% !important;
     min-width: 0 !important;
     overflow-x: hidden !important;
