@@ -46,28 +46,18 @@ body {
     width: 100% !important;
   }
 
-  /* Facilities layout: single column instead of 3-col grid */
-  .facilities-layout {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 14px !important;
-    width: 100% !important;
-  }
-
-  /* Metrics row: single column */
-  .metrics-row {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 12px !important;
-    width: 100% !important;
-  }
-
   /* Log type selector: stack vertically */
   .log-type-selector {
     display: flex !important;
     flex-direction: column !important;
     gap: 10px !important;
     width: 100% !important;
+  }
+
+  /* Score cards: 2-col grid on mobile instead of 4 */
+  .dashboard-main .score-row,
+  [style*="repeat(4, 1fr)"] {
+    grid-template-columns: 1fr 1fr !important;
   }
 
   /* Inputs and textareas: never overflow */
