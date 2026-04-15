@@ -48,12 +48,20 @@ const CATEGORY_KEYWORDS = {
   ],
 };
 
-// Mock facility score targets — replace with real data when available
-const MOCK_SCORES = [
-  { key: "pr",  label: "PR%",  target: 78,  unit: "%",  desc: "Policy Reference Rate",    decimal: false },
-  { key: "pas", label: "PAS%", target: 85,  unit: "%",  desc: "Policy Adherence Score",   decimal: false },
-  { key: "tpr", label: "TPR%", target: 91,  unit: "%",  desc: "Team Performance Rating",  decimal: false },
-  { key: "ppd", label: "PP:D", target: 4.2, unit: "",   desc: "Policies Per Day",          decimal: true  },
+// Facility score cards (Area Manager view)
+// PP/D = Policy Pull to Documentation Ratio — max 6 pulls per 1 decision
+const AM_SCORES = [
+  { key: "pr",  label: "PR%",  target: 78,  unit: "%",  desc: "Policy Reference Rate",                    decimal: false, max: 100 },
+  { key: "pas", label: "PAS%", target: 85,  unit: "%",  desc: "Policy Adherence Score",                   decimal: false, max: 100 },
+  { key: "tpr", label: "TPR%", target: 91,  unit: "%",  desc: "Team Performance Rating",                  decimal: false, max: 100 },
+  { key: "ppd", label: "PP/D", target: 4.2, unit: "x",  desc: "Policy Pull to Documentation Ratio · /6", decimal: true,  max: 6   },
+];
+
+// GM performance snapshot (General Manager view)
+const GM_SCORES = [
+  { key: "pr",  label: "PR%",  target: 74,  unit: "%", desc: "Policy Reference Rate",   decimal: false, max: 100 },
+  { key: "pas", label: "PAS%", target: 88,  unit: "%", desc: "Policy Adherence Score",  decimal: false, max: 100 },
+  { key: "tpr", label: "TPR%", target: 82,  unit: "%", desc: "Team Performance Rating", decimal: false, max: 100 },
 ];
 
 function detectCategory(situation = "", action = "") {
@@ -111,20 +119,22 @@ function CategoryBadge({ item }) {
 // ─── Animated score card ──────────────────────────────────────────────────────
 
 function ScoreCard({ metric, value }) {
-  const color = scoreColor(value, metric.decimal ? 10 : 100);
+  const color = scoreColor(value, metric.max || 100);
   const display = metric.decimal ? value.toFixed(1) : Math.round(value);
+  // Progress bar width: for PPD max=6, otherwise percentage of 100
+  const barPct = metric.max === 6 ? (value / 6) * 100 : value;
   return (
     <div style={styles.scoreCard}>
       <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "10px" }}>
         {metric.label}
       </div>
-      <div style={{ fontSize: "42px", fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: "tabular-nums", transition: "color 0.3s" }}>
+      <div style={{ fontSize: "40px", fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: "tabular-nums", transition: "color 0.3s" }}>
         {display}{metric.unit}
       </div>
       <div style={{ background: "#1f2937", borderRadius: "999px", height: "4px", overflow: "hidden", margin: "12px 0 8px" }}>
         <div style={{
           height: "100%",
-          width: `${metric.decimal ? (value / metric.target) * 100 : (value / 100) * 100}%`,
+          width: `${Math.min(barPct, 100)}%`,
           background: color,
           borderRadius: "999px",
           transition: "background 0.3s, width 0.1s",
@@ -243,8 +253,10 @@ export default function Dashboard() {
   const [personFileLoading, setPersonFileLoading] = useState(false);
   const [personFileTab, setPersonFileTab]         = useState("decisions");
 
-  // Animated score values (0 → mock target when facility selected)
+  // Animated score values for Facilities (Area Manager)
   const [scoreValues, setScoreValues] = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
+  // Animated score values for GM performance snapshot
+  const [gmScoreValues, setGmScoreValues] = useState({ pr: 0, pas: 0, tpr: 0 });
 
   // ─── Role flags ───────────────────────────────────────────────────────────
 
@@ -303,7 +315,7 @@ export default function Dashboard() {
     fetchManagers();
   }, [profile?.company, profile?.role, canViewLeadershipTabs]);
 
-  // Animate score cards when a facility is selected
+  // Animate AM facility score cards when a facility is selected
   useEffect(() => {
     if (!selectedFacility) { setScoreValues({ pr: 0, pas: 0, tpr: 0, ppd: 0 }); return; }
     setScoreValues({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
@@ -324,6 +336,27 @@ export default function Dashboard() {
     raf = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(raf);
   }, [selectedFacility?.facility_number, selectedFacility?.company]);
+
+  // Animate GM performance snapshot on load
+  useEffect(() => {
+    if (!isGeneralManager) return;
+    setGmScoreValues({ pr: 0, pas: 0, tpr: 0 });
+    const duration = 1600;
+    const start = performance.now();
+    let raf;
+    const animate = (now) => {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setGmScoreValues({
+        pr:  parseFloat((eased * 74).toFixed(1)),
+        pas: parseFloat((eased * 88).toFixed(1)),
+        tpr: parseFloat((eased * 82).toFixed(1)),
+      });
+      if (progress < 1) raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [isGeneralManager]);
 
   // ─── Data fetchers ────────────────────────────────────────────────────────
 
@@ -597,25 +630,33 @@ export default function Dashboard() {
       {/* ══════════════════════════════════════════════
           STICKY TOP NAV
       ══════════════════════════════════════════════ */}
-      <header style={styles.topNav}>
+      <header style={{ ...styles.topNav, padding: isMobile ? "14px 16px" : "12px 20px" }}>
         {/* Identity */}
         <div style={styles.topNavBrand}>
-          <div style={styles.topNavName}>{profile?.full_name || "Dashboard"}</div>
-          <div style={styles.topNavMeta}>{profile?.role} · {profile?.company}</div>
+          <div style={{ ...styles.topNavName, fontSize: isMobile ? "17px" : "14px" }}>
+            {profile?.full_name || "Dashboard"}
+          </div>
+          <div style={{ ...styles.topNavMeta, fontSize: isMobile ? "13px" : "11px", marginTop: isMobile ? "3px" : "1px" }}>
+            {profile?.role} · {profile?.company}
+          </div>
         </div>
 
         {/* Desktop nav tabs */}
         {!isMobile && (
           <nav style={styles.topNavItems}>
-            {/* My Logs always visible in nav */}
-            <button
-              className="nav-tab"
-              style={{ ...styles.topNavBtn, ...(activeTab === TABS.myLogs ? styles.topNavBtnActive : {}) }}
-              onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}
-            >
-              My Logs
-            </button>
-            <div style={styles.topNavDivider} />
+            {/* My Logs — hidden for Area Manager */}
+            {!isAreaManager && (
+              <>
+                <button
+                  className="nav-tab"
+                  style={{ ...styles.topNavBtn, ...(activeTab === TABS.myLogs ? styles.topNavBtnActive : {}) }}
+                  onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}
+                >
+                  My Logs
+                </button>
+                <div style={styles.topNavDivider} />
+              </>
+            )}
             {navItems.map((item, i) => {
               if (!item.show) return null;
               if (item.divider) return <div key={i} style={styles.topNavDivider} />;
@@ -642,9 +683,11 @@ export default function Dashboard() {
             <button style={styles.topNavLogout} onClick={handleLogout}>Log Out</button>
           ) : (
             <div style={{ display: "flex", gap: "8px" }}>
-              <button style={styles.mobileMenuBtn} onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); setMobileMenuOpen(false); }}>
-                My Logs
-              </button>
+              {!isAreaManager && (
+                <button style={styles.mobileMenuBtn} onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); setMobileMenuOpen(false); }}>
+                  My Logs
+                </button>
+              )}
               <button style={styles.mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
                 {mobileMenuOpen ? "✕" : "☰"}
               </button>
@@ -682,6 +725,15 @@ export default function Dashboard() {
           MAIN CONTENT
       ══════════════════════════════════════════════ */}
       <main className="dashboard-main" style={styles.main}>
+
+        {/* ════ GM Performance Snapshot (always visible for General Manager) ════ */}
+        {isGeneralManager && (
+          <div style={{ ...styles.scoreRow, gridTemplateColumns: "repeat(3, 1fr)" }} className="fade-up">
+            {GM_SCORES.map((metric) => (
+              <ScoreCard key={metric.key} metric={metric} value={gmScoreValues[metric.key] || 0} />
+            ))}
+          </div>
+        )}
 
         {/* ════ Request Policy ════ */}
         {activeTab === TABS.policy && (
@@ -1117,7 +1169,7 @@ export default function Dashboard() {
             {selectedFacility && !selectedPerson && (
               <>
                 <div style={styles.scoreRow} className="fade-up">
-                  {MOCK_SCORES.map((metric) => (
+                  {AM_SCORES.map((metric) => (
                     <ScoreCard key={metric.key} metric={metric} value={scoreValues[metric.key] || 0} />
                   ))}
                 </div>
