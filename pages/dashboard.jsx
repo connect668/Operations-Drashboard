@@ -19,6 +19,11 @@ const ROLE_LEVELS = {
   "Area Manager": 3,
 };
 
+const MOCK_POLICY_BREAKDOWN = {
+  referenced: 80,
+  notReferenced: 20,
+};
+
 function getNextRole(role) {
   if (role === "Manager") return "General Manager";
   if (role === "General Manager") return "Area Coach";
@@ -27,7 +32,6 @@ function getNextRole(role) {
 
 function formatDate(value) {
   if (!value) return "Unknown date";
-
   try {
     return new Date(value).toLocaleString();
   } catch {
@@ -39,21 +43,8 @@ function getManagerDisplayName(manager) {
   return manager?.full_name || "Unnamed Manager";
 }
 
-function calculateCompliance(decisionLogs) {
-  if (!decisionLogs || decisionLogs.length === 0) return 92;
-
-  const referencedCount = decisionLogs.filter((item) =>
-    String(item?.policy_referenced || "").trim()
-  ).length;
-
-  return Math.max(
-    0,
-    Math.min(100, Math.round((referencedCount / decisionLogs.length) * 100))
-  );
-}
-
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState(TABS.coaching);
+  const [activeTab, setActiveTab] = useState(TABS.policy);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -79,6 +70,7 @@ export default function Dashboard() {
   const [teamCoachingLoading, setTeamCoachingLoading] = useState(false);
   const [managersLoading, setManagersLoading] = useState(false);
   const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
+  const [myLogsLoading, setMyLogsLoading] = useState(false);
   const [facilitiesLoading, setFacilitiesLoading] = useState(false);
   const [facilityGMsLoading, setFacilityGMsLoading] = useState(false);
   const [gmDataLoading, setGmDataLoading] = useState(false);
@@ -99,7 +91,6 @@ export default function Dashboard() {
   const [myLogType, setMyLogType] = useState(null);
   const [myDecisions, setMyDecisions] = useState([]);
   const [myCoaching, setMyCoaching] = useState([]);
-  const [myLogsLoading, setMyLogsLoading] = useState(false);
 
   const [isMobile, setIsMobile] = useState(false);
 
@@ -107,13 +98,8 @@ export default function Dashboard() {
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [facilityGMs, setFacilityGMs] = useState([]);
   const [selectedGM, setSelectedGM] = useState(null);
+  const [gmManagerCount, setGmManagerCount] = useState(0);
 
-  const [gmOwnDecisionLogs, setGmOwnDecisionLogs] = useState([]);
-  const [gmOwnCoachingRequests, setGmOwnCoachingRequests] = useState([]);
-  const [facilityManagerSummaries, setFacilityManagerSummaries] = useState([]);
-  const [gmManagerIds, setGmManagerIds] = useState([]);
-
-  const [complianceTarget, setComplianceTarget] = useState(92);
   const [complianceDisplay, setComplianceDisplay] = useState(0);
 
   const currentRoleLevel = useMemo(
@@ -126,6 +112,15 @@ export default function Dashboard() {
   const canViewFacilities =
     profile?.role === "Area Manager" || profile?.role === "Area Coach";
   const nextRole = getNextRole(profile?.role);
+
+  const shouldShowRequestCoachingTab =
+    profile?.role !== "Area Manager" && profile?.role !== "General Manager";
+
+  const compliancePercent = Math.round(
+    (MOCK_POLICY_BREAKDOWN.referenced /
+      (MOCK_POLICY_BREAKDOWN.referenced + MOCK_POLICY_BREAKDOWN.notReferenced)) *
+      100
+  );
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -173,25 +168,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!profile?.role) return;
-
-    if (profile.role === "Area Manager") {
-      setActiveTab(TABS.facilities);
-    }
-  }, [profile?.role]);
-
-  useEffect(() => {
-    if (
-      profile?.role === "Area Manager" &&
-      activeTab === TABS.facilities &&
-      user?.id
-    ) {
-      fetchFacilities();
-    }
-  }, [profile?.role, activeTab, user?.id]);
-
-  useEffect(() => {
-    const target = complianceTarget ?? 0;
+    const target = selectedGM ? compliancePercent : 0;
     setComplianceDisplay(0);
 
     const duration = 900;
@@ -211,7 +188,7 @@ export default function Dashboard() {
     rafId = requestAnimationFrame(animate);
 
     return () => cancelAnimationFrame(rafId);
-  }, [complianceTarget, selectedGM?.id]);
+  }, [selectedGM, compliancePercent]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -431,19 +408,21 @@ export default function Dashboard() {
     setManagerFileTab(null);
 
     try {
-      const [{ data: decisionData, error: decisionError }, { data: coachingData, error: coachingError }] =
-        await Promise.all([
-          supabase
-            .from("decision_logs")
-            .select("*")
-            .eq("user_id", manager.id)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("coaching_requests")
-            .select("*")
-            .eq("user_id", manager.id)
-            .order("created_at", { ascending: false }),
-        ]);
+      const [
+        { data: decisionData, error: decisionError },
+        { data: coachingData, error: coachingError },
+      ] = await Promise.all([
+        supabase
+          .from("decision_logs")
+          .select("*")
+          .eq("user_id", manager.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("coaching_requests")
+          .select("*")
+          .eq("user_id", manager.id)
+          .order("created_at", { ascending: false }),
+      ]);
 
       if (decisionError) throw decisionError;
       if (coachingError) throw coachingError;
@@ -584,11 +563,7 @@ export default function Dashboard() {
     setSelectedFacility(null);
     setFacilityGMs([]);
     setSelectedGM(null);
-    setGmOwnDecisionLogs([]);
-    setGmOwnCoachingRequests([]);
-    setFacilityManagerSummaries([]);
-    setGmManagerIds([]);
-    setComplianceTarget(92);
+    setGmManagerCount(0);
 
     try {
       const { data, error } = await supabase
@@ -617,11 +592,7 @@ export default function Dashboard() {
     setSelectedFacility(facility);
     setSelectedGM(null);
     setFacilityGMs([]);
-    setGmOwnDecisionLogs([]);
-    setGmOwnCoachingRequests([]);
-    setFacilityManagerSummaries([]);
-    setGmManagerIds([]);
-    setComplianceTarget(92);
+    setGmManagerCount(0);
     setFacilitiesMessage("");
     setFacilityGMsLoading(true);
 
@@ -654,109 +625,18 @@ export default function Dashboard() {
 
     setSelectedGM(gm);
     setFacilitiesMessage("");
-    setGmOwnDecisionLogs([]);
-    setGmOwnCoachingRequests([]);
-    setFacilityManagerSummaries([]);
-    setGmManagerIds([]);
-    setComplianceTarget(92);
+    setGmManagerCount(0);
     setGmDataLoading(true);
 
     try {
-      const [
-        { data: assignmentRows, error: assignmentError },
-        { data: gmDecisionRows, error: gmDecisionError },
-        { data: gmCoachingRows, error: gmCoachingError },
-      ] = await Promise.all([
-        supabase
-          .from("gm_manager_assignments")
-          .select("manager_id")
-          .eq("gm_id", gm.id),
-        supabase
-          .from("decision_logs")
-          .select("id, user_id, created_at, policy_referenced")
-          .eq("user_id", gm.id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("coaching_requests")
-          .select("id, user_id, created_at, status")
-          .eq("user_id", gm.id)
-          .order("created_at", { ascending: false }),
-      ]);
+      const { data, error } = await supabase
+        .from("gm_manager_assignments")
+        .select("manager_id")
+        .eq("gm_id", gm.id);
 
-      if (assignmentError) throw assignmentError;
-      if (gmDecisionError) throw gmDecisionError;
-      if (gmCoachingError) throw gmCoachingError;
+      if (error) throw error;
 
-      const managerIds = (assignmentRows || [])
-        .map((row) => row.manager_id)
-        .filter(Boolean);
-
-      setGmManagerIds(managerIds);
-      setGmOwnDecisionLogs(gmDecisionRows || []);
-      setGmOwnCoachingRequests(gmCoachingRows || []);
-
-      let managerProfiles = [];
-      let managerDecisionRows = [];
-      let managerCoachingRows = [];
-
-      if (managerIds.length > 0) {
-        const [
-          { data: managerProfileRows, error: managerProfileError },
-          { data: managerDecisionData, error: managerDecisionDataError },
-          { data: managerCoachingData, error: managerCoachingDataError },
-        ] = await Promise.all([
-          supabase
-            .from("profiles")
-            .select("id, full_name, role, company, facility_number")
-            .in("id", managerIds)
-            .order("full_name", { ascending: true }),
-          supabase
-            .from("decision_logs")
-            .select("id, user_id, created_at, policy_referenced")
-            .in("user_id", managerIds),
-          supabase
-            .from("coaching_requests")
-            .select("id, user_id, created_at, status")
-            .in("user_id", managerIds),
-        ]);
-
-        if (managerProfileError) throw managerProfileError;
-        if (managerDecisionDataError) throw managerDecisionDataError;
-        if (managerCoachingDataError) throw managerCoachingDataError;
-
-        managerProfiles = managerProfileRows || [];
-        managerDecisionRows = managerDecisionData || [];
-        managerCoachingRows = managerCoachingData || [];
-      }
-
-      const decisionCountMap = managerDecisionRows.reduce((acc, item) => {
-        acc[item.user_id] = (acc[item.user_id] || 0) + 1;
-        return acc;
-      }, {});
-
-      const coachingCountMap = managerCoachingRows.reduce((acc, item) => {
-        acc[item.user_id] = (acc[item.user_id] || 0) + 1;
-        return acc;
-      }, {});
-
-      const summaries = managerProfiles.map((manager) => ({
-        id: manager.id,
-        full_name: manager.full_name,
-        role: manager.role || "Manager",
-        company: manager.company,
-        facility_number: manager.facility_number,
-        decisionCount: decisionCountMap[manager.id] || 0,
-        coachingCount: coachingCountMap[manager.id] || 0,
-      }));
-
-      setFacilityManagerSummaries(summaries);
-
-      const complianceSource = [...(gmDecisionRows || []), ...managerDecisionRows];
-      setComplianceTarget(calculateCompliance(complianceSource));
-
-      if (managerIds.length === 0) {
-        setFacilitiesMessage("No managers assigned to this GM yet.");
-      }
+      setGmManagerCount((data || []).length);
     } catch (error) {
       console.error("Fetch GM data error:", error);
       setFacilitiesMessage(error.message || "Failed to load GM data.");
@@ -775,8 +655,9 @@ export default function Dashboard() {
   const navItems = [
     { key: TABS.policy, label: "Request Policy" },
     { key: TABS.decision, label: "Document Decision" },
-    { key: TABS.coaching, label: "Request Coaching" },
-    { key: TABS.myLogs, label: "My Logs" },
+    ...(shouldShowRequestCoachingTab
+      ? [{ key: TABS.coaching, label: "Request Coaching" }]
+      : []),
     ...(canViewLeadershipTabs && !isAreaManager
       ? [
           { key: TABS.teamDecisions, label: "Team Decisions" },
@@ -814,6 +695,16 @@ export default function Dashboard() {
           </div>
 
           <div style={styles.headerActions}>
+            <button
+              style={{
+                ...styles.headerActionButton,
+                ...(activeTab === TABS.myLogs ? styles.headerActionButtonActive : {}),
+              }}
+              onClick={() => handleTabChange(TABS.myLogs)}
+            >
+              My Logs
+            </button>
+
             <button style={styles.logoutButton} onClick={handleLogout}>
               Log Out
             </button>
@@ -932,7 +823,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {activeTab === TABS.coaching && (
+          {activeTab === TABS.coaching && shouldShowRequestCoachingTab && (
             <>
               <div style={styles.headerCard}>
                 <h1 style={styles.title}>Request Coaching</h1>
@@ -1505,7 +1396,7 @@ export default function Dashboard() {
                 <h1 style={styles.title}>Facilities</h1>
                 <p style={styles.subtitle}>
                   Select a facility to review General Manager performance and
-                  operational activity.
+                  policy compliance.
                 </p>
 
                 {(selectedFacility || selectedGM) ? (
@@ -1516,10 +1407,7 @@ export default function Dashboard() {
                         setSelectedFacility(null);
                         setFacilityGMs([]);
                         setSelectedGM(null);
-                        setGmOwnDecisionLogs([]);
-                        setGmOwnCoachingRequests([]);
-                        setFacilityManagerSummaries([]);
-                        setGmManagerIds([]);
+                        setGmManagerCount(0);
                         setFacilitiesMessage("");
                       }}
                     >
@@ -1533,10 +1421,7 @@ export default function Dashboard() {
                           style={styles.breadcrumbLink}
                           onClick={() => {
                             setSelectedGM(null);
-                            setGmOwnDecisionLogs([]);
-                            setGmOwnCoachingRequests([]);
-                            setFacilityManagerSummaries([]);
-                            setGmManagerIds([]);
+                            setGmManagerCount(0);
                             setFacilitiesMessage("");
                           }}
                         >
@@ -1656,128 +1541,105 @@ export default function Dashboard() {
                       {selectedFacility?.facility_number}
                     </div>
                     <div style={{ ...styles.rowMeta, marginTop: "4px" }}>
-                      {gmManagerIds.length} manager{gmManagerIds.length !== 1 ? "s" : ""} assigned
+                      {gmManagerCount} manager{gmManagerCount !== 1 ? "s" : ""} assigned
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      ...styles.statGrid,
-                      gridTemplateColumns: isMobile
-                        ? "repeat(2, minmax(0, 1fr))"
-                        : "repeat(3, minmax(0, 1fr))",
-                    }}
-                  >
-                    <div style={styles.statCard}>
-                      <div style={{ ...styles.statValue, color: complianceColor }}>
-                        {complianceDisplay}%
+                  {gmDataLoading ? (
+                    <div style={styles.panelCard}>
+                      <p style={styles.message}>Loading GM data...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        style={{
+                          ...styles.statGrid,
+                          gridTemplateColumns: isMobile
+                            ? "repeat(2, minmax(0, 1fr))"
+                            : "repeat(3, minmax(0, 1fr))",
+                        }}
+                      >
+                        <div style={styles.statCard}>
+                          <div style={{ ...styles.statValue, color: complianceColor }}>
+                            {complianceDisplay}%
+                          </div>
+                          <div style={styles.statLabel}>Policy Compliance</div>
+                        </div>
+
+                        <div style={styles.statCard}>
+                          <div style={{ ...styles.statValue, color: "#4ade80" }}>
+                            {MOCK_POLICY_BREAKDOWN.referenced}
+                          </div>
+                          <div style={styles.statLabel}>Logs Referencing Policy</div>
+                        </div>
+
+                        <div style={styles.statCard}>
+                          <div style={{ ...styles.statValue, color: "#f87171" }}>
+                            {MOCK_POLICY_BREAKDOWN.notReferenced}
+                          </div>
+                          <div style={styles.statLabel}>Logs Not Referencing Policy</div>
+                        </div>
                       </div>
-                      <div style={styles.statLabel}>Policy Compliance</div>
-                    </div>
 
-                    <div style={styles.statCard}>
-                      <div style={styles.statValue}>{gmOwnDecisionLogs.length}</div>
-                      <div style={styles.statLabel}>GM Decision Logs</div>
-                    </div>
+                      <div style={styles.panelCard}>
+                        <div style={styles.sectionHeading}>Policy Compliance Breakdown</div>
+                        <p style={{ ...styles.message, marginTop: "8px" }}>
+                          Mock facility compliance data based on policy reference behavior.
+                        </p>
 
-                    <div style={styles.statCard}>
-                      <div style={styles.statValue}>{gmOwnCoachingRequests.length}</div>
-                      <div style={styles.statLabel}>GM Coaching Requests</div>
-                    </div>
-                  </div>
-
-                  <div style={styles.panelCard}>
-                    <div style={styles.sectionHeading}>Facility Activity</div>
-
-                    <div
-                      style={{
-                        ...styles.splitLayout,
-                        gridTemplateColumns: isMobile ? "1fr" : "320px minmax(0, 1fr)",
-                        marginTop: "18px",
-                      }}
-                    >
-                      <div style={styles.panelInset}>
-                        <div style={styles.feedLabel}>GM Logs & Requests</div>
-
-                        <div style={styles.cardList}>
-                          <div style={styles.feedCard}>
-                            <div style={styles.feedName}>Decision Logs</div>
-                            <div style={styles.statValueSmall}>
-                              {gmOwnDecisionLogs.length}
-                            </div>
-                            <div style={styles.rowMeta}>
-                              Submitted directly by this GM
-                            </div>
+                        <div style={styles.breakdownWrap}>
+                          <div style={styles.breakdownBar}>
+                            <div
+                              style={{
+                                ...styles.breakdownReferenced,
+                                width: `${MOCK_POLICY_BREAKDOWN.referenced}%`,
+                              }}
+                            />
+                            <div
+                              style={{
+                                ...styles.breakdownNotReferenced,
+                                width: `${MOCK_POLICY_BREAKDOWN.notReferenced}%`,
+                              }}
+                            />
                           </div>
 
-                          <div style={styles.feedCard}>
-                            <div style={styles.feedName}>Coaching Requests</div>
-                            <div style={styles.statValueSmall}>
-                              {gmOwnCoachingRequests.length}
+                          <div
+                            style={{
+                              ...styles.splitLayout,
+                              gridTemplateColumns: isMobile
+                                ? "1fr"
+                                : "repeat(2, minmax(0, 1fr))",
+                              marginTop: "18px",
+                            }}
+                          >
+                            <div style={styles.breakdownCardGreen}>
+                              <div style={styles.feedName}>Referencing Policy</div>
+                              <div style={{ ...styles.statValueSmall, color: "#4ade80" }}>
+                                {MOCK_POLICY_BREAKDOWN.referenced}
+                              </div>
+                              <div style={styles.rowMeta}>
+                                Logs that included a policy reference
+                              </div>
                             </div>
-                            <div style={styles.rowMeta}>
-                              Support requests submitted by this GM
+
+                            <div style={styles.breakdownCardRed}>
+                              <div style={styles.feedName}>Not Referencing Policy</div>
+                              <div style={{ ...styles.statValueSmall, color: "#f87171" }}>
+                                {MOCK_POLICY_BREAKDOWN.notReferenced}
+                              </div>
+                              <div style={styles.rowMeta}>
+                                Logs missing a policy reference
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-
-                      <div style={styles.panelInset}>
-                        <div style={styles.feedLabel}>Facility Managers</div>
-
-                        {facilityManagerSummaries.length === 0 ? (
-                          <div style={styles.emptyCard}>
-                            No managers assigned to this GM yet.
-                          </div>
-                        ) : (
-                          <div style={styles.cardList}>
-                            {facilityManagerSummaries.map((manager) => (
-                              <div key={manager.id} style={styles.managerSummaryCard}>
-                                <div style={styles.sectionTopRow}>
-                                  <div>
-                                    <div style={styles.feedName}>
-                                      {manager.full_name}
-                                    </div>
-                                    <div style={styles.feedMeta}>
-                                      {manager.role || "Manager"}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div
-                                  style={{
-                                    ...styles.statGrid,
-                                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                                    marginTop: "12px",
-                                  }}
-                                >
-                                  <div style={styles.statCardCompact}>
-                                    <div style={styles.statValueSmall}>
-                                      {manager.decisionCount}
-                                    </div>
-                                    <div style={styles.statLabel}>Logs</div>
-                                  </div>
-
-                                  <div style={styles.statCardCompact}>
-                                    <div style={styles.statValueSmall}>
-                                      {manager.coachingCount}
-                                    </div>
-                                    <div style={styles.statLabel}>Requests</div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                    </>
+                  )}
                 </>
-              ) : null}
-
-              {selectedFacility && !selectedGM ? (
+              ) : selectedFacility ? (
                 <div style={styles.emptyCard}>
-                  Select a general manager to view facility activity.
+                  Select a general manager to view policy compliance breakdown.
                 </div>
               ) : null}
             </>
@@ -1823,6 +1685,7 @@ const styles = {
     justifyContent: "flex-end",
     gap: "12px",
     marginLeft: "auto",
+    flexWrap: "wrap",
   },
   smallLabel: {
     fontSize: "11px",
@@ -1874,6 +1737,21 @@ const styles = {
     color: "#ffffff",
     border: "1px solid #2563eb",
     boxShadow: "0 10px 20px rgba(37,99,235,0.2)",
+  },
+  headerActionButton: {
+    padding: "12px 16px",
+    borderRadius: "14px",
+    border: "1px solid #334155",
+    background: "#08111f",
+    color: "#e5e7eb",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  headerActionButtonActive: {
+    background: "linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%)",
+    border: "1px solid #2563eb",
+    color: "#ffffff",
   },
   logoutButton: {
     padding: "12px 16px",
@@ -1930,12 +1808,6 @@ const styles = {
     borderRadius: "22px",
     padding: "22px",
     boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-  },
-  panelInset: {
-    background: "#0b1324",
-    border: "1px solid #18283f",
-    borderRadius: "18px",
-    padding: "18px",
   },
   splitLayout: {
     display: "grid",
@@ -2192,13 +2064,6 @@ const styles = {
     padding: "22px",
     textAlign: "center",
   },
-  statCardCompact: {
-    background: "#08111f",
-    border: "1px solid #18283f",
-    borderRadius: "16px",
-    padding: "16px",
-    textAlign: "center",
-  },
   statValue: {
     fontSize: "42px",
     fontWeight: 800,
@@ -2220,11 +2085,37 @@ const styles = {
     color: "#94a3b8",
     fontWeight: 800,
   },
-  managerSummaryCard: {
-    background: "#08111f",
-    border: "1px solid #18283f",
+  breakdownWrap: {
+    marginTop: "20px",
+  },
+  breakdownBar: {
+    width: "100%",
+    height: "18px",
+    display: "flex",
+    overflow: "hidden",
+    borderRadius: "999px",
+    background: "#111827",
+    border: "1px solid #1f2937",
+  },
+  breakdownReferenced: {
+    height: "100%",
+    background: "#4ade80",
+  },
+  breakdownNotReferenced: {
+    height: "100%",
+    background: "#f87171",
+  },
+  breakdownCardGreen: {
+    background: "rgba(74, 222, 128, 0.08)",
+    border: "1px solid rgba(74, 222, 128, 0.25)",
     borderRadius: "18px",
-    padding: "16px",
+    padding: "18px",
+  },
+  breakdownCardRed: {
+    background: "rgba(248, 113, 113, 0.08)",
+    border: "1px solid rgba(248, 113, 113, 0.25)",
+    borderRadius: "18px",
+    padding: "18px",
   },
   breadcrumb: {
     display: "flex",
