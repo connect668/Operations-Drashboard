@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS = {
+  compliance:    "compliance",
   policy:        "policy",
   decision:      "decision",
   coaching:      "coaching",
@@ -56,6 +57,18 @@ const AM_SCORES = [
   { key: "tpr", label: "TPR%", target: 91,  unit: "%",  desc: "Team Performance Rating",                  decimal: false, max: 100 },
   { key: "ppd", label: "PP/D", target: 4.2, unit: "x",  desc: "Policy Pull to Documentation Ratio · /6", decimal: true,  max: 6   },
 ];
+
+// Area Manager Policy Compliance — mock data (swap these values with Supabase queries when live)
+const AM_COMPLIANCE_MOCK = {
+  pas:        87,    // Area Policy Adherence Score (%)
+  ppd:        3.8,   // Area Policy Pull to Documentation Ratio (out of 6)
+  totalPulls: 142,   // Total policy pulls this month
+  categories: [
+    { label: "HR",           pct: 45 },
+    { label: "Operations",   pct: 32 },
+    { label: "Food Safety",  pct: 23 },
+  ],
+};
 
 // GM performance snapshot (General Manager view)
 const GM_SCORES = [
@@ -257,6 +270,8 @@ export default function Dashboard() {
   const [scoreValues, setScoreValues] = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
   // Animated score values for GM performance snapshot
   const [gmScoreValues, setGmScoreValues] = useState({ pr: 0, pas: 0, tpr: 0 });
+  // Animated values for AM Policy Compliance Dashboard
+  const [amComplianceValues, setAmComplianceValues] = useState({ pas: 0, ppd: 0, pulls: 0 });
 
   // ─── Role flags ───────────────────────────────────────────────────────────
 
@@ -357,6 +372,32 @@ export default function Dashboard() {
     raf = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(raf);
   }, [isGeneralManager]);
+
+  // Default tab for Area Manager: Policy Compliance Dashboard
+  useEffect(() => {
+    if (isAreaManager) setActiveTab(TABS.compliance);
+  }, [isAreaManager]);
+
+  // Animate AM Policy Compliance Dashboard when tab becomes active
+  useEffect(() => {
+    if (!isAreaManager || activeTab !== TABS.compliance) return;
+    setAmComplianceValues({ pas: 0, ppd: 0, pulls: 0 });
+    const duration = 1600;
+    const start = performance.now();
+    let raf;
+    const animate = (now) => {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setAmComplianceValues({
+        pas:   parseFloat((eased * AM_COMPLIANCE_MOCK.pas).toFixed(1)),
+        ppd:   parseFloat((eased * AM_COMPLIANCE_MOCK.ppd).toFixed(2)),
+        pulls: Math.round(eased * AM_COMPLIANCE_MOCK.totalPulls),
+      });
+      if (progress < 1) raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [isAreaManager, activeTab]);
 
   // ─── Data fetchers ────────────────────────────────────────────────────────
 
@@ -603,8 +644,10 @@ export default function Dashboard() {
   // ─── Nav items ────────────────────────────────────────────────────────────
 
   const navItems = [
-    { tab: TABS.policy,        label: "Request Policy",    show: true },
-    { tab: TABS.decision,      label: "Document Decision",  show: true },
+    { tab: TABS.compliance,    label: "Policy Compliance",  show: isAreaManager },
+    { divider: true,                                         show: isAreaManager },
+    { tab: TABS.policy,        label: "Request Policy",     show: true },
+    { tab: TABS.decision,      label: "Document Decision",  show: !isAreaManager },
     { tab: TABS.coaching,      label: "Request Coaching",   show: canRequestCoaching },
     { divider: true,                                         show: canViewLeadershipTabs && !isAreaManager },
     { tab: TABS.teamDecisions, label: "Team Decisions",     show: canViewLeadershipTabs && !isAreaManager },
@@ -733,6 +776,108 @@ export default function Dashboard() {
               <ScoreCard key={metric.key} metric={metric} value={gmScoreValues[metric.key] || 0} />
             ))}
           </div>
+        )}
+
+        {/* ════ Policy Compliance Dashboard (Area Manager only) ════ */}
+        {activeTab === TABS.compliance && isAreaManager && (
+          <>
+            <div style={styles.headerCard}>
+              <h1 style={styles.title}>Policy Compliance Dashboard</h1>
+              <p style={styles.subtitle}>Area-wide adherence, pull patterns, and documentation health.</p>
+            </div>
+
+            {/* ── Top metric row: PAS% · PP/D · Total Pulls ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "14px" }} className="fade-up">
+              {/* Area PAS% */}
+              <ScoreCard
+                metric={{ label: "Area PAS%", unit: "%", desc: "Policy Adherence Score · Area-wide", decimal: false, max: 100 }}
+                value={amComplianceValues.pas}
+              />
+              {/* Area PP/D */}
+              <ScoreCard
+                metric={{ label: "Area PP/D", unit: "x", desc: "Policy Pull to Documentation Ratio · /6", decimal: true, max: 6 }}
+                value={amComplianceValues.ppd}
+              />
+              {/* Total policy pulls */}
+              <div style={styles.scoreCard}>
+                <div style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#6b7280", textTransform: "uppercase", marginBottom: "10px" }}>
+                  Pulls / Month
+                </div>
+                <div style={{ fontSize: "40px", fontWeight: 800, color: "#60a5fa", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                  {amComplianceValues.pulls}
+                </div>
+                <div style={{ background: "#1f2937", borderRadius: "999px", height: "4px", overflow: "hidden", margin: "12px 0 8px" }}>
+                  <div style={{
+                    height: "100%",
+                    width: `${Math.min((amComplianceValues.pulls / AM_COMPLIANCE_MOCK.totalPulls) * 100, 100)}%`,
+                    background: "#60a5fa",
+                    borderRadius: "999px",
+                    transition: "background 0.3s, width 0.1s",
+                  }} />
+                </div>
+                <div style={{ fontSize: "11px", color: "#6b7280" }}>Total policy pulls this month</div>
+              </div>
+            </div>
+
+            {/* ── Category breakdown ── */}
+            <div style={styles.panelCard} className="fade-up">
+              <div style={styles.sectionHeading}>Policy Pull Breakdown by Category</div>
+              <p style={{ ...styles.subtitle, marginTop: "6px", marginBottom: "20px" }}>
+                Distribution of policy pulls across categories this month.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {AM_COMPLIANCE_MOCK.categories.map((cat, idx) => {
+                  const catColor = CATEGORY_COLORS[cat.label] || { color: "#94a3b8", border: "rgba(148,163,184,0.3)", bg: "rgba(148,163,184,0.1)" };
+                  // Animate the bar width based on amComplianceValues.pulls progress proxy
+                  const animatedPct = amComplianceValues.pulls > 0
+                    ? parseFloat(((amComplianceValues.pulls / AM_COMPLIANCE_MOCK.totalPulls) * cat.pct).toFixed(1))
+                    : 0;
+                  return (
+                    <div key={cat.label}>
+                      {/* Label row */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          {idx === 0 && (
+                            <span style={{
+                              fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
+                              background: "rgba(251,191,36,0.12)", color: "#fbbf24",
+                              border: "1px solid rgba(251,191,36,0.3)",
+                              padding: "2px 8px", borderRadius: "999px", textTransform: "uppercase",
+                            }}>
+                              Most Common
+                            </span>
+                          )}
+                          <span style={{
+                            display: "inline-flex", alignItems: "center",
+                            padding: "3px 10px", borderRadius: "999px",
+                            fontSize: "11px", fontWeight: 700,
+                            textTransform: "uppercase", letterSpacing: "0.06em",
+                            background: catColor.bg, color: catColor.color, border: `1px solid ${catColor.border}`,
+                          }}>
+                            {cat.label}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: "20px", fontWeight: 800, color: catColor.color, fontVariantNumeric: "tabular-nums" }}>
+                          {animatedPct.toFixed(0)}%
+                        </span>
+                      </div>
+                      {/* Bar */}
+                      <div style={{ background: "#1f2937", borderRadius: "999px", height: "6px", overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%",
+                          width: `${Math.min(animatedPct, 100)}%`,
+                          background: catColor.color,
+                          borderRadius: "999px",
+                          transition: "width 0.1s ease",
+                        }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
 
         {/* ════ Request Policy ════ */}
