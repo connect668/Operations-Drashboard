@@ -54,9 +54,9 @@ body {
     width: 100% !important;
   }
 
-  /* Score cards: 2-col grid on mobile instead of 4 */
-  .dashboard-main .score-row,
-  [style*="repeat(4, 1fr)"] {
+  /* Score cards: 2-col grid on mobile */
+  [style*="repeat(4, 1fr)"],
+  [style*="repeat(3, 1fr)"] {
     grid-template-columns: 1fr 1fr !important;
   }
 
