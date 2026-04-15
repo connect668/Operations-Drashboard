@@ -695,7 +695,7 @@ export default function Dashboard() {
   const complianceColor = complianceDisplay >= 70 ? "#4ade80" : complianceDisplay >= 40 ? "#fbbf24" : "#f87171";
 
   return (
-    <div className="dashboard-page" style={{ ...styles.page, padding: isMobile ? "12px" : "24px" }}>
+    <div className="dashboard-page" style={styles.page}>
       {/* ── Keyframe animations ── */}
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes amFadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -704,111 +704,99 @@ export default function Dashboard() {
         .am-facility-btn:hover { transform: translateY(-1px) !important; }
         .am-gm-card { transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease !important; cursor: pointer; }
         .am-gm-card:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important; border-color: #334155 !important; }
-        .nav-btn-hover:hover { background: #1e293b !important; }
+        .top-nav-btn { transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease !important; }
+        .top-nav-btn:hover { background: #1e293b !important; color: #f8fafc !important; }
       `}} />
 
-      {/* ── Mobile top bar ── */}
-      {isMobile && (
-        <div style={styles.mobileTopBar}>
-          <div>
-            <div style={styles.mobileTopName}>{profile?.full_name || "Dashboard"}</div>
-            <div style={styles.mobileTopRole}>{profile?.role} · {profile?.company}</div>
-          </div>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              style={{ ...styles.mobileMenuBtn, fontSize: "13px", padding: "8px 12px" }}
-              onClick={() => navClick(() => { setActiveTab(TABS.myLogs); fetchMyLogs(); })}
-            >
-              My Logs
-            </button>
-            <button style={styles.mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
-              {mobileMenuOpen ? "✕" : "☰"}
-            </button>
-          </div>
+      {/* ══════════════════════════════════════════════
+          TOP NAVIGATION HEADER
+      ══════════════════════════════════════════════ */}
+      <header style={styles.topNav}>
+        {/* Left — user identity */}
+        <div style={styles.topNavBrand}>
+          <div style={styles.topNavName}>{profile?.full_name || "Dashboard"}</div>
+          <div style={styles.topNavMeta}>{profile?.role} · {profile?.company}</div>
         </div>
-      )}
 
-      {/* ── Mobile nav overlay ── */}
-      {isMobile && mobileMenuOpen && (
-        <div style={styles.mobileOverlay}>
-          <div style={styles.navGroup}>
+        {/* Center — nav tabs (desktop) */}
+        {!isMobile && (
+          <nav style={styles.topNavItems}>
             {navItems.map((item, i) => {
               if (!item.show) return null;
-              if (item.divider) return <div key={i} style={styles.navDivider} />;
+              if (item.divider) return <div key={i} style={styles.topNavDivider} />;
+              const isActive = activeTab === item.tab;
               return (
                 <button
                   key={item.tab}
-                  style={{ ...styles.navButton, ...(activeTab === item.tab ? styles.navButtonActive : {}) }}
-                  onClick={() => navClick(() => {
+                  className="top-nav-btn"
+                  style={{
+                    ...styles.topNavBtn,
+                    ...(isActive ? styles.topNavBtnActive : {}),
+                  }}
+                  onClick={() => {
                     setActiveTab(item.tab);
                     if (item.onEnter) item.onEnter();
                     if (item.tab === TABS.myLogs) fetchMyLogs();
-                  })}
+                  }}
                 >
                   {item.label}
                 </button>
               );
             })}
-            <div style={styles.navDivider} />
-            <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
-          </div>
+          </nav>
+        )}
+
+        {/* Right — logout (desktop) / hamburger (mobile) */}
+        <div style={styles.topNavRight}>
+          {!isMobile ? (
+            <button style={styles.topNavLogout} onClick={handleLogout}>Log Out</button>
+          ) : (
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                style={styles.mobileMenuBtn}
+                onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); setMobileMenuOpen(false); }}
+              >
+                My Logs
+              </button>
+              <button
+                style={styles.mobileMenuBtn}
+                onClick={() => setMobileMenuOpen((v) => !v)}
+              >
+                {mobileMenuOpen ? "✕" : "☰"}
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Mobile dropdown nav ── */}
+      {isMobile && mobileMenuOpen && (
+        <div style={styles.mobileDropdown}>
+          {navItems.map((item, i) => {
+            if (!item.show) return null;
+            if (item.divider) return <div key={i} style={styles.navDivider} />;
+            return (
+              <button
+                key={item.tab}
+                style={{ ...styles.navButton, ...(activeTab === item.tab ? styles.navButtonActive : {}) }}
+                onClick={() => {
+                  setActiveTab(item.tab);
+                  if (item.onEnter) item.onEnter();
+                  if (item.tab === TABS.myLogs) fetchMyLogs();
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+          <div style={styles.navDivider} />
+          <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
         </div>
       )}
 
-      <div className="dashboard-container" style={isMobile ? styles.containerMobile : styles.container}>
-
-        {/* ── Desktop sidebar ── */}
-        {!isMobile && (
-          <aside className="dashboard-sidebar" style={styles.sidebar}>
-            <div style={styles.brandCard}>
-              <div style={styles.smallLabel}>SIGNED IN AS</div>
-              <div style={styles.userName}>{profile?.full_name || "No name found"}</div>
-              <div style={styles.userMeta}>{profile?.role || "No role assigned"}</div>
-              <div style={styles.companyName}>{profile?.company || "No company assigned"}</div>
-              {/* My Logs shortcut in brand card */}
-              <button
-                style={{
-                  marginTop: "14px", width: "100%", padding: "9px 12px",
-                  borderRadius: "10px", border: "1px solid #334155",
-                  background: activeTab === TABS.myLogs ? "#1e293b" : "transparent",
-                  color: activeTab === TABS.myLogs ? "#f8fafc" : "#94a3b8",
-                  fontSize: "13px", fontWeight: 600, cursor: "pointer", textAlign: "center",
-                  transition: "all 0.15s ease",
-                }}
-                onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}
-              >
-                📋 My Logs
-              </button>
-            </div>
-
-            <div style={styles.navGroup}>
-              {navItems.map((item, i) => {
-                if (!item.show) return null;
-                if (item.divider) return <div key={i} style={styles.navDivider} />;
-                if (item.tab === TABS.myLogs) return null; // shown in brand card
-                return (
-                  <button
-                    key={item.tab}
-                    style={{ ...styles.navButton, ...(activeTab === item.tab ? styles.navButtonActive : {}) }}
-                    onClick={() => {
-                      setActiveTab(item.tab);
-                      if (item.onEnter) item.onEnter();
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={styles.logoutWrap}>
-              <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
-            </div>
-          </aside>
-        )}
-
-        {/* ── Main content ── */}
-        <main className="dashboard-main" style={styles.main}>
+      {/* ── Main content ── */}
+      <main className="dashboard-main" style={styles.main}>
 
           {/* ════ Request Policy ════ */}
           {activeTab === TABS.policy && (
@@ -1440,8 +1428,7 @@ export default function Dashboard() {
             </>
           )}
 
-        </main>
-      </div>
+      </main>
     </div>
   );
 }
@@ -1453,58 +1440,93 @@ const styles = {
     minHeight: "100vh",
     background: "#0b1120",
     color: "#e5e7eb",
-    padding: "24px",
     boxSizing: "border-box",
     overflowX: "hidden",
     maxWidth: "100vw",
     fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
-  container: {
-    maxWidth: "1440px",
-    margin: "0 auto",
-    display: "grid",
-    gridTemplateColumns: "280px 1fr",
-    gap: "24px",
-  },
-  containerMobile: {
+  // ── Top nav header ──────────────────────────────────
+  topNav: {
     display: "flex",
-    flexDirection: "column",
+    alignItems: "center",
     gap: "12px",
-    padding: "0",
-  },
-  sidebar: {
-    minHeight: "calc(100vh - 48px)",
     background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "20px",
-    padding: "20px",
+    borderBottom: "1px solid #1f2937",
+    padding: "12px 24px",
+    position: "sticky",
+    top: 0,
+    zIndex: 100,
+    flexWrap: "wrap",
+  },
+  topNavBrand: {
     display: "flex",
     flexDirection: "column",
+    marginRight: "8px",
+    flexShrink: 0,
   },
-  brandCard: {
-    background: "#0f172a",
-    border: "1px solid #1e293b",
-    borderRadius: "16px",
-    padding: "18px",
-    marginBottom: "22px",
-  },
-  smallLabel: {
-    fontSize: "11px",
-    letterSpacing: "0.12em",
-    color: "#94a3b8",
-    marginBottom: "10px",
-  },
-  userName: {
-    fontSize: "24px",
+  topNavName: {
+    fontSize: "15px",
     fontWeight: 700,
-    lineHeight: 1.15,
-    marginBottom: "6px",
+    color: "#f8fafc",
+    lineHeight: 1.2,
+  },
+  topNavMeta: {
+    fontSize: "11px",
+    color: "#6b7280",
+    marginTop: "1px",
+  },
+  topNavItems: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    flex: 1,
+    flexWrap: "wrap",
+  },
+  topNavDivider: {
+    width: "1px",
+    height: "20px",
+    background: "#1f2937",
+    margin: "0 4px",
+    flexShrink: 0,
+  },
+  topNavBtn: {
+    padding: "7px 14px",
+    borderRadius: "8px",
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "#94a3b8",
+    fontSize: "13px",
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  topNavBtnActive: {
+    background: "#1e293b",
+    border: "1px solid #334155",
     color: "#f8fafc",
   },
-  userMeta: {
+  topNavRight: {
+    marginLeft: "auto",
+    flexShrink: 0,
+  },
+  topNavLogout: {
+    padding: "7px 14px",
+    borderRadius: "8px",
+    border: "1px solid #243041",
+    background: "transparent",
+    color: "#6b7280",
     fontSize: "13px",
-    color: "#cbd5e1",
-    marginBottom: "6px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  // ── Mobile dropdown ──────────────────────────────────
+  mobileDropdown: {
+    background: "#111827",
+    borderBottom: "1px solid #1f2937",
+    padding: "12px 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
   },
   companyName: {
     fontSize: "14px",
@@ -1559,6 +1581,11 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "18px",
+    maxWidth: "960px",
+    margin: "0 auto",
+    width: "100%",
+    padding: "24px 24px 40px",
+    boxSizing: "border-box",
   },
   headerCard: {
     background: "#111827",
