@@ -5,15 +5,16 @@ import { supabase } from "../lib/supabaseClient";
 // TABS
 // ─────────────────────────────────────────────────────────────────────────────
 const TABS = {
-  dashboard: "dashboard",       // GM + AM home overview
-  policy: "policy",
-  decision: "decision",
-  coaching: "coaching",
-  myLogs: "my_logs",
+  dashboard:     "dashboard",       // GM + AM home overview
+  policy:        "policy",
+  decision:      "decision",
+  coaching:      "coaching",
+  myLogs:        "my_logs",
   teamDecisions: "team_decisions",
-  teamCoaching: "team_coaching",
-  managers: "managers",
-  facilities: "facilities",
+  teamCoaching:  "team_coaching",
+  managers:      "managers",
+  facilities:    "facilities",
+  facilityNotes: "facility_notes",  // NEW — visible to any user with a facility_number
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,6 +28,25 @@ const ROLE_LEVELS = {
 };
 
 const CATEGORIES = ["HR", "Operations", "Food Safety"];
+
+const NOTE_TYPES = [
+  "Equipment / Repair",
+  "Safety Concern",
+  "Maintenance",
+  "Operational Issue",
+  "Staffing Issue",
+  "Other",
+];
+
+const NOTE_PRIORITIES = ["low", "normal", "high", "urgent"];
+
+const NOTE_STATUSES = ["open", "in_progress", "closed"];
+
+const SIGNATURE_OPTIONS = [
+  { value: "employee_signed",  label: "Employee Signed"  },
+  { value: "employee_refused", label: "Employee Refused" },
+  { value: "witness_verified", label: "Witness Verified" },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // METRIC DEFINITIONS
@@ -650,6 +670,22 @@ export default function Dashboard() {
   const [selectedPolicy,       setSelectedPolicy]       = useState(null);
   const [policySearchCategory, setPolicySearchCategory] = useState("");
 
+  // ── facility notes (Feature 1 & 2) ───────────────────────────────────────
+  const [facilityNotes,         setFacilityNotes]         = useState([]);
+  const [facilityNotesLoading,  setFacilityNotesLoading]  = useState(false);
+  const [facilityNotesMessage,  setFacilityNotesMessage]  = useState("");
+  const [newNoteType,           setNewNoteType]           = useState(NOTE_TYPES[0]);
+  const [newNotePriority,       setNewNotePriority]       = useState("normal");
+  const [newNoteText,           setNewNoteText]           = useState("");
+  const [newNoteSubmitting,     setNewNoteSubmitting]     = useState(false);
+  const [showNewNoteForm,       setShowNewNoteForm]       = useState(false);
+  const [noteStatusUpdating,    setNoteStatusUpdating]    = useState(null); // id being updated
+  const [resolutionNoteId,      setResolutionNoteId]      = useState(null); // id awaiting resolution
+  const [resolutionText,        setResolutionText]        = useState("");
+
+  // ── employee signature (Feature 3) ───────────────────────────────────────
+  const [signatureStatus, setSignatureStatus] = useState("");
+
   // ── derived role flags ────────────────────────────────────────────────────
   const currentRoleLevel     = useMemo(() => ROLE_LEVELS[profile?.role] || 1, [profile]);
   const canViewLeadershipTabs = currentRoleLevel >= 2;
@@ -659,6 +695,8 @@ export default function Dashboard() {
   const isGeneralManager      = profile?.role === "General Manager";
   const hasDashboard          = isGeneralManager || isAreaManager;
   const nextRole              = getNextRole(profile?.role);
+  const canViewFacilityNotes  = !!(profile?.facility_number);
+  const canManageFacilityNotes = isGeneralManager || profile?.role === "Area Coach";
 
   const autoDetectedCategory = useMemo(
     () => detectCategory(decisionSituation, decisionAction, keywordMap),
@@ -834,7 +872,8 @@ export default function Dashboard() {
     if (!categoryManuallySet && policy.category) {
       setDecisionCategory(policy.category);
     }
-    setPolicyMessage(`Policy "${policy.title}" selected. Navigate to Document Decision to continue.`);
+    // Auto-redirect to Document Decision (Feature 4)
+    setActiveTab(TABS.decision);
   };
 
   const handleDecisionSubmit = async () => {
@@ -864,11 +903,12 @@ export default function Dashboard() {
         category_confidence: categoryManuallySet ? "high" : detected.confidence,
         category_score: categoryManuallySet ? null : detected.score,
         policy_referenced: decisionPolicy.trim() || null,
+        signature_status: signatureStatus || null,
         is_read: false,
       }]);
       if (error) throw error;
       setDecisionSituation(""); setDecisionAction(""); setDecisionCategory("");
-      setDecisionPolicy(""); setCategoryManuallySet(false);
+      setDecisionPolicy(""); setCategoryManuallySet(false); setSignatureStatus("");
       setDecisionMessage("Decision submitted successfully.");
     } catch (err) {
       console.error("Decision submit error:", err);
@@ -1126,6 +1166,103 @@ export default function Dashboard() {
     finally { setPersonFileLoading(false); }
   };
 
+  // ── Facility Notes (Features 1 & 2) ──────────────────────────────────────
+
+  const fetchFacilityNotes = async () => {
+    if (!profile?.facility_number) return;
+    setFacilityNotesLoading(true); setFacilityNotesMessage("");
+    try {
+      let q = supabase
+        .from("facility_notes")
+        .select("*")
+        .eq("facility_number", profile.facility_number)
+        .order("created_at", { ascending: false });
+      q = applyCompanyScope(q, profile);
+      // Non-managers can only see OPEN notes; GM/AC can see all
+      if (!canManageFacilityNotes) q = q.neq("status", "closed");
+      const { data, error } = await q;
+      if (error) throw error;
+      setFacilityNotes(data || []);
+    } catch (err) {
+      console.error("Fetch facility notes error:", err);
+      setFacilityNotesMessage(err.message || "Failed to load facility notes.");
+    } finally {
+      setFacilityNotesLoading(false);
+    }
+  };
+
+  const handleNewNoteSubmit = async () => {
+    if (!newNoteText.trim()) { setFacilityNotesMessage("Please describe the issue."); return; }
+    setNewNoteSubmitting(true); setFacilityNotesMessage("");
+    try {
+      const { error } = await supabase.from("facility_notes").insert([{
+        facility_number: profile.facility_number,
+        company:         profile?.company    || null,
+        company_id:      profile?.company_id || null,
+        note_type:       newNoteType,
+        priority:        newNotePriority,
+        note_text:       newNoteText.trim(),
+        status:          "open",
+        created_by:      user.id,
+        created_by_name: profile?.full_name || "Unknown",
+        created_by_role: profile?.role      || "Manager",
+      }]);
+      if (error) throw error;
+      setNewNoteText(""); setNewNoteType(NOTE_TYPES[0]); setNewNotePriority("normal");
+      setShowNewNoteForm(false);
+      await fetchFacilityNotes();
+    } catch (err) {
+      console.error("New note submit error:", err);
+      setFacilityNotesMessage(err.message || "Failed to submit note.");
+    } finally {
+      setNewNoteSubmitting(false);
+    }
+  };
+
+  const handleNoteStatusUpdate = async (noteId, newStatus) => {
+    if (newStatus === "closed") {
+      // Open resolution prompt instead of closing immediately
+      setResolutionNoteId(noteId); setResolutionText(""); return;
+    }
+    setNoteStatusUpdating(noteId);
+    try {
+      const { error } = await supabase.from("facility_notes")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", noteId);
+      if (error) throw error;
+      await fetchFacilityNotes();
+    } catch (err) {
+      console.error("Note status update error:", err);
+      setFacilityNotesMessage(err.message || "Failed to update note status.");
+    } finally {
+      setNoteStatusUpdating(null);
+    }
+  };
+
+  const handleCloseNoteWithResolution = async (noteId) => {
+    if (!resolutionText.trim()) { setFacilityNotesMessage("Please enter a resolution before closing."); return; }
+    setNoteStatusUpdating(noteId);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("facility_notes").update({
+        status:          "closed",
+        resolution_text: resolutionText.trim(),
+        closed_by:       user.id,
+        closed_by_name:  profile?.full_name || "Unknown",
+        closed_at:       now,
+        updated_at:      now,
+      }).eq("id", noteId);
+      if (error) throw error;
+      setResolutionNoteId(null); setResolutionText("");
+      await fetchFacilityNotes();
+    } catch (err) {
+      console.error("Close note error:", err);
+      setFacilityNotesMessage(err.message || "Failed to close note.");
+    } finally {
+      setNoteStatusUpdating(null);
+    }
+  };
+
   // ── Dashboard loader (called on tab enter) ────────────────────────────────
   const enterDashboard = async () => {
     if (!profile) return;
@@ -1158,6 +1295,8 @@ export default function Dashboard() {
     { tab: TABS.managers,       label: "Managers",          show: canViewLeadershipTabs && !isAreaManager, onEnter: fetchManagers },
     { divider: true,                                        show: canViewFacilities },
     { tab: TABS.facilities,     label: "Facilities",        show: canViewFacilities,                      onEnter: fetchFacilities },
+    { divider: true,                                        show: canViewFacilityNotes },
+    { tab: TABS.facilityNotes,  label: "Facility Notes",    show: canViewFacilityNotes,                   onEnter: fetchFacilityNotes },
   ];
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1466,6 +1605,32 @@ export default function Dashboard() {
               <div style={styles.sectionDivider} />
               <input type="text" value={decisionPolicy} onChange={(e) => setDecisionPolicy(e.target.value)}
                 placeholder="Policy referenced (optional)" style={styles.policyInput} />
+
+              {/* ── Employee Signature (Feature 3) ── */}
+              <div style={styles.sectionDivider} />
+              <div style={styles.sectionTitle}>Employee Signature</div>
+              <div style={styles.signatureRow}>
+                {SIGNATURE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    style={{
+                      ...styles.signatureOption,
+                      ...(signatureStatus === opt.value ? styles.signatureOptionActive : {}),
+                    }}
+                    onClick={() => setSignatureStatus(signatureStatus === opt.value ? "" : opt.value)}
+                    type="button"
+                  >
+                    {signatureStatus === opt.value && <span style={{ marginRight: "6px", fontSize: "12px" }}>✓</span>}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {!signatureStatus && (
+                <div style={styles.sigWarning}>
+                  ⚠ HR recommends having EE signatures before submitting documents.
+                </div>
+              )}
+
               <button
                 style={{ ...styles.primaryButton, ...(decisionLoading ? styles.buttonDisabled : {}), marginTop: "14px" }}
                 onClick={handleDecisionSubmit} disabled={decisionLoading}
@@ -1911,6 +2076,184 @@ export default function Dashboard() {
             )}
           </>
         )}
+        {/* ════════════════════════════════════════════════════════════════════
+            FACILITY NOTES  (any user with a facility_number)
+        ════════════════════════════════════════════════════════════════════ */}
+        {activeTab === TABS.facilityNotes && canViewFacilityNotes && (
+          <>
+            <div style={styles.headerCard}>
+              <div style={styles.dashHeaderRow}>
+                <div>
+                  <h1 style={styles.title}>Facility Notes</h1>
+                  <p style={styles.subtitle}>
+                    Log facility issues for Facility {profile?.facility_number || "—"}.
+                    {canManageFacilityNotes
+                      ? " As GM / Area Coach you can update status and close notes."
+                      : " GM and Area Coach can update status and close notes."}
+                  </p>
+                </div>
+                <button
+                  style={styles.primaryButton}
+                  onClick={() => { setShowNewNoteForm((v) => !v); setFacilityNotesMessage(""); }}
+                >
+                  {showNewNoteForm ? "Cancel" : "+ New Note"}
+                </button>
+              </div>
+            </div>
+
+            {/* ── New note form ── */}
+            {showNewNoteForm && (
+              <div style={styles.panelCard} className="fade-up">
+                <div style={styles.sectionHeading}>New Facility Note</div>
+                <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" }}>
+                  <div>
+                    <label style={styles.label}>Note Type</label>
+                    <select value={newNoteType} onChange={(e) => setNewNoteType(e.target.value)} style={styles.categorySelect}>
+                      {NOTE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={styles.label}>Priority</label>
+                    <select value={newNotePriority} onChange={(e) => setNewNotePriority(e.target.value)} style={styles.categorySelect}>
+                      {NOTE_PRIORITIES.map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <label style={{ ...styles.label, marginTop: "14px" }}>Describe the issue</label>
+                <textarea
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  placeholder="Describe the issue in detail..."
+                  style={styles.textareaSmall}
+                />
+                <button
+                  style={{ ...styles.primaryButton, ...(newNoteSubmitting ? styles.buttonDisabled : {}) }}
+                  onClick={handleNewNoteSubmit}
+                  disabled={newNoteSubmitting}
+                >
+                  {newNoteSubmitting ? "Submitting…" : "Submit Note"}
+                </button>
+              </div>
+            )}
+
+            <div style={styles.panelCard}>
+              <div style={styles.sectionTopRow}>
+                <div style={styles.sectionHeading}>
+                  {canManageFacilityNotes ? "All Notes" : "Open Notes"}
+                </div>
+                <button style={styles.secondaryButton} onClick={fetchFacilityNotes}>Refresh</button>
+              </div>
+
+              {facilityNotesMessage && (
+                <p style={{ ...styles.message, color: PALETTE.amber }}>{facilityNotesMessage}</p>
+              )}
+
+              {facilityNotesLoading ? (
+                <p style={styles.message}>Loading notes...</p>
+              ) : facilityNotes.length === 0 ? (
+                <p style={styles.message}>No facility notes on record. Use "+ New Note" to log an issue.</p>
+              ) : (
+                <div style={styles.cardList}>
+                  {facilityNotes.map((note) => {
+                    const priorityColor = note.priority === "urgent" ? PALETTE.red
+                      : note.priority === "high"   ? PALETTE.amber
+                      : note.priority === "low"    ? PALETTE.textMuted
+                      : PALETTE.textSoft;
+                    const statusColor = note.status === "closed"      ? PALETTE.green
+                      : note.status === "in_progress" ? PALETTE.amber
+                      : PALETTE.blue;
+                    return (
+                      <div key={note.id} style={{ ...styles.feedCard, opacity: note.status === "closed" ? 0.75 : 1 }}>
+                        <div style={styles.feedTop}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={styles.feedName}>{note.note_type}</div>
+                            <div style={styles.feedMeta}>
+                              {note.created_by_name || "Unknown"} · {note.created_by_role || ""} · {formatDate(note.created_at)}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0, flexWrap: "wrap" }}>
+                            <span style={{ ...styles.notePriorityBadge, color: priorityColor, borderColor: priorityColor }}>
+                              {note.priority}
+                            </span>
+                            <span style={{ ...styles.noteStatusBadge, color: statusColor, borderColor: statusColor }}>
+                              {note.status.replace("_", " ")}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ ...styles.feedBody, marginTop: "6px" }}>{note.note_text}</div>
+
+                        {/* Resolution block — visible on closed notes */}
+                        {note.status === "closed" && note.resolution_text && (
+                          <div style={styles.noteResolutionBlock}>
+                            <div style={styles.noteResolutionLabel}>Resolution</div>
+                            <div style={{ ...styles.feedBody, fontSize: "13px" }}>{note.resolution_text}</div>
+                            <div style={{ fontSize: "12px", color: PALETTE.textMuted, marginTop: "4px" }}>
+                              Closed by {note.closed_by_name || "leadership"} · {formatDate(note.closed_at)}
+                            </div>
+                            <div style={{ ...styles.message, color: PALETTE.textMuted, fontSize: "12px", marginTop: "8px", fontStyle: "italic" }}>
+                              If this resolution did not solve the issue, submit a new facility note.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Resolution input — shown when closing */}
+                        {canManageFacilityNotes && resolutionNoteId === note.id && (
+                          <div style={{ marginTop: "12px" }}>
+                            <label style={styles.label}>Resolution (required to close)</label>
+                            <textarea
+                              value={resolutionText}
+                              onChange={(e) => setResolutionText(e.target.value)}
+                              placeholder="Describe how this issue was resolved..."
+                              style={styles.guidanceTextarea}
+                            />
+                            <div style={styles.guidanceButtons}>
+                              <button
+                                style={{ ...styles.primaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
+                                onClick={() => handleCloseNoteWithResolution(note.id)}
+                                disabled={noteStatusUpdating === note.id || !resolutionText.trim()}
+                              >
+                                {noteStatusUpdating === note.id ? "Closing…" : "Confirm Close"}
+                              </button>
+                              <button style={styles.secondaryButton} onClick={() => { setResolutionNoteId(null); setResolutionText(""); }}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Status controls — GM / Area Coach only, on non-closed notes */}
+                        {canManageFacilityNotes && note.status !== "closed" && resolutionNoteId !== note.id && (
+                          <div style={{ ...styles.actionRow, marginTop: "12px" }}>
+                            {note.status === "open" && (
+                              <button
+                                style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
+                                onClick={() => handleNoteStatusUpdate(note.id, "in_progress")}
+                                disabled={!!noteStatusUpdating}
+                              >
+                                Mark In Progress
+                              </button>
+                            )}
+                            {(note.status === "open" || note.status === "in_progress") && (
+                              <button
+                                style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
+                                onClick={() => handleNoteStatusUpdate(note.id, "closed")}
+                                disabled={!!noteStatusUpdating}
+                              >
+                                Close Note
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
       </main>
     </div>
   );
@@ -2276,4 +2619,53 @@ const styles = {
   emptyStateTitle: { fontSize: "14px", fontWeight: 700, color: PALETTE.textSoft, marginBottom: "4px" },
   emptyStateText:  { fontSize: "12px", color: PALETTE.textMuted },
   emptyStateTight: { textAlign: "center", padding: "24px 0", fontSize: "13px", color: PALETTE.textSoft },
+
+  // ── EMPLOYEE SIGNATURE (Feature 3)
+  signatureRow: { display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "10px" },
+  signatureOption: {
+    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
+    color: PALETTE.textSoft, borderRadius: "14px", padding: "10px 15px",
+    fontSize: "13px", fontWeight: 700, cursor: "pointer",
+    display: "inline-flex", alignItems: "center",
+  },
+  signatureOptionActive: {
+    border: `1px solid rgba(74, 124, 97, 0.5)`,
+    background: "rgba(74, 124, 97, 0.12)",
+    color: "#7ac4a0",
+  },
+  sigWarning: {
+    background: "rgba(154, 120, 64, 0.10)",
+    border: `1px solid rgba(154, 120, 64, 0.30)`,
+    borderRadius: "12px",
+    padding: "10px 14px",
+    fontSize: "13px",
+    fontWeight: 600,
+    color: "#c4a070",
+    marginBottom: "4px",
+  },
+
+  // ── FACILITY NOTES (Feature 1 & 2)
+  notePriorityBadge: {
+    display: "inline-flex", alignItems: "center", padding: "3px 9px",
+    borderRadius: "999px", fontSize: "10px", fontWeight: 800,
+    letterSpacing: "0.07em", textTransform: "uppercase",
+    border: "1px solid", background: "transparent",
+  },
+  noteStatusBadge: {
+    display: "inline-flex", alignItems: "center", padding: "3px 9px",
+    borderRadius: "999px", fontSize: "10px", fontWeight: 800,
+    letterSpacing: "0.07em", textTransform: "uppercase",
+    border: "1px solid", background: "transparent",
+  },
+  noteResolutionBlock: {
+    marginTop: "12px",
+    background: "rgba(74, 124, 97, 0.08)",
+    border: `1px solid rgba(74, 124, 97, 0.22)`,
+    borderRadius: "12px",
+    padding: "12px 14px",
+  },
+  noteResolutionLabel: {
+    fontSize: "11px", fontWeight: 800, color: "#7ac4a0",
+    letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "5px",
+  },
 };
