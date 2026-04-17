@@ -625,6 +625,29 @@ export default function Dashboard() {
           .eq("id", authUser.id)
           .maybeSingle();
         setProfile(prof || null);
+
+        // Set Dashboard as default tab for GM and AM, and pre-load metrics
+        if (prof?.role === "General Manager") {
+          setActiveTab(TABS.dashboard);
+          setDashboardLoading(true);
+          try {
+            const metrics = await loadGmDashboardMetrics(prof);
+            setGmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr });
+          } catch (e) { console.error("GM metrics load error:", e); }
+          finally { setDashboardLoading(false); }
+        } else if (prof?.role === "Area Manager") {
+          setActiveTab(TABS.dashboard);
+          setDashboardLoading(true);
+          try {
+            const [metrics, territory] = await Promise.all([
+              loadAmDashboardMetrics(prof),
+              loadAmTerritoryData(prof),
+            ]);
+            setAmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr, ppd: metrics.ppd });
+            setAmTerritoryFacilities(territory);
+          } catch (e) { console.error("AM metrics load error:", e); }
+          finally { setDashboardLoading(false); }
+        }
       } catch (err) {
         console.error("Dashboard load error:", err);
       } finally {
