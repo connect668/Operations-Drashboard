@@ -1,5 +1,5 @@
-import { styles } from "../../utils/dashboardStyles";
-import { getCategoryStyle } from "../../utils/dashboardHelpers";
+import { styles } from "../utils/dashboardStyles";
+import { getCategoryStyle } from "../utils/dashboardHelpers";
 
 export default function CategoryBadge({ category }) {
   if (!category) return null;
