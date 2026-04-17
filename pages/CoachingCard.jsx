@@ -1,4 +1,4 @@
-import { styles } from "../../utils/dashboardStyles";
+import { styles } from "../utils/dashboardStyles";
 
 export default function CoachingCard({ item, formatDateFn }) {
   return (
