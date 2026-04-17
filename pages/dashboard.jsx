@@ -706,17 +706,38 @@ export default function Dashboard() {
   // ── EFFECTS ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    let mounted = true;
+
     const loadDashboard = async () => {
       try {
+        // ── Step 1: fast local check (reads localStorage, no network) ──────
+        // This prevents the redirect flicker on every page load.
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        if (!initialSession) {
+          window.location.href = "/";
+          return;
+        }
+
+        // ── Step 2: secure server-side validation ──────────────────────────
+        // getUser() contacts Supabase servers to confirm the JWT is still valid.
+        // This is the correct auth check for anything that touches the DB.
         const { data: { user: authUser }, error } = await supabase.auth.getUser();
-        if (error) throw error;
-        if (!authUser) { window.location.href = "/"; return; }
+        if (error || !authUser) {
+          console.error("Auth validation failed:", error?.message);
+          window.location.href = "/";
+          return;
+        }
+
+        if (!mounted) return;
         setUser(authUser);
+
         const { data: prof } = await supabase
           .from("profiles")
           .select("id, full_name, role, company, company_id, facility_number")
           .eq("id", authUser.id)
           .maybeSingle();
+
+        if (!mounted) return;
         setProfile(prof || null);
 
         // Set Dashboard as default tab for GM and AM, and pre-load metrics
@@ -725,9 +746,9 @@ export default function Dashboard() {
           setDashboardLoading(true);
           try {
             const metrics = await loadGmDashboardMetrics(prof);
-            setGmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr });
+            if (mounted) setGmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr });
           } catch (e) { console.error("GM metrics load error:", e); }
-          finally { setDashboardLoading(false); }
+          finally { if (mounted) setDashboardLoading(false); }
         } else if (prof?.role === "Area Manager") {
           setActiveTab(TABS.dashboard);
           setDashboardLoading(true);
@@ -736,18 +757,38 @@ export default function Dashboard() {
               loadAmDashboardMetrics(prof),
               loadAmTerritoryData(prof),
             ]);
-            setAmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr, ppd: metrics.ppd });
-            setAmTerritoryFacilities(territory);
+            if (mounted) {
+              setAmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr, ppd: metrics.ppd });
+              setAmTerritoryFacilities(territory);
+            }
           } catch (e) { console.error("AM metrics load error:", e); }
-          finally { setDashboardLoading(false); }
+          finally { if (mounted) setDashboardLoading(false); }
         }
       } catch (err) {
         console.error("Dashboard load error:", err);
+        if (mounted) window.location.href = "/";
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
+
     loadDashboard();
+    return () => { mounted = false; };
+  }, []);
+
+  // ── Keep React user state in sync with Supabase session ──────────────────
+  // This fires when: token is refreshed, user signs out in another tab, etc.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || !session) {
+        // User signed out (this tab or another tab) — redirect to login
+        window.location.href = "/";
+      } else if (session?.user) {
+        // Token was refreshed or user signed back in — keep state current
+        setUser(session.user);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
