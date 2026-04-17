@@ -9,9 +9,7 @@ export default function CoachingCard({ item, formatDateFn }) {
           <div style={styles.feedMeta}>{item.status || "open"}</div>
         </div>
       </div>
-
       <div style={styles.feedBody}>{item.request_text || "—"}</div>
-
       {item.leadership_notes && (
         <div style={styles.guidanceBlock}>
           <div style={styles.guidanceLabel}>Guidance</div>
