@@ -1,30 +1,43 @@
-import { styles } from "../utils/dashboardStyles";
-import { scoreMetricColor } from "../utils/dashboardHelpers";
-
-export default function MetricCard({ metric, value }) {
-  const color = scoreMetricColor(metric.key, value);
-  const barWidth = Math.max(0, Math.min(100, value));
+export default function MetricCard({
+  metricKey,
+  label,
+  value,
+  color,
+  status,
+  formatPercent,
+}) {
+  const displayValue =
+    typeof formatPercent === "function"
+      ? formatPercent(value ?? 0)
+      : `${value ?? 0}%`;
 
   return (
-    <div style={styles.metricCard}>
-      <div style={styles.metricLabel}>{metric.label}</div>
-      <div style={{ ...styles.metricValue, color }}>
-        {Math.round(value)}
-        {metric.unit}
+    <div
+      style={{
+        background: "#111827",
+        border: "1px solid #374151",
+        borderRadius: "12px",
+        padding: "16px",
+        minHeight: "110px",
+      }}
+    >
+      <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "8px" }}>
+        {label || metricKey || "Metric"}
       </div>
-      <div style={styles.metricBarTrack}>
-        <div
-          style={{
-            ...styles.metricBarFill,
-            width: `${barWidth}%`,
-            background: color,
-          }}
-        />
+
+      <div style={{ fontSize: "28px", fontWeight: 700, marginBottom: "8px" }}>
+        {displayValue}
       </div>
-      <div style={styles.metricDesc}>{metric.desc}</div>
-      {metric.key === "ppd" && (
-        <div style={styles.metricTarget}>Target: under 38%</div>
-      )}
+
+      <div
+        style={{
+          fontSize: "12px",
+          fontWeight: 600,
+          color: color || "#9CA3AF",
+        }}
+      >
+        {status || "neutral"}
+      </div>
     </div>
   );
 }
