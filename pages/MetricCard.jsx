@@ -1,5 +1,5 @@
-import { styles } from "../../utils/dashboardStyles";
-import { scoreMetricColor } from "../../utils/dashboardHelpers";
+import { styles } from "../utils/dashboardStyles";
+import { scoreMetricColor } from "../utils/dashboardHelpers";
 
 export default function MetricCard({ metric, value }) {
   const color = scoreMetricColor(metric.key, value);
