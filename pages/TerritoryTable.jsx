@@ -1,6 +1,6 @@
-import { AM_METRIC_DEFS, PALETTE } from "../../utils/dashboardConstants";
-import { scoreMetricColor } from "../../utils/dashboardHelpers";
-import { styles } from "../../utils/dashboardStyles";
+import { AM_METRIC_DEFS, PALETTE } from "../utils/dashboardConstants";
+import { scoreMetricColor } from "../utils/dashboardHelpers";
+import { styles } from "../utils/dashboardStyles";
 
 export default function TerritoryTable({ facilities }) {
   return (
