@@ -1,7 +1,6 @@
-import { styles } from "../../utils/dashboardStyles";
-import { resolveCategory } from "../../utils/dashboardHelpers";
+import { styles } from "../utils/dashboardStyles";
+import { resolveCategory } from "../utils/dashboardHelpers";
 import CategoryBadge from "./CategoryBadge";
-
 export default function DecisionCard({
   item,
   title,
