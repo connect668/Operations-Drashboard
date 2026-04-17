@@ -1,21 +1,34 @@
-import { styles } from "../utils/dashboardStyles";
+function safeDate(value) {
+  if (!value) return "No date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return date.toLocaleString();
+}
 
-export default function CoachingCard({ item, formatDateFn }) {
+export default function CoachingCard({ request }) {
+  const item = request || {};
+
   return (
-    <div style={styles.feedCard}>
-      <div style={styles.feedTop}>
-        <div>
-          <div style={styles.feedName}>{formatDateFn(item.created_at)}</div>
-          <div style={styles.feedMeta}>{item.status || "open"}</div>
-        </div>
+    <div
+      style={{
+        background: "#111827",
+        border: "1px solid #374151",
+        borderRadius: "12px",
+        padding: "16px",
+        marginBottom: "12px",
+      }}
+    >
+      <div style={{ marginBottom: "8px", fontWeight: 700 }}>
+        Coaching Request
       </div>
-      <div style={styles.feedBody}>{item.request_text || "—"}</div>
-      {item.leadership_notes && (
-        <div style={styles.guidanceBlock}>
-          <div style={styles.guidanceLabel}>Guidance</div>
-          <div style={styles.feedBody}>{item.leadership_notes}</div>
-        </div>
-      )}
+
+      <div style={{ marginBottom: "8px" }}>
+        {item.request_text || "No request text provided."}
+      </div>
+
+      <div style={{ fontSize: "12px", opacity: 0.65 }}>
+        {safeDate(item.created_at)}
+      </div>
     </div>
   );
 }
