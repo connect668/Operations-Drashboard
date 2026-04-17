@@ -1,31 +1,38 @@
-import { styles } from "../utils/dashboardStyles";
-import { resolveCategory } from "../utils/dashboardHelpers";
-import CategoryBadge from "./CategoryBadge";
+function safeDate(value) {
+  if (!value) return "No date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return date.toLocaleString();
+}
 
-export default function DecisionCard({ item, title, meta, formatDateFn, actions }) {
+export default function DecisionCard({ log }) {
+  const item = log || {};
+
   return (
-    <div style={styles.feedCard}>
-      <div style={styles.feedTop}>
-        <div>
-          <div style={styles.feedName}>{title}</div>
-          {meta && <div style={styles.feedMeta}>{meta}</div>}
-        </div>
-        <div style={styles.feedDate}>{formatDateFn(item.created_at)}</div>
+    <div
+      style={{
+        background: "#111827",
+        border: "1px solid #374151",
+        borderRadius: "12px",
+        padding: "16px",
+        marginBottom: "12px",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: "8px" }}>
+        {item.category || "Uncategorized"}
       </div>
-      <div style={styles.feedInlineRow}>
-        <CategoryBadge category={resolveCategory(item)} />
-        {item.policy_referenced && <span style={styles.policyTag}>Policy: {item.policy_referenced}</span>}
-        {item.is_read === false && <span style={styles.unreadBadge}>Unread</span>}
+
+      <div style={{ marginBottom: "8px" }}>
+        {item.decision_text || "No decision text provided."}
       </div>
-      <div style={styles.feedSection}>
-        <div style={styles.feedLabel}>Situation</div>
-        <div style={styles.feedBody}>{item.situation || "—"}</div>
+
+      <div style={{ fontSize: "13px", opacity: 0.8, marginBottom: "6px" }}>
+        Policy: {item.policy_referenced || "None"}
       </div>
-      <div style={styles.feedSection}>
-        <div style={styles.feedLabel}>Action Taken</div>
-        <div style={styles.feedBody}>{item.action_taken || "—"}</div>
+
+      <div style={{ fontSize: "12px", opacity: 0.65 }}>
+        {safeDate(item.created_at)}
       </div>
-      {actions && <div style={styles.actionRow}>{actions}</div>}
     </div>
   );
 }
