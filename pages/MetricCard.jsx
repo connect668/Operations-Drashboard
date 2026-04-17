@@ -8,12 +8,10 @@ export default function MetricCard({ metric, value }) {
   return (
     <div style={styles.metricCard}>
       <div style={styles.metricLabel}>{metric.label}</div>
-
       <div style={{ ...styles.metricValue, color }}>
         {Math.round(value)}
         {metric.unit}
       </div>
-
       <div style={styles.metricBarTrack}>
         <div
           style={{
@@ -23,9 +21,7 @@ export default function MetricCard({ metric, value }) {
           }}
         />
       </div>
-
       <div style={styles.metricDesc}>{metric.desc}</div>
-
       {metric.key === "ppd" && (
         <div style={styles.metricTarget}>Target: under 38%</div>
       )}
