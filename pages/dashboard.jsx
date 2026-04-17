@@ -442,6 +442,54 @@ function CoachingCard({ item, formatDateFn }) {
   );
 }
 
+function PolicyResultCard({ policy, onUse, isSelected }) {
+  const catStyle = getCategoryStyle(policy.category);
+  const snippet = policy.policy_text
+    ? policy.policy_text.length > 260
+      ? policy.policy_text.slice(0, 260).trimEnd() + "…"
+      : policy.policy_text
+    : null;
+  return (
+    <div style={{
+      ...styles.feedCard,
+      border: isSelected
+        ? `1px solid rgba(61,104,153,0.5)`
+        : `1px solid ${PALETTE.border}`,
+      background: isSelected ? "rgba(61,104,153,0.07)" : PALETTE.panelAlt,
+    }}>
+      <div style={styles.feedTop}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={styles.feedName}>{policy.title || "Untitled Policy"}</div>
+          <div style={styles.feedInlineRow}>
+            {policy.policy_code && (
+              <span style={styles.policyCodeBadge}>{policy.policy_code}</span>
+            )}
+            {policy.category && (
+              <span style={{ ...styles.categoryBadge, color: catStyle.color, background: catStyle.bg, border: `1px solid ${catStyle.border}` }}>
+                {policy.category}
+              </span>
+            )}
+            {policy.version && (
+              <span style={styles.versionTag}>v{policy.version}</span>
+            )}
+          </div>
+        </div>
+        <button
+          style={{ ...styles.primaryButton, whiteSpace: "nowrap", flexShrink: 0 }}
+          onClick={() => onUse(policy)}
+        >
+          Use This Policy
+        </button>
+      </div>
+      {snippet && (
+        <div style={{ ...styles.feedBody, fontSize: "13px", marginTop: "6px", color: PALETTE.textSoft }}>
+          {snippet}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TERRITORY TABLE (AM-specific sub-component)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -595,6 +643,13 @@ export default function Dashboard() {
   const [mobileMenuOpen,setMobileMenuOpen]= useState(false);
   const [keywordMap,    setKeywordMap]    = useState(FALLBACK_CATEGORY_KEYWORDS);
 
+  // ── policy search ─────────────────────────────────────────────────────────
+  const [policyResults,        setPolicyResults]        = useState([]);
+  const [policySearchLoading,  setPolicySearchLoading]  = useState(false);
+  const [policySearchError,    setPolicySearchError]    = useState("");
+  const [selectedPolicy,       setSelectedPolicy]       = useState(null);
+  const [policySearchCategory, setPolicySearchCategory] = useState("");
+
   // ── derived role flags ────────────────────────────────────────────────────
   const currentRoleLevel     = useMemo(() => ROLE_LEVELS[profile?.role] || 1, [profile]);
   const canViewLeadershipTabs = currentRoleLevel >= 2;
@@ -706,12 +761,58 @@ export default function Dashboard() {
     window.location.href = "/";
   };
 
+  const searchPolicies = async (searchText, categoryOverride = "") => {
+    setPolicySearchLoading(true);
+    setPolicySearchError("");
+    setPolicyResults([]);
+    const term = searchText.trim();
+    if (!term) { setPolicySearchLoading(false); return; }
+    try {
+      const detected = detectCategory(term, "", keywordMap);
+      const category = categoryOverride || detected.category || "";
+      setPolicySearchCategory(category);
+
+      const runQuery = async (withCategory) => {
+        let q = supabase
+          .from("company_policies")
+          .select("id, title, policy_code, policy_text, category, version, is_active")
+          .eq("is_active", true)
+          .or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,policy_code.ilike.%${term}%`)
+          .order("title", { ascending: true })
+          .limit(10);
+        q = applyCompanyScope(q, profile);
+        if (withCategory) q = q.eq("category", withCategory);
+        return q;
+      };
+
+      let { data, error } = await runQuery(category);
+      if (error) throw error;
+
+      // Fallback: if category filtered to zero results, retry without category filter
+      if (category && (!data || data.length === 0)) {
+        const fallback = await runQuery("");
+        if (fallback.error) throw fallback.error;
+        data = fallback.data;
+      }
+
+      setPolicyResults(data || []);
+    } catch (err) {
+      console.error("Policy search error:", err);
+      setPolicySearchError(err.message || "Failed to search policies.");
+    } finally {
+      setPolicySearchLoading(false);
+    }
+  };
+
   const handlePullPolicy = async () => {
     setPolicyMessage("");
+    setSelectedPolicy(null);
     if (!policyText.trim()) { setPolicyMessage("Please describe the situation first."); return; }
-    const detected = detectCategory(policyText, "", keywordMap);
+    await searchPolicies(policyText);
+    // Log to policy_pull_logs non-blocking (do not block or show error to user)
     try {
-      const { error } = await supabase.from("policy_pull_logs").insert([{
+      const detected = detectCategory(policyText, "", keywordMap);
+      await supabase.from("policy_pull_logs").insert([{
         user_id: user.id,
         company: profile?.company || null,
         company_id: profile?.company_id || null,
@@ -722,12 +823,18 @@ export default function Dashboard() {
         policy_query: policyText.trim(),
         policy_result_used: false,
       }]);
-      if (error) throw error;
-      setPolicyMessage("Policy pull logged. AI response layer comes next.");
-    } catch (err) {
-      console.error("Policy pull log error:", err);
-      setPolicyMessage("Policy pull logging failed. Check policy_pull_logs setup.");
+    } catch (logErr) {
+      console.warn("Policy pull log failed (non-critical):", logErr);
     }
+  };
+
+  const handleUsePolicy = (policy) => {
+    setSelectedPolicy(policy);
+    setDecisionPolicy(policy.policy_code || policy.title || "");
+    if (!categoryManuallySet && policy.category) {
+      setDecisionCategory(policy.category);
+    }
+    setPolicyMessage(`Policy "${policy.title}" selected. Navigate to Document Decision to continue.`);
   };
 
   const handleDecisionSubmit = async () => {
@@ -1265,19 +1372,66 @@ export default function Dashboard() {
           <>
             <div style={styles.headerCard}>
               <h1 style={styles.title}>Request Policy</h1>
-              <p style={styles.subtitle}>Describe the situation and log a policy pull before the response layer is added.</p>
+              <p style={styles.subtitle}>Describe the situation to search your company policy library. Select a policy to pre-fill Document Decision.</p>
             </div>
             <div style={styles.panelCard}>
-              <label style={styles.label}>Describe situation for policy reference</label>
+              <label style={styles.label}>Describe the situation</label>
               <textarea
                 value={policyText}
-                onChange={(e) => setPolicyText(e.target.value)}
+                onChange={(e) => { setPolicyText(e.target.value); if (policyResults.length || policySearchError) { setPolicyResults([]); setPolicySearchError(""); setSelectedPolicy(null); setPolicyMessage(""); } }}
                 placeholder="Example: An employee showed up 30 minutes late without calling. What does company policy say I should do?"
                 style={styles.textarea}
               />
-              <button style={styles.primaryButton} onClick={handlePullPolicy}>Pull Policy</button>
-              {policyMessage && <p style={styles.message}>{policyMessage}</p>}
+              <button
+                style={{ ...styles.primaryButton, ...(policySearchLoading ? styles.buttonDisabled : {}) }}
+                onClick={handlePullPolicy}
+                disabled={policySearchLoading}
+              >
+                {policySearchLoading ? "Searching…" : "Search Policy"}
+              </button>
+              {policyMessage && (
+                <p style={{ ...styles.message, color: selectedPolicy ? PALETTE.green : PALETTE.textSoft }}>
+                  {policyMessage}
+                </p>
+              )}
             </div>
+
+            {/* Search results */}
+            {(policySearchLoading || policySearchError || policyResults.length > 0) && (
+              <div style={styles.panelCard} className="fade-up">
+                <div style={styles.sectionTopRow}>
+                  <div style={styles.sectionHeading}>
+                    {policySearchLoading
+                      ? "Searching policies…"
+                      : policySearchError
+                      ? "Search Error"
+                      : `${policyResults.length} result${policyResults.length !== 1 ? "s" : ""} found`}
+                  </div>
+                  {policySearchCategory && !policySearchLoading && (
+                    <div style={styles.sectionHint}>Matched category: {policySearchCategory}</div>
+                  )}
+                </div>
+
+                {policySearchError ? (
+                  <p style={{ ...styles.message, color: PALETTE.red }}>{policySearchError}</p>
+                ) : policySearchLoading ? (
+                  <p style={styles.message}>Loading…</p>
+                ) : policyResults.length === 0 ? (
+                  <p style={styles.message}>No matching policies found. Try rephrasing your description.</p>
+                ) : (
+                  <div style={styles.cardList}>
+                    {policyResults.map((policy) => (
+                      <PolicyResultCard
+                        key={policy.id}
+                        policy={policy}
+                        onUse={handleUsePolicy}
+                        isSelected={selectedPolicy?.id === policy.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -2103,6 +2257,19 @@ const styles = {
   personStatValue:  { fontSize: "22px", fontWeight: 800, lineHeight: 1 },
   personStatLabel:  { marginTop: "4px", fontSize: "10px", color: PALETTE.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 },
   personStatDivider:{ width: "1px", height: "32px", background: PALETTE.borderStrong },
+
+  // ── POLICY RESULT CARDS
+  policyCodeBadge: {
+    display: "inline-flex", alignItems: "center", padding: "4px 10px",
+    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
+    letterSpacing: "0.05em", textTransform: "uppercase",
+    background: PALETTE.blueSoft, border: `1px solid rgba(61,104,153,0.26)`, color: "#94b8d8",
+  },
+  versionTag: {
+    display: "inline-flex", alignItems: "center", padding: "4px 8px",
+    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
+    background: "rgba(143,163,184,0.07)", border: `1px solid rgba(143,163,184,0.16)`, color: PALETTE.textMuted,
+  },
 
   emptyState:      { textAlign: "center", padding: "28px 0" },
   emptyStateIcon:  { fontSize: "26px", marginBottom: "10px" },
