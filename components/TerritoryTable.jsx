@@ -6,35 +6,15 @@ export default function TerritoryTable({ facilities }) {
   return (
     <div style={styles.territoryTableWrap}>
       <div style={styles.territoryHeaderRow}>
-        <div
-          style={{
-            ...styles.territoryCell,
-            flex: "0 0 88px",
-            ...styles.territoryCellLabel,
-          }}
-        >
+        <div style={{ ...styles.territoryCell, flex: "0 0 88px", ...styles.territoryCellLabel }}>
           Facility
         </div>
-
         {AM_METRIC_DEFS.map((m) => (
-          <div
-            key={m.key}
-            style={{
-              ...styles.territoryCell,
-              ...styles.territoryCellLabel,
-            }}
-          >
+          <div key={m.key} style={{ ...styles.territoryCell, ...styles.territoryCellLabel }}>
             {m.label}
           </div>
         ))}
-
-        <div
-          style={{
-            ...styles.territoryCell,
-            flex: "0 0 96px",
-            ...styles.territoryCellLabel,
-          }}
-        >
+        <div style={{ ...styles.territoryCell, flex: "0 0 96px", ...styles.territoryCellLabel }}>
           Status
         </div>
       </div>
@@ -47,31 +27,11 @@ export default function TerritoryTable({ facilities }) {
           ppd: scoreMetricColor("ppd", fac.ppd),
         };
 
-        const alertCount = Object.values(colors).filter(
-          (c) => c === PALETTE.red
-        ).length;
-
-        const warnCount = Object.values(colors).filter(
-          (c) => c === PALETTE.amber
-        ).length;
-
-        const statusLabel =
-          alertCount > 0 ? "Alert" : warnCount > 1 ? "Attention" : "On Track";
-
-        const statusColor =
-          alertCount > 0
-            ? PALETTE.red
-            : warnCount > 1
-            ? PALETTE.amber
-            : PALETTE.green;
-
-        const statusBg =
-          alertCount > 0
-            ? PALETTE.redSoft
-            : warnCount > 1
-            ? PALETTE.amberSoft
-            : PALETTE.greenSoft;
-
+        const alertCount = Object.values(colors).filter((c) => c === PALETTE.red).length;
+        const warnCount = Object.values(colors).filter((c) => c === PALETTE.amber).length;
+        const statusLabel = alertCount > 0 ? "Alert" : warnCount > 1 ? "Attention" : "On Track";
+        const statusColor = alertCount > 0 ? PALETTE.red : warnCount > 1 ? PALETTE.amber : PALETTE.green;
+        const statusBg = alertCount > 0 ? PALETTE.redSoft : warnCount > 1 ? PALETTE.amberSoft : PALETTE.greenSoft;
         const statusBorder =
           alertCount > 0
             ? "rgba(138,72,72,0.26)"
@@ -112,12 +72,7 @@ export default function TerritoryTable({ facilities }) {
               </div>
             ))}
 
-            <div
-              style={{
-                ...styles.territoryCell,
-                flex: "0 0 96px",
-              }}
-            >
+            <div style={{ ...styles.territoryCell, flex: "0 0 96px" }}>
               <span
                 style={{
                   display: "inline-flex",
