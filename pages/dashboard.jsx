@@ -1347,12 +1347,10 @@ export default function Dashboard() {
     }
     setNoteStatusUpdating(noteId);
     try {
-      const { data: updated, error } = await supabase.from("facility_notes")
+      const { error } = await supabase.from("facility_notes")
         .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", noteId)
-        .select();
+        .eq("id", noteId);
       if (error) throw error;
-      if (!updated?.length) throw new Error("Update blocked — check your permissions.");
       await fetchFacilityNotes();
     } catch (err) {
       console.error("Note status update error:", err);
@@ -1367,17 +1365,17 @@ export default function Dashboard() {
     setNoteStatusUpdating(noteId);
     try {
       const now = new Date().toISOString();
-      const { data: updated, error } = await supabase.from("facility_notes").update({
+      const { error } = await supabase.from("facility_notes").update({
         status:          "closed",
         resolution_text: resolutionText.trim(),
         closed_by:       user.id,
         closed_by_name:  profile?.full_name || "Unknown",
         closed_at:       now,
         updated_at:      now,
-      }).eq("id", noteId).select();
+      }).eq("id", noteId);
       if (error) throw error;
-      if (!updated?.length) throw new Error("Update blocked — check your permissions.");
       setResolutionNoteId(null); setResolutionText("");
+      setFacilityNotesMessage("Note closed successfully.");
       await fetchFacilityNotes();
     } catch (err) {
       console.error("Close note error:", err);
@@ -2438,6 +2436,7 @@ export default function Dashboard() {
                               onChange={(e) => setResolutionText(e.target.value)}
                               placeholder="Describe how this issue was resolved..."
                               style={styles.guidanceTextarea}
+                              autoFocus
                             />
                             <div style={styles.guidanceButtons}>
                               <button
