@@ -2345,6 +2345,11 @@ export default function Dashboard() {
         )}
 
       </main>
+
+      {/* ── APP FOOTER ── */}
+      <footer style={styles.appFooter}>
+        <a href="/support" style={styles.appFooterLink}>Contact Support</a>
+      </footer>
     </div>
   );
 }
@@ -2840,5 +2845,17 @@ const styles = {
   noteResolutionLabel: {
     fontSize: "10px", fontWeight: 800, color: PALETTE.green,
     letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "5px",
+  },
+
+  // ── APP FOOTER
+  appFooter: {
+    borderTop: `1px solid ${PALETTE.border}`,
+    padding: "14px 20px",
+    textAlign: "center",
+    marginTop: "8px",
+  },
+  appFooterLink: {
+    fontSize: "11px", fontWeight: 600, color: PALETTE.textSoft,
+    textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase",
   },
 };
