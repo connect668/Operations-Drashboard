@@ -195,8 +195,10 @@ function formatDate(value) {
 }
 
 function applyCompanyScope(query, scope) {
-  if (scope?.company_id) return query.eq("company_id", scope.company_id);
-  if (scope?.company)    return query.eq("company",    scope.company);
+  const cid = scope?.company_id;
+  if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid))
+    return query.eq("company_id", cid);
+  if (scope?.company) return query.eq("company", scope.company);
   return query;
 }
 
