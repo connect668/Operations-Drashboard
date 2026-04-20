@@ -57,49 +57,49 @@ const GM_METRIC_DEFS = ALL_METRIC_DEFS.filter((m) => m.key !== "ppd");
 const AM_METRIC_DEFS = ALL_METRIC_DEFS;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COLOUR PALETTE  — muted, executive, dark SaaS
+// COLOUR PALETTE  — trading terminal / financial dark
 // ─────────────────────────────────────────────────────────────────────────────
 const PALETTE = {
-  bg:           "#070f1a",
-  panel:        "#0c1622",
-  panelAlt:     "#091420",
-  border:       "#19273a",
-  borderStrong: "#243547",
-  text:         "#e2eaf4",
-  textSoft:     "#8fa3b8",
-  textMuted:    "#5d7a94",
-  // blues — deep navy
-  blue:         "#3d6899",
-  blueSoft:     "rgba(61, 104, 153, 0.13)",
-  // greens — deeper forest
-  green:        "#4a7c61",
-  greenSoft:    "rgba(74, 124, 97, 0.13)",
-  // ambers — earthy, not neon
-  amber:        "#9a7840",
-  amberSoft:    "rgba(154, 120, 64, 0.13)",
-  // reds — dark, serious
-  red:          "#8a4848",
-  redSoft:      "rgba(138, 72, 72, 0.13)",
-  // indigo accent
-  indigo:       "#6878a8",
-  indigoSoft:   "rgba(104, 120, 168, 0.13)",
+  bg:           "#03070f",
+  panel:        "#070f1c",
+  panelAlt:     "#0a1626",
+  panelDeep:    "#050b18",
+  border:       "#0e1e30",
+  borderStrong: "#162840",
+  borderBright: "#1d3a55",
+  text:         "#ccd9ea",
+  textSoft:     "#4d6a84",
+  textMuted:    "#283d52",
+  blue:         "#1a80ff",
+  blueSoft:     "rgba(26, 128, 255, 0.10)",
+  blueGlow:     "rgba(26, 128, 255, 0.06)",
+  green:        "#00c87a",
+  greenSoft:    "rgba(0, 200, 122, 0.10)",
+  amber:        "#e8980a",
+  amberSoft:    "rgba(232, 152, 10, 0.10)",
+  red:          "#e83248",
+  redSoft:      "rgba(232, 50, 72, 0.10)",
+  cyan:         "#00b8d4",
+  cyanSoft:     "rgba(0, 184, 212, 0.08)",
+  indigo:       "#6478c8",
+  indigoSoft:   "rgba(100, 120, 200, 0.10)",
 };
 
 const CATEGORY_STYLES = {
   HR: {
-    color:  "#7a94be",
-    bg:     "rgba(122, 148, 190, 0.12)",
-    border: "rgba(122, 148, 190, 0.24)",
+    color:  "#4da6ff",
+    bg:     "rgba(26, 128, 255, 0.08)",
+    border: "rgba(26, 128, 255, 0.22)",
   },
   Operations: {
-    color:  "#5e8f88",
-    bg:     "rgba(94, 143, 136, 0.12)",
-    border: "rgba(94, 143, 136, 0.24)",
+    color:  "#00c87a",
+    bg:     "rgba(0, 200, 122, 0.08)",
+    border: "rgba(0, 200, 122, 0.22)",
   },
   "Food Safety": {
-    color:  "#a08454",
-    bg:     "rgba(160, 132, 84, 0.12)",
-    border: "rgba(160, 132, 84, 0.24)",
+    color:  "#e8980a",
+    bg:     "rgba(232, 152, 10, 0.08)",
+    border: "rgba(232, 152, 10, 0.22)",
   },
 };
 
@@ -381,21 +381,26 @@ function MetricCard({ metric, value, onClick }) {
   const isClickable = typeof onClick === "function";
   return (
     <div
-      style={{ ...styles.metricCard, ...(isClickable ? styles.metricCardClickable : {}) }}
+      className={isClickable ? "metric-card-click" : undefined}
+      style={{
+        ...styles.metricCard,
+        borderTop: `2px solid ${color}`,
+        ...(isClickable ? styles.metricCardClickable : {}),
+      }}
       onClick={onClick}
       role={isClickable ? "button" : undefined}
       tabIndex={isClickable ? 0 : undefined}
       onKeyDown={isClickable ? (e) => e.key === "Enter" && onClick() : undefined}
     >
       {isClickable && (
-        <div style={styles.metricCardDrillHint}>View breakdown →</div>
+        <div style={styles.metricCardDrillHint}>VIEW BREAKDOWN →</div>
       )}
       <div style={styles.metricLabel}>{metric.label}</div>
       <div style={{ ...styles.metricValue, color }}>
         {Math.round(value)}{metric.unit}
       </div>
       <div style={styles.metricBarTrack}>
-        <div style={{ ...styles.metricBarFill, width: `${barWidth}%`, background: color }} />
+        <div style={{ ...styles.metricBarFill, width: `${barWidth}%`, background: color, boxShadow: `0 0 6px ${color}60` }} />
       </div>
       <div style={styles.metricDesc}>{metric.desc}</div>
       {metric.key === "ppd" && (
@@ -474,9 +479,9 @@ function PolicyResultCard({ policy, onUse, isSelected }) {
     <div style={{
       ...styles.feedCard,
       border: isSelected
-        ? `1px solid rgba(61,104,153,0.5)`
+        ? `1px solid rgba(26,128,255,0.40)`
         : `1px solid ${PALETTE.border}`,
-      background: isSelected ? "rgba(61,104,153,0.07)" : PALETTE.panelAlt,
+      background: isSelected ? "rgba(26,128,255,0.07)" : PALETTE.panelAlt,
     }}>
       <div style={styles.feedTop}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -537,10 +542,10 @@ function TerritoryTable({ facilities }) {
         const statusColor = alertCount > 0 ? PALETTE.red : warnCount > 1 ? PALETTE.amber : PALETTE.green;
         const statusBg    = alertCount > 0 ? PALETTE.redSoft : warnCount > 1 ? PALETTE.amberSoft : PALETTE.greenSoft;
         const statusBorder= alertCount > 0
-          ? "rgba(138,72,72,0.26)"
+          ? "rgba(232,50,72,0.28)"
           : warnCount > 1
-          ? "rgba(154,120,64,0.26)"
-          : "rgba(74,124,97,0.26)";
+          ? "rgba(232,152,10,0.28)"
+          : "rgba(0,200,122,0.28)";
 
         return (
           <div key={fac.number} style={styles.territoryDataRow}>
@@ -1357,17 +1362,33 @@ export default function Dashboard() {
   return (
     <div style={styles.page}>
       <style dangerouslySetInnerHTML={{ __html: `
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(7px); }
-          to   { opacity: 1; transform: translateY(0);   }
+          from { opacity: 0; transform: translateY(5px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        .fade-up { animation: fadeUp 0.22s ease both; }
-        .nav-tab:hover    { background: #0f1e2f !important; color: #e2eaf4 !important; }
-        .person-row:hover { border-color: #2c3f55 !important; background: #0d1b2a !important; }
+        .fade-up { animation: fadeUp 0.20s ease both; }
+        .nav-tab:hover { color: #ccd9ea !important; }
+        .person-row:hover { border-left-color: #1a80ff !important; background: rgba(26,128,255,0.04) !important; }
+        .metric-card-click:hover { box-shadow: 0 0 0 1px rgba(26,128,255,0.35), 0 4px 20px rgba(26,128,255,0.08) !important; transform: translateY(-1px); }
+        .metric-card-click { transition: box-shadow 0.18s ease, transform 0.18s ease; }
+        textarea:focus, input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus {
+          border-color: rgba(26,128,255,0.45) !important;
+          box-shadow: 0 0 0 3px rgba(26,128,255,0.07) !important;
+          outline: none !important;
+        }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #03070f; }
+        ::-webkit-scrollbar-thumb { background: #162840; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #1d3a55; }
+        .manager-row-btn:hover { border-left-color: #1a80ff !important; background: rgba(26,128,255,0.04) !important; }
+        .log-type-btn:hover { border-top-color: #1a80ff !important; }
+        .facility-pill:hover { border-color: #1a80ff !important; background: rgba(26,128,255,0.06) !important; }
+        .sort-btn:hover { color: #ccd9ea !important; border-color: #1d3a55 !important; }
       `}} />
 
       {/* ── TOP HEADER ── */}
-      <header style={{ ...styles.topNav, padding: isMobile ? "14px 16px" : "12px 20px" }}>
+      <header style={styles.topNav}>
         <div style={styles.topNavBrand}>
           <div style={{ ...styles.topNavName, fontSize: isMobile ? "17px" : "14px" }}>
             {profile?.full_name || "Dashboard"}
@@ -1752,11 +1773,11 @@ export default function Dashboard() {
                 <p style={styles.message}>Loading...</p>
               ) : !myLogType ? (
                 <div style={styles.logTypeSelector}>
-                  <button style={styles.logTypeButton} onClick={() => setMyLogType("decisions")}>
+                  <button className="log-type-btn" style={styles.logTypeButton} onClick={() => setMyLogType("decisions")}>
                     <div style={styles.logTypeTitle}>Decision Logs</div>
                     <div style={styles.logTypeMeta}>{myDecisions.length} record{myDecisions.length !== 1 ? "s" : ""}</div>
                   </button>
-                  <button style={styles.logTypeButton} onClick={() => setMyLogType("coaching")}>
+                  <button className="log-type-btn" style={styles.logTypeButton} onClick={() => setMyLogType("coaching")}>
                     <div style={styles.logTypeTitle}>Coaching Logs</div>
                     <div style={styles.logTypeMeta}>{myCoaching.length} record{myCoaching.length !== 1 ? "s" : ""}</div>
                   </button>
@@ -1918,6 +1939,7 @@ export default function Dashboard() {
                   <div style={styles.cardList}>
                     {managers.map((mgr) => (
                       <button key={mgr.id}
+                        className="manager-row-btn"
                         style={{ ...styles.managerRowButton, ...(selectedManager?.id === mgr.id ? styles.managerRowButtonActive : {}) }}
                         onClick={() => openManagerFile(mgr)}
                       >
@@ -2016,6 +2038,7 @@ export default function Dashboard() {
                       {facilities.map((f) => (
                         <button
                           key={`${f.company || "co"}-${f.facility_number}`}
+                          className="facility-pill"
                           onClick={() => fetchFacilityPeople(f)}
                           style={styles.facilityPill}
                         >
@@ -2324,170 +2347,211 @@ export default function Dashboard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STYLES
+// STYLES  — trading terminal / financial dark
 // ─────────────────────────────────────────────────────────────────────────────
+const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
+const SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif';
+
 const styles = {
   page: {
     minHeight: "100vh",
     background: PALETTE.bg,
     color: PALETTE.text,
-    padding: "16px",
+    padding: "0",
     boxSizing: "border-box",
-    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontFamily: SANS,
   },
   loadingCard: {
-    maxWidth: "520px", margin: "120px auto",
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "22px", padding: "32px", textAlign: "center",
-    color: PALETTE.text, boxShadow: "0 12px 30px rgba(0,0,0,0.24)",
+    maxWidth: "480px", margin: "0 auto", paddingTop: "120px",
+    textAlign: "center", color: PALETTE.textSoft, fontSize: "13px",
+    letterSpacing: "0.06em", textTransform: "uppercase",
   },
 
-  // ── TOP NAV
+  // ── TOP NAV — full-width sticky terminal toolbar
   topNav: {
-    maxWidth: "1420px", margin: "0 auto 18px",
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "22px", display: "flex", alignItems: "center",
-    justifyContent: "space-between", gap: "16px",
-    boxShadow: "0 12px 30px rgba(0,0,0,0.24)",
+    background: PALETTE.panel,
+    borderBottom: `1px solid ${PALETTE.border}`,
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between",
+    position: "sticky", top: 0, zIndex: 100,
+    height: "52px",
+    paddingLeft: "20px",
+    paddingRight: "16px",
+    boxSizing: "border-box",
+    gap: "0",
   },
-  topNavBrand:  { minWidth: "220px" },
-  topNavName:   { fontWeight: 700, color: PALETTE.text, lineHeight: 1.1 },
-  topNavMeta:   { color: PALETTE.textSoft, marginTop: "2px" },
-  topNavItems:  { display: "flex", alignItems: "center", gap: "8px", flex: 1, overflowX: "auto" },
+  topNavBrand: { minWidth: "200px", flexShrink: 0 },
+  topNavName:  { fontWeight: 700, color: PALETTE.text, lineHeight: 1.1, fontSize: "13px", letterSpacing: "0.01em" },
+  topNavMeta:  { color: PALETTE.textSoft, marginTop: "2px", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" },
+  topNavItems: { display: "flex", alignItems: "stretch", gap: "0", flex: 1, overflowX: "auto", height: "52px" },
   topNavBtn: {
-    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    color: PALETTE.textSoft, borderRadius: "999px", padding: "9px 14px",
-    fontSize: "13px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    borderTop: "2px solid transparent",
+    background: "transparent",
+    color: PALETTE.textSoft,
+    padding: "0 13px",
+    fontSize: "11px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    letterSpacing: "0.05em", textTransform: "uppercase",
+    display: "flex", alignItems: "center",
+    transition: "color 0.15s ease",
   },
   topNavBtnActive: {
-    background: PALETTE.blueSoft, color: "#c8dcf0",
-    border: `1px solid rgba(61, 104, 153, 0.34)`,
+    borderBottom: `2px solid ${PALETTE.blue}`,
+    color: PALETTE.text,
   },
-  topNavDivider: { width: "1px", height: "18px", background: PALETTE.borderStrong, flexShrink: 0 },
-  topNavRight:   { display: "flex", alignItems: "center", gap: "8px" },
+  topNavDivider: { width: "1px", height: "20px", background: PALETTE.border, flexShrink: 0, alignSelf: "center", margin: "0 2px" },
+  topNavRight:   { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
   topNavLogout: {
-    border: `1px solid ${PALETTE.borderStrong}`, background: "transparent",
-    color: PALETTE.textSoft, borderRadius: "14px", padding: "9px 14px",
-    fontSize: "13px", fontWeight: 700, cursor: "pointer",
+    border: `1px solid ${PALETTE.border}`,
+    background: "transparent",
+    color: PALETTE.textSoft, borderRadius: "3px", padding: "5px 11px",
+    fontSize: "10px", fontWeight: 700, cursor: "pointer",
+    letterSpacing: "0.07em", textTransform: "uppercase",
   },
   mobileMenuBtn: {
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, borderRadius: "12px", padding: "10px 12px",
-    fontSize: "13px", fontWeight: 700, cursor: "pointer",
+    border: `1px solid ${PALETTE.border}`, background: "transparent",
+    color: PALETTE.text, borderRadius: "3px", padding: "6px 10px",
+    fontSize: "12px", fontWeight: 700, cursor: "pointer",
   },
   mobileDropdown: {
-    maxWidth: "1420px", margin: "-4px auto 18px",
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "18px", padding: "14px", display: "flex", flexDirection: "column", gap: "8px",
+    background: PALETTE.panel,
+    borderBottom: `1px solid ${PALETTE.border}`,
+    padding: "10px 16px", display: "flex", flexDirection: "column", gap: "2px",
   },
-  navDivider: { height: "1px", background: PALETTE.borderStrong, margin: "4px 0" },
+  navDivider: { height: "1px", background: PALETTE.border, margin: "4px 0" },
   navButton: {
-    width: "100%", textAlign: "left", border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt, color: PALETTE.textSoft, borderRadius: "12px",
-    padding: "12px 14px", fontSize: "14px", fontWeight: 700, cursor: "pointer",
+    width: "100%", textAlign: "left",
+    border: "none", borderLeft: "2px solid transparent",
+    background: "transparent", color: PALETTE.textSoft,
+    padding: "10px 14px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+    letterSpacing: "0.04em", textTransform: "uppercase",
   },
-  navButtonActive: { background: PALETTE.blueSoft, color: "#c8dcf0", border: `1px solid rgba(61,104,153,0.34)` },
+  navButtonActive: {
+    borderLeft: `2px solid ${PALETTE.blue}`,
+    color: PALETTE.text,
+    background: PALETTE.blueGlow,
+  },
   logoutButton: {
-    width: "100%", textAlign: "left", border: `1px solid ${PALETTE.borderStrong}`,
-    background: "transparent", color: PALETTE.textSoft, borderRadius: "12px",
-    padding: "12px 14px", fontSize: "14px", fontWeight: 700, cursor: "pointer",
+    width: "100%", textAlign: "left",
+    border: "none", borderLeft: "2px solid transparent",
+    background: "transparent", color: PALETTE.textSoft,
+    padding: "10px 14px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+    letterSpacing: "0.04em",
   },
 
   // ── LAYOUT
-  main: { maxWidth: "1420px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "18px" },
+  main: {
+    maxWidth: "1420px", margin: "0 auto",
+    display: "flex", flexDirection: "column", gap: "14px",
+    padding: "20px 16px",
+    boxSizing: "border-box",
+  },
   headerCard: {
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "22px", padding: "24px", boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
+    background: PALETTE.panel,
+    border: `1px solid ${PALETTE.border}`,
+    borderLeft: `3px solid ${PALETTE.blue}`,
+    borderRadius: "4px", padding: "20px 22px",
   },
   panelCard: {
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "22px", padding: "22px", boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
+    background: PALETTE.panel,
+    border: `1px solid ${PALETTE.border}`,
+    borderRadius: "4px", padding: "20px 22px",
   },
 
   // ── TYPOGRAPHY
-  title:    { margin: 0, fontSize: "36px", lineHeight: 1.05, fontWeight: 800, color: PALETTE.text },
-  subtitle: { margin: "10px 0 0", fontSize: "14px", lineHeight: 1.65, color: PALETTE.textSoft, maxWidth: "820px" },
-  label:    { display: "block", marginBottom: "10px", fontSize: "14px", fontWeight: 700, color: PALETTE.text },
-  message:  { marginTop: "12px", fontSize: "14px", lineHeight: 1.6, color: PALETTE.textSoft },
+  title: { margin: 0, fontSize: "22px", lineHeight: 1.1, fontWeight: 700, color: PALETTE.text, letterSpacing: "-0.01em" },
+  subtitle: { margin: "8px 0 0", fontSize: "12px", lineHeight: 1.65, color: PALETTE.textSoft, maxWidth: "820px", letterSpacing: "0.01em" },
+  label: { display: "block", marginBottom: "8px", fontSize: "10px", fontWeight: 700, color: PALETTE.textSoft, textTransform: "uppercase", letterSpacing: "0.09em" },
+  message: { marginTop: "12px", fontSize: "13px", lineHeight: 1.6, color: PALETTE.textSoft },
   sectionTopRow: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    gap: "12px", flexWrap: "wrap", marginBottom: "14px",
+    gap: "12px", flexWrap: "wrap", marginBottom: "16px",
   },
-  sectionHeading: { fontSize: "20px", fontWeight: 800, color: PALETTE.text },
-  sectionHint:    { fontSize: "12px", color: PALETTE.textMuted },
-  sectionDivider: { height: "1px", background: PALETTE.borderStrong, margin: "4px 0 16px" },
+  sectionHeading: { fontSize: "11px", fontWeight: 800, color: PALETTE.text, textTransform: "uppercase", letterSpacing: "0.10em" },
+  sectionHint:    { fontSize: "11px", color: PALETTE.textMuted, letterSpacing: "0.04em" },
+  sectionDivider: { height: "1px", background: PALETTE.border, margin: "4px 0 16px" },
   sectionTitle: {
-    marginBottom: "10px", fontSize: "11px", letterSpacing: "0.08em",
+    marginBottom: "10px", fontSize: "10px", letterSpacing: "0.11em",
     textTransform: "uppercase", color: PALETTE.textMuted, fontWeight: 800,
   },
-  autoDetectedText: { marginTop: "8px", marginBottom: "4px", fontSize: "12px", color: PALETTE.textMuted },
+  autoDetectedText: { marginTop: "8px", marginBottom: "4px", fontSize: "11px", color: PALETTE.textMuted, letterSpacing: "0.03em" },
 
   // ── FORMS
   textarea: {
-    width: "100%", minHeight: "220px", borderRadius: "16px",
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "16px", fontSize: "15px", lineHeight: 1.6,
-    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "16px",
+    width: "100%", minHeight: "200px", borderRadius: "3px",
+    border: `1px solid ${PALETTE.border}`,
+    background: PALETTE.panelAlt,
+    color: PALETTE.text, padding: "14px 16px", fontSize: "14px", lineHeight: 1.7,
+    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "14px",
+    fontFamily: SANS,
   },
   textareaSmall: {
-    width: "100%", minHeight: "130px", borderRadius: "16px",
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "16px", fontSize: "15px", lineHeight: 1.6,
-    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "16px",
+    width: "100%", minHeight: "110px", borderRadius: "3px",
+    border: `1px solid ${PALETTE.border}`,
+    background: PALETTE.panelAlt,
+    color: PALETTE.text, padding: "14px 16px", fontSize: "14px", lineHeight: 1.7,
+    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "14px",
+    fontFamily: SANS,
   },
   categorySelect: {
-    width: "100%", borderRadius: "14px", border: `1px solid ${PALETTE.borderStrong}`,
-    background: PALETTE.panelAlt, color: PALETTE.text, padding: "14px 16px",
-    fontSize: "15px", outline: "none", boxSizing: "border-box",
+    width: "100%", borderRadius: "3px", border: `1px solid ${PALETTE.border}`,
+    background: PALETTE.panelAlt, color: PALETTE.text, padding: "11px 13px",
+    fontSize: "14px", outline: "none", boxSizing: "border-box",
   },
   policyInput: {
-    width: "100%", borderRadius: "14px", border: `1px solid ${PALETTE.borderStrong}`,
-    background: PALETTE.panelAlt, color: PALETTE.text, padding: "14px 16px",
-    fontSize: "15px", outline: "none", boxSizing: "border-box",
+    width: "100%", borderRadius: "3px", border: `1px solid ${PALETTE.border}`,
+    background: PALETTE.panelAlt, color: PALETTE.text, padding: "11px 13px",
+    fontSize: "14px", outline: "none", boxSizing: "border-box",
   },
 
   // ── BUTTONS
   primaryButton: {
-    border: `1px solid rgba(61,104,153,0.34)`, background: PALETTE.blueSoft,
-    color: "#c8dcf0", borderRadius: "14px", padding: "11px 16px",
-    fontSize: "14px", fontWeight: 700, cursor: "pointer",
+    border: `1px solid ${PALETTE.blue}`,
+    background: "rgba(26,128,255,0.12)",
+    color: PALETTE.blue, borderRadius: "3px", padding: "8px 16px",
+    fontSize: "11px", fontWeight: 700, cursor: "pointer",
+    letterSpacing: "0.07em", textTransform: "uppercase",
   },
   secondaryButton: {
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, borderRadius: "14px", padding: "9px 14px",
-    fontSize: "13px", fontWeight: 700, cursor: "pointer",
+    border: `1px solid ${PALETTE.border}`, background: "transparent",
+    color: PALETTE.textSoft, borderRadius: "3px", padding: "7px 13px",
+    fontSize: "11px", fontWeight: 700, cursor: "pointer",
+    letterSpacing: "0.05em",
   },
-  buttonDisabled: { opacity: 0.55, cursor: "not-allowed" },
+  buttonDisabled: { opacity: 0.45, cursor: "not-allowed" },
 
   // ── METRIC CARDS
   metricsGrid: {
-    display: "grid", gap: "14px",
-    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+    display: "grid", gap: "12px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   },
   metricCard: {
-    background: PALETTE.panel, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "20px", padding: "22px 20px",
-    boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+    background: PALETTE.panel,
+    border: `1px solid ${PALETTE.border}`,
+    borderTop: "2px solid transparent",
+    borderRadius: "4px", padding: "20px 18px",
   },
   metricLabel: {
-    fontSize: "10px", letterSpacing: "0.12em", textTransform: "uppercase",
-    color: PALETTE.textMuted, marginBottom: "12px", fontWeight: 800,
+    fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase",
+    color: PALETTE.textSoft, marginBottom: "14px", fontWeight: 800,
   },
   metricValue: {
-    fontSize: "40px", lineHeight: 1, fontWeight: 800,
-    fontVariantNumeric: "tabular-nums", marginBottom: "14px",
-    transition: "color 0.3s ease",
+    fontSize: "44px", lineHeight: 1, fontWeight: 700,
+    fontFamily: MONO,
+    fontVariantNumeric: "tabular-nums", marginBottom: "16px",
+    transition: "color 0.3s ease", letterSpacing: "-0.02em",
   },
   metricBarTrack: {
-    background: "#0d1e30", borderRadius: "999px", height: "4px",
-    overflow: "hidden", marginBottom: "12px",
+    background: PALETTE.panelAlt, borderRadius: "0", height: "3px",
+    overflow: "hidden", marginBottom: "14px",
   },
   metricBarFill: {
-    height: "100%", borderRadius: "999px",
+    height: "100%", borderRadius: "0",
     transition: "width 0.12s ease, background 0.3s ease",
   },
-  metricDesc:   { fontSize: "12px", color: PALETTE.textSoft, lineHeight: 1.5 },
-  metricTarget: { marginTop: "8px", fontSize: "11px", color: PALETTE.textMuted },
+  metricDesc:   { fontSize: "11px", color: PALETTE.textSoft, lineHeight: 1.5, letterSpacing: "0.01em" },
+  metricTarget: { marginTop: "6px", fontSize: "10px", color: PALETTE.textMuted, letterSpacing: "0.04em" },
 
   // ── DASHBOARD HEADER
   dashHeaderRow: {
@@ -2495,214 +2559,232 @@ const styles = {
     justifyContent: "space-between", gap: "16px", flexWrap: "wrap",
   },
   roleBadge: {
-    padding: "5px 13px", borderRadius: "999px", fontSize: "11px",
-    fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase",
-    background: PALETTE.blueSoft, border: `1px solid rgba(61,104,153,0.26)`,
-    color: "#94b8d8", flexShrink: 0, alignSelf: "flex-start", marginTop: "5px",
+    padding: "4px 10px", borderRadius: "2px", fontSize: "10px",
+    fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase",
+    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.28)`,
+    color: PALETTE.blue, flexShrink: 0, alignSelf: "flex-start", marginTop: "4px",
   },
 
   // ── PERFORMANCE REFERENCE (GM)
   thresholdGrid: {
-    display: "grid", gap: "14px",
+    display: "grid", gap: "12px",
     gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
   },
   thresholdItem: {
     background: PALETTE.panelAlt, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "16px", padding: "16px",
+    borderRadius: "4px", padding: "16px",
   },
-  thresholdLabel: { fontSize: "11px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PALETTE.textMuted, marginBottom: "8px" },
-  thresholdValue: { fontSize: "20px", fontWeight: 800, color: PALETTE.text, marginBottom: "4px" },
-  thresholdDesc:  { fontSize: "12px", color: PALETTE.textSoft },
+  thresholdLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted, marginBottom: "8px" },
+  thresholdValue: { fontSize: "18px", fontWeight: 700, color: PALETTE.text, marginBottom: "4px", fontVariantNumeric: "tabular-nums", fontFamily: MONO },
+  thresholdDesc:  { fontSize: "11px", color: PALETTE.textSoft },
 
   // ── TERRITORY TABLE (AM)
-  territoryTableWrap: { display: "flex", flexDirection: "column", gap: "2px", overflowX: "auto" },
+  territoryTableWrap: { display: "flex", flexDirection: "column", gap: "1px", overflowX: "auto" },
   territoryHeaderRow: {
     display: "flex", alignItems: "center",
-    padding: "8px 14px", borderBottom: `1px solid ${PALETTE.borderStrong}`, marginBottom: "4px",
+    padding: "8px 12px", borderBottom: `1px solid ${PALETTE.border}`, marginBottom: "2px",
   },
-  territoryCellLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: PALETTE.textMuted },
-  territoryDataRow: { display: "flex", alignItems: "center", padding: "11px 14px", borderRadius: "13px" },
-  territoryCell: { flex: 1, minWidth: "60px", fontSize: "14px", fontVariantNumeric: "tabular-nums", paddingRight: "8px" },
+  territoryCellLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted },
+  territoryDataRow: {
+    display: "flex", alignItems: "center", padding: "10px 12px",
+    borderBottom: `1px solid ${PALETTE.border}`,
+  },
+  territoryCell: { flex: 1, minWidth: "60px", fontSize: "13px", fontVariantNumeric: "tabular-nums", paddingRight: "8px", fontFamily: MONO, fontWeight: 600 },
 
   // ── PP/D LEGEND
-  ppdLegendRow:  { display: "flex", gap: "22px", flexWrap: "wrap", alignItems: "center" },
+  ppdLegendRow:  { display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "center" },
   ppdLegendItem: { display: "flex", alignItems: "center", gap: "8px" },
-  ppdLegendDot:  { width: "7px", height: "7px", borderRadius: "50%", flexShrink: 0 },
-  ppdLegendText: { fontSize: "13px", color: PALETTE.textSoft, fontWeight: 600 },
+  ppdLegendDot:  { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
+  ppdLegendText: { fontSize: "12px", color: PALETTE.textSoft, fontWeight: 600 },
 
   // ── FEED / DECISION CARDS
-  cardList: { display: "flex", flexDirection: "column", gap: "12px" },
+  cardList: { display: "flex", flexDirection: "column", gap: "8px" },
   feedCard: {
-    background: PALETTE.panelAlt, border: `1px solid ${PALETTE.border}`,
-    borderRadius: "16px", padding: "16px",
+    background: PALETTE.panelAlt,
+    border: `1px solid ${PALETTE.border}`,
+    borderRadius: "4px", padding: "14px 16px",
   },
   feedTop: {
     display: "flex", alignItems: "flex-start", justifyContent: "space-between",
     gap: "16px", marginBottom: "10px", flexWrap: "wrap",
   },
-  feedName:   { fontSize: "15px", fontWeight: 800, color: PALETTE.text, marginBottom: "3px" },
-  feedMeta:   { fontSize: "13px", color: PALETTE.textSoft },
-  feedDate:   { fontSize: "12px", color: PALETTE.textMuted },
-  feedInlineRow: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" },
+  feedName:   { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "3px" },
+  feedMeta:   { fontSize: "12px", color: PALETTE.textSoft },
+  feedDate:   { fontSize: "11px", color: PALETTE.textMuted, fontFamily: MONO, fontVariantNumeric: "tabular-nums" },
+  feedInlineRow: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" },
   feedSection:   { marginTop: "10px" },
   feedLabel: {
-    marginBottom: "5px", fontSize: "11px", fontWeight: 800,
-    letterSpacing: "0.06em", textTransform: "uppercase", color: PALETTE.textMuted,
+    marginBottom: "5px", fontSize: "10px", fontWeight: 800,
+    letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted,
   },
-  feedBody: { fontSize: "14px", lineHeight: 1.6, color: PALETTE.text, whiteSpace: "pre-wrap" },
+  feedBody: { fontSize: "13px", lineHeight: 1.65, color: PALETTE.text, whiteSpace: "pre-wrap" },
   policyTag: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    background: PALETTE.blueSoft, border: `1px solid rgba(61,104,153,0.26)`, color: "#94b8d8",
+    display: "inline-flex", alignItems: "center", padding: "3px 8px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.22)`, color: PALETTE.blue,
+    letterSpacing: "0.04em",
   },
   unreadBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    background: PALETTE.amberSoft, border: `1px solid rgba(154,120,64,0.26)`, color: "#c4a070",
+    display: "inline-flex", alignItems: "center", padding: "3px 8px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    background: PALETTE.amberSoft, border: `1px solid rgba(232,152,10,0.28)`, color: PALETTE.amber,
+    letterSpacing: "0.04em",
   },
   categoryBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    letterSpacing: "0.05em", textTransform: "uppercase",
+    display: "inline-flex", alignItems: "center", padding: "3px 8px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
   },
   statusBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    letterSpacing: "0.05em", textTransform: "uppercase",
-    background: "rgba(143,163,184,0.09)", border: "1px solid rgba(143,163,184,0.18)", color: PALETTE.textSoft,
+    display: "inline-flex", alignItems: "center", padding: "3px 8px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
+    background: "rgba(77,106,132,0.10)", border: `1px solid ${PALETTE.border}`, color: PALETTE.textSoft,
   },
-  actionRow: { display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "12px" },
-  guidanceBlock: { marginTop: "12px", borderLeft: `3px solid ${PALETTE.blue}`, paddingLeft: "12px" },
+  actionRow: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" },
+  guidanceBlock: { marginTop: "12px", borderLeft: `2px solid ${PALETTE.blue}`, paddingLeft: "12px" },
   guidanceLabel: {
-    fontSize: "11px", fontWeight: 800, color: "#94b8d8",
-    letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "5px",
+    fontSize: "10px", fontWeight: 800, color: PALETTE.blue,
+    letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "5px",
   },
   guidancePrompt:  { width: "100%" },
   guidanceTextarea: {
-    width: "100%", minHeight: "120px", borderRadius: "14px",
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "14px 16px", fontSize: "14px", lineHeight: 1.6,
-    resize: "vertical", outline: "none", boxSizing: "border-box",
+    width: "100%", minHeight: "110px", borderRadius: "3px",
+    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
+    color: PALETTE.text, padding: "12px 14px", fontSize: "13px", lineHeight: 1.65,
+    resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: SANS,
   },
-  guidanceButtons: { display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "10px" },
+  guidanceButtons: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" },
 
   // ── MANAGERS
-  managersLayout: { display: "grid", gap: "18px" },
+  managersLayout: { display: "grid", gap: "14px" },
   managerRowButton: {
-    width: "100%", textAlign: "left", borderRadius: "15px",
-    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    padding: "14px 15px", cursor: "pointer",
+    width: "100%", textAlign: "left", borderRadius: "3px",
+    border: `1px solid ${PALETTE.border}`,
+    borderLeft: "2px solid transparent",
+    background: "transparent",
+    padding: "12px 14px", cursor: "pointer",
   },
-  managerRowButtonActive: { border: `1px solid ${PALETTE.blue}`, background: "rgba(61,104,153,0.11)" },
-  managerRowName: { fontSize: "15px", fontWeight: 800, color: PALETTE.text, marginBottom: "3px" },
-  managerRowMeta: { fontSize: "13px", color: PALETTE.textSoft },
+  managerRowButtonActive: {
+    border: `1px solid ${PALETTE.border}`,
+    borderLeft: `2px solid ${PALETTE.blue}`,
+    background: PALETTE.blueGlow,
+  },
+  managerRowName: { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "3px" },
+  managerRowMeta: { fontSize: "12px", color: PALETTE.textSoft },
 
   // ── LOG TYPE SELECTOR
-  logTypeSelector: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" },
+  logTypeSelector: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" },
   logTypeButton: {
-    textAlign: "left", borderRadius: "17px",
-    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    padding: "18px", cursor: "pointer",
+    textAlign: "left", borderRadius: "4px",
+    border: `1px solid ${PALETTE.border}`,
+    borderTop: `2px solid ${PALETTE.border}`,
+    background: "transparent",
+    padding: "16px 18px", cursor: "pointer",
+    transition: "border-top-color 0.15s ease",
   },
-  logTypeTitle: { fontSize: "15px", fontWeight: 800, color: PALETTE.text, marginBottom: "7px" },
-  logTypeMeta:  { fontSize: "13px", color: PALETTE.textSoft },
+  logTypeTitle: { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "6px" },
+  logTypeMeta:  { fontSize: "12px", color: PALETTE.textSoft, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
 
   // ── FACILITIES
   facilitiesHeaderTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" },
   facilitySelectorWrap: { marginTop: "16px" },
   facilityPillWrap: { display: "flex", gap: "8px", flexWrap: "wrap" },
   facilityPill: {
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt, color: PALETTE.text,
-    borderRadius: "999px", padding: "9px 14px", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-    display: "inline-flex", alignItems: "center", gap: "6px",
+    border: `1px solid ${PALETTE.border}`,
+    borderLeft: `2px solid ${PALETTE.blue}`,
+    background: "transparent", color: PALETTE.text,
+    borderRadius: "3px", padding: "8px 14px", fontSize: "12px", fontWeight: 700, cursor: "pointer",
+    display: "inline-flex", alignItems: "center", gap: "8px",
+    letterSpacing: "0.02em",
   },
   facilityPillMeta: { fontSize: "11px", color: PALETTE.textMuted, fontWeight: 600 },
-  breadcrumb: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "14px" },
-  breadcrumbLink: { border: "none", padding: 0, background: "transparent", color: "#94b8d8", fontSize: "14px", fontWeight: 700, cursor: "pointer" },
-  breadcrumbSep:  { color: PALETTE.textMuted, fontSize: "14px" },
-  breadcrumbCurrent: { color: PALETTE.textSoft, fontSize: "14px", fontWeight: 700 },
+  breadcrumb: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "12px" },
+  breadcrumbLink: { border: "none", padding: 0, background: "transparent", color: PALETTE.blue, fontSize: "12px", fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em" },
+  breadcrumbSep:  { color: PALETTE.textMuted, fontSize: "13px" },
+  breadcrumbCurrent: { color: PALETTE.textSoft, fontSize: "12px", fontWeight: 700 },
 
   // ── CATEGORY BREAKDOWN
-  breakdownList:   { display: "flex", flexDirection: "column", gap: "15px" },
+  breakdownList:   { display: "flex", flexDirection: "column", gap: "14px" },
   breakdownItem:   { display: "flex", flexDirection: "column", gap: "7px" },
   breakdownTop:    { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" },
   breakdownLeft:   { display: "flex", alignItems: "center", gap: "10px" },
   breakdownBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    letterSpacing: "0.05em", textTransform: "uppercase",
+    display: "inline-flex", alignItems: "center", padding: "3px 8px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
   },
-  breakdownPercent: { fontSize: "20px", fontWeight: 800, fontVariantNumeric: "tabular-nums" },
-  breakdownTrack:   { background: "#0d1e30", borderRadius: "999px", height: "6px", overflow: "hidden" },
-  breakdownFill:    { height: "100%", borderRadius: "999px", transition: "width 0.12s ease" },
+  breakdownPercent: { fontSize: "18px", fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
+  breakdownTrack:   { background: PALETTE.panelAlt, borderRadius: "0", height: "3px", overflow: "hidden" },
+  breakdownFill:    { height: "100%", borderRadius: "0", transition: "width 0.12s ease" },
 
   // ── PEOPLE / PERSON FILE
-  peopleList:  { display: "flex", flexDirection: "column", gap: "7px" },
+  peopleList:  { display: "flex", flexDirection: "column", gap: "4px" },
   personRow: {
-    width: "100%", textAlign: "left", border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt, borderRadius: "15px", padding: "14px 16px",
+    width: "100%", textAlign: "left",
+    border: `1px solid ${PALETTE.border}`,
+    borderLeft: "2px solid transparent",
+    background: "transparent", borderRadius: "3px", padding: "12px 16px",
     display: "flex", justifyContent: "space-between", alignItems: "center",
     gap: "12px", cursor: "pointer",
   },
-  personName:  { fontSize: "14px", fontWeight: 800, color: PALETTE.text, marginBottom: "3px" },
-  personMeta:  { fontSize: "12px", color: PALETTE.textSoft },
+  personName:  { fontSize: "13px", fontWeight: 700, color: PALETTE.text, marginBottom: "2px" },
+  personMeta:  { fontSize: "11px", color: PALETTE.textSoft },
   personRight: { display: "flex", alignItems: "center", gap: "10px" },
   personRoleBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 9px",
-    borderRadius: "999px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.05em", textTransform: "uppercase",
+    display: "inline-flex", alignItems: "center", padding: "3px 7px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
   },
-  personRoleBadgeGm:  { background: PALETTE.blueSoft,   color: "#94b8d8", border: `1px solid rgba(61,104,153,0.26)` },
-  personRoleBadgeMgr: { background: PALETTE.indigoSoft, color: "#a8b8d8", border: `1px solid rgba(104,120,168,0.26)` },
-  personChevron: { color: PALETTE.textMuted, fontSize: "17px", lineHeight: 1 },
+  personRoleBadgeGm:  { background: "rgba(26,128,255,0.10)", color: PALETTE.blue, border: `1px solid rgba(26,128,255,0.24)` },
+  personRoleBadgeMgr: { background: PALETTE.indigoSoft, color: "#a0b4e8", border: `1px solid rgba(100,120,200,0.24)` },
+  personChevron: { color: PALETTE.textMuted, fontSize: "16px", lineHeight: 1 },
 
-  personFileStack:  { display: "flex", flexDirection: "column", gap: "14px" },
-  personFileTitle:  { fontSize: "20px", fontWeight: 800, color: PALETTE.text },
-  personFileMeta:   { fontSize: "13px", color: PALETTE.textSoft, marginTop: "3px" },
+  personFileStack:  { display: "flex", flexDirection: "column", gap: "12px" },
+  personFileTitle:  { fontSize: "18px", fontWeight: 700, color: PALETTE.text },
+  personFileMeta:   { fontSize: "12px", color: PALETTE.textSoft, marginTop: "3px" },
   personStatsRow:   { display: "flex", gap: "14px", alignItems: "center", marginTop: "14px", flexWrap: "wrap" },
   personStatBlock:  { textAlign: "center" },
-  personStatValue:  { fontSize: "22px", fontWeight: 800, lineHeight: 1 },
-  personStatLabel:  { marginTop: "4px", fontSize: "10px", color: PALETTE.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 },
-  personStatDivider:{ width: "1px", height: "32px", background: PALETTE.borderStrong },
+  personStatValue:  { fontSize: "22px", fontWeight: 700, lineHeight: 1, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
+  personStatLabel:  { marginTop: "4px", fontSize: "10px", color: PALETTE.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 800 },
+  personStatDivider:{ width: "1px", height: "30px", background: PALETTE.border },
 
   // ── POLICY RESULT CARDS
   policyCodeBadge: {
-    display: "inline-flex", alignItems: "center", padding: "4px 10px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    letterSpacing: "0.05em", textTransform: "uppercase",
-    background: PALETTE.blueSoft, border: `1px solid rgba(61,104,153,0.26)`, color: "#94b8d8",
+    display: "inline-flex", alignItems: "center", padding: "3px 7px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
+    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.24)`, color: PALETTE.blue,
   },
   versionTag: {
-    display: "inline-flex", alignItems: "center", padding: "4px 8px",
-    borderRadius: "999px", fontSize: "11px", fontWeight: 700,
-    background: "rgba(143,163,184,0.07)", border: `1px solid rgba(143,163,184,0.16)`, color: PALETTE.textMuted,
+    display: "inline-flex", alignItems: "center", padding: "3px 7px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
+    background: "rgba(77,106,132,0.08)", border: `1px solid ${PALETTE.border}`, color: PALETTE.textMuted,
   },
 
-  emptyState:      { textAlign: "center", padding: "28px 0" },
-  emptyStateIcon:  { fontSize: "26px", marginBottom: "10px" },
-  emptyStateTitle: { fontSize: "14px", fontWeight: 700, color: PALETTE.textSoft, marginBottom: "4px" },
-  emptyStateText:  { fontSize: "12px", color: PALETTE.textMuted },
-  emptyStateTight: { textAlign: "center", padding: "24px 0", fontSize: "13px", color: PALETTE.textSoft },
+  emptyState:      { textAlign: "center", padding: "32px 0" },
+  emptyStateIcon:  { fontSize: "22px", marginBottom: "10px" },
+  emptyStateTitle: { fontSize: "12px", fontWeight: 700, color: PALETTE.textSoft, marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.07em" },
+  emptyStateText:  { fontSize: "11px", color: PALETTE.textMuted },
+  emptyStateTight: { textAlign: "center", padding: "24px 0", fontSize: "12px", color: PALETTE.textSoft },
 
   // ── CLICKABLE METRIC CARDS (GM drill-through)
   metricCardClickable: {
     cursor: "pointer",
-    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
-    border: `1px solid rgba(61,104,153,0.32)`,
-    boxShadow: "0 8px 20px rgba(0,0,0,0.18), 0 0 0 0 rgba(61,104,153,0)",
+    border: `1px solid rgba(26,128,255,0.20)`,
   },
   metricCardDrillHint: {
-    fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em",
-    color: "#6a92c0", textTransform: "uppercase", marginBottom: "10px",
+    fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
+    color: PALETTE.blue, textTransform: "uppercase", marginBottom: "12px",
     textAlign: "right",
   },
 
   // ── GM VIRTUAL SIGNATURE BOX
   sigBoxWrap: { marginTop: "4px" },
-  sigBoxLabel: { fontSize: "13px", color: PALETTE.textSoft, marginBottom: "10px", fontWeight: 600 },
+  sigBoxLabel: { fontSize: "12px", color: PALETTE.textSoft, marginBottom: "10px", fontWeight: 600 },
   sigBoxInput: {
-    width: "100%", borderRadius: "14px",
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
+    width: "100%", borderRadius: "3px",
+    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
     color: "#c8dcf0", padding: "14px 18px", fontSize: "20px",
     fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic",
     outline: "none", boxSizing: "border-box", letterSpacing: "0.03em",
@@ -2710,49 +2792,50 @@ const styles = {
   sigBoxPreview: {
     display: "flex", alignItems: "center", gap: "10px", marginTop: "10px", flexWrap: "wrap",
   },
-  sigBoxPreviewLabel: { fontSize: "11px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" },
+  sigBoxPreviewLabel: { fontSize: "10px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" },
   sigBoxPreviewName: {
     fontSize: "18px", fontFamily: "Georgia, 'Times New Roman', serif",
-    fontStyle: "italic", color: "#7ac4a0", letterSpacing: "0.02em",
+    fontStyle: "italic", color: PALETTE.green, letterSpacing: "0.02em",
   },
   sigBoxClear: {
-    background: "transparent", border: `1px solid ${PALETTE.borderStrong}`,
-    color: PALETTE.textMuted, borderRadius: "8px", padding: "4px 10px",
+    background: "transparent", border: `1px solid ${PALETTE.border}`,
+    color: PALETTE.textMuted, borderRadius: "3px", padding: "4px 10px",
     fontSize: "11px", fontWeight: 700, cursor: "pointer",
   },
   sigWarning: {
-    background: "rgba(154, 120, 64, 0.10)",
-    border: `1px solid rgba(154, 120, 64, 0.30)`,
-    borderRadius: "12px",
+    background: PALETTE.amberSoft,
+    border: `1px solid rgba(232,152,10,0.30)`,
+    borderRadius: "3px",
     padding: "10px 14px",
-    fontSize: "13px",
+    fontSize: "12px",
     fontWeight: 600,
-    color: "#c4a070",
+    color: PALETTE.amber,
     marginBottom: "4px",
   },
 
-  // ── FACILITY NOTES (Feature 1 & 2)
+  // ── FACILITY NOTES
   notePriorityBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 9px",
-    borderRadius: "999px", fontSize: "10px", fontWeight: 800,
-    letterSpacing: "0.07em", textTransform: "uppercase",
+    display: "inline-flex", alignItems: "center", padding: "3px 7px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 800,
+    letterSpacing: "0.08em", textTransform: "uppercase",
     border: "1px solid", background: "transparent",
   },
   noteStatusBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 9px",
-    borderRadius: "999px", fontSize: "10px", fontWeight: 800,
-    letterSpacing: "0.07em", textTransform: "uppercase",
+    display: "inline-flex", alignItems: "center", padding: "3px 7px",
+    borderRadius: "2px", fontSize: "10px", fontWeight: 800,
+    letterSpacing: "0.08em", textTransform: "uppercase",
     border: "1px solid", background: "transparent",
   },
   noteResolutionBlock: {
     marginTop: "12px",
-    background: "rgba(74, 124, 97, 0.08)",
-    border: `1px solid rgba(74, 124, 97, 0.22)`,
-    borderRadius: "12px",
+    background: "rgba(0,200,122,0.07)",
+    border: `1px solid rgba(0,200,122,0.20)`,
+    borderLeft: `2px solid ${PALETTE.green}`,
+    borderRadius: "3px",
     padding: "12px 14px",
   },
   noteResolutionLabel: {
-    fontSize: "11px", fontWeight: 800, color: "#7ac4a0",
-    letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "5px",
+    fontSize: "10px", fontWeight: 800, color: PALETTE.green,
+    letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "5px",
   },
 };
