@@ -1295,10 +1295,12 @@ export default function Dashboard() {
     }
     setNoteStatusUpdating(noteId);
     try {
-      const { error } = await supabase.from("facility_notes")
+      const { data: updated, error } = await supabase.from("facility_notes")
         .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", noteId);
+        .eq("id", noteId)
+        .select();
       if (error) throw error;
+      if (!updated?.length) throw new Error("Update blocked — check your permissions.");
       await fetchFacilityNotes();
     } catch (err) {
       console.error("Note status update error:", err);
@@ -1313,15 +1315,16 @@ export default function Dashboard() {
     setNoteStatusUpdating(noteId);
     try {
       const now = new Date().toISOString();
-      const { error } = await supabase.from("facility_notes").update({
+      const { data: updated, error } = await supabase.from("facility_notes").update({
         status:          "closed",
         resolution_text: resolutionText.trim(),
         closed_by:       user.id,
         closed_by_name:  profile?.full_name || "Unknown",
         closed_at:       now,
         updated_at:      now,
-      }).eq("id", noteId);
+      }).eq("id", noteId).select();
       if (error) throw error;
+      if (!updated?.length) throw new Error("Update blocked — check your permissions.");
       setResolutionNoteId(null); setResolutionText("");
       await fetchFacilityNotes();
     } catch (err) {
