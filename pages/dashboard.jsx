@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,20 +43,13 @@ const NOTE_PRIORITIES = ["low", "normal", "high", "urgent"];
 
 const NOTE_STATUSES = ["open", "in_progress", "closed"];
 
-const SIGNATURE_OPTIONS = [
-  { value: "employee_signed",  label: "Employee Signed"  },
-  { value: "employee_refused", label: "Employee Refused" },
-  { value: "witness_verified", label: "Witness Verified" },
-];
-
 // ─────────────────────────────────────────────────────────────────────────────
 // METRIC DEFINITIONS
-// GM sees PR / PAS / TPR only.  AM sees all four including PP/D.
+// GM sees PR / PAS only.  AM sees PR / PAS / PP/D.
 // ─────────────────────────────────────────────────────────────────────────────
 const ALL_METRIC_DEFS = [
   { key: "pr",  label: "PR%",  desc: "Policy Reference Rate",             target: 78, unit: "%" },
   { key: "pas", label: "PAS%", desc: "Policy Adherence Score",            target: 85, unit: "%" },
-  { key: "tpr", label: "TPR%", desc: "Team Performance Rating",           target: 91, unit: "%" },
   { key: "ppd", label: "PP/D", desc: "Policy Pull / Documented Decision", target: 38, unit: "%" },
 ];
 
@@ -252,7 +246,7 @@ function detectCategory(situation = "", action = "", keywordMap = FALLBACK_CATEG
 // ─────────────────────────────────────────────────────────────────────────────
 // These functions provide deterministic mock values seeded from facility number.
 // SWAP these with real Supabase queries when the backend is ready.
-// Each returns: { pr, pas, tpr, ppd }   (ppd optional)
+// Each returns: { pr, pas, ppd }   (ppd optional for GM)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function seedFromFacility(facilityNumber = "") {
@@ -261,24 +255,21 @@ function seedFromFacility(facilityNumber = "") {
   return Number.isNaN(base) ? 7 : base;
 }
 
-/** GM facility-level snapshot — PR, PAS, TPR */
+/** GM facility-level snapshot — PR, PAS */
 function getMockGmMetrics(facilityNumber) {
   const s = seedFromFacility(facilityNumber);
   return {
     pr:  72 + (s % 10),
     pas: 80 + (s % 8),
-    tpr: 85 + (s % 9),
-    ppd: null,
   };
 }
 
-/** AM area-level aggregate — PR, PAS, TPR, PP/D */
+/** AM area-level aggregate — PR, PAS, PP/D */
 function getMockAmMetrics(facilityNumber) {
   const s = seedFromFacility(facilityNumber);
   return {
     pr:  74 + (s % 8),
     pas: 82 + (s % 7),
-    tpr: 87 + (s % 7),
     ppd: 33  + (s % 12),
   };
 }
@@ -287,17 +278,17 @@ function getMockAmMetrics(facilityNumber) {
 function getMockTerritoryFacilities(facilityNumber) {
   const s = seedFromFacility(facilityNumber);
   return [
-    { number: `#${1040 + (s % 7)}`,           pr: 76 + (s % 8),        pas: 83 + (s % 6),        tpr: 88 + (s % 6),        ppd: 29 + (s % 10) },
-    { number: `#${1048 + ((s + 3) % 7)}`,      pr: 70 + ((s * 2) % 10), pas: 80 + (s % 7),        tpr: 85 + ((s * 2) % 6),  ppd: 40 + (s % 14) },
-    { number: `#${1060 + (s % 9)}`,            pr: 78 + (s % 7),        pas: 85 + (s % 5),        tpr: 90 + (s % 5),        ppd: 27 + ((s * 3) % 8) },
-    { number: `#${1070 + ((s + 5) % 9)}`,      pr: 66 + ((s * 3) % 12), pas: 77 + (s % 8),        tpr: 83 + (s % 7),        ppd: 52 + (s % 10) },
+    { number: `#${1040 + (s % 7)}`,           pr: 76 + (s % 8),        pas: 83 + (s % 6),        ppd: 29 + (s % 10) },
+    { number: `#${1048 + ((s + 3) % 7)}`,      pr: 70 + ((s * 2) % 10), pas: 80 + (s % 7),        ppd: 40 + (s % 14) },
+    { number: `#${1060 + (s % 9)}`,            pr: 78 + (s % 7),        pas: 85 + (s % 5),        ppd: 27 + ((s * 3) % 8) },
+    { number: `#${1070 + ((s + 5) % 9)}`,      pr: 66 + ((s * 3) % 12), pas: 77 + (s % 8),        ppd: 52 + (s % 10) },
   ];
 }
 
 /** Facility-level metrics used in the Facilities tab (Area Manager) */
 function getMockFacilityMetrics(facilityNumber) {
   const s = seedFromFacility(facilityNumber);
-  return { pr: 72 + (s % 9), pas: 80 + (s % 8), tpr: 84 + (s % 10), ppd: 34 + (s % 9) };
+  return { pr: 72 + (s % 9), pas: 80 + (s % 8), ppd: 34 + (s % 9) };
 }
 
 /** Category breakdown for a single facility */
@@ -322,11 +313,11 @@ function getMockBreakdown(facilityNumber) {
 async function loadGmDashboardMetrics(profile) {
   // TODO: real query →
   // const { data } = await supabase.from("facility_metrics")
-  //   .select("pr_percent, pas_percent, tpr_percent")
+  //   .select("pr_percent, pas_percent")
   //   .eq("facility_number", profile.facility_number)
   //   .eq("company_id", profile.company_id)
   //   .maybeSingle();
-  // if (data) return { pr: data.pr_percent, pas: data.pas_percent, tpr: data.tpr_percent, ppd: null };
+  // if (data) return { pr: data.pr_percent, pas: data.pas_percent };
   return getMockGmMetrics(profile?.facility_number);
 }
 
@@ -334,10 +325,10 @@ async function loadGmDashboardMetrics(profile) {
 async function loadAmDashboardMetrics(profile) {
   // TODO: real query →
   // const { data } = await supabase.from("area_metrics")
-  //   .select("pr_percent, pas_percent, tpr_percent, ppd_percent")
+  //   .select("pr_percent, pas_percent, ppd_percent")
   //   .eq("area_manager_id", profile.id)
   //   .maybeSingle();
-  // if (data) return { pr: data.pr_percent, pas: data.pas_percent, tpr: data.tpr_percent, ppd: data.ppd_percent };
+  // if (data) return { pr: data.pr_percent, pas: data.pas_percent, ppd: data.ppd_percent };
   return getMockAmMetrics(profile?.facility_number);
 }
 
@@ -345,7 +336,7 @@ async function loadAmDashboardMetrics(profile) {
 async function loadAmTerritoryData(profile) {
   // TODO: real query →
   // const { data } = await supabase.from("area_manager_facilities")
-  //   .select("facility_number, pr_percent, pas_percent, tpr_percent, ppd_percent")
+  //   .select("facility_number, pr_percent, pas_percent, ppd_percent")
   //   .eq("area_manager_id", profile.id);
   // if (data?.length) return data.map(f => ({ number: `#${f.facility_number}`, ... }));
   return getMockTerritoryFacilities(profile?.facility_number);
@@ -384,11 +375,21 @@ function normalizeBreakdownRows(rows, facilityNumber) {
 // SUB-COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MetricCard({ metric, value }) {
+function MetricCard({ metric, value, onClick }) {
   const color = scoreMetricColor(metric.key, value);
   const barWidth = Math.max(0, Math.min(100, value));
+  const isClickable = typeof onClick === "function";
   return (
-    <div style={styles.metricCard}>
+    <div
+      style={{ ...styles.metricCard, ...(isClickable ? styles.metricCardClickable : {}) }}
+      onClick={onClick}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={isClickable ? (e) => e.key === "Enter" && onClick() : undefined}
+    >
+      {isClickable && (
+        <div style={styles.metricCardDrillHint}>View breakdown →</div>
+      )}
       <div style={styles.metricLabel}>{metric.label}</div>
       <div style={{ ...styles.metricValue, color }}>
         {Math.round(value)}{metric.unit}
@@ -528,7 +529,6 @@ function TerritoryTable({ facilities }) {
         const colors = {
           pr:  scoreMetricColor("pr",  fac.pr),
           pas: scoreMetricColor("pas", fac.pas),
-          tpr: scoreMetricColor("tpr", fac.tpr),
           ppd: scoreMetricColor("ppd", fac.ppd),
         };
         const alertCount = Object.values(colors).filter((c) => c === PALETTE.red).length;
@@ -550,7 +550,6 @@ function TerritoryTable({ facilities }) {
             {[
               { key: "pr",  val: fac.pr  },
               { key: "pas", val: fac.pas },
-              { key: "tpr", val: fac.tpr },
               { key: "ppd", val: fac.ppd },
             ].map(({ key, val }) => (
               <div key={key} style={{ ...styles.territoryCell, color: colors[key], fontWeight: 700, fontSize: "14px" }}>
@@ -623,12 +622,12 @@ export default function Dashboard() {
   const [guidanceSubmittingId, setGuidanceSubmittingId] = useState(null);
 
   // ── GM dashboard metrics ─────────────────────────────────────────────────
-  const [gmMetrics,         setGmMetrics]         = useState({ pr: 0, pas: 0, tpr: 0 });
-  const [gmAnimatedMetrics, setGmAnimatedMetrics] = useState({ pr: 0, pas: 0, tpr: 0 });
+  const [gmMetrics,         setGmMetrics]         = useState({ pr: 0, pas: 0 });
+  const [gmAnimatedMetrics, setGmAnimatedMetrics] = useState({ pr: 0, pas: 0 });
 
   // ── AM dashboard metrics ─────────────────────────────────────────────────
-  const [amMetrics,              setAmMetrics]              = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
-  const [amAnimatedMetrics,      setAmAnimatedMetrics]      = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
+  const [amMetrics,              setAmMetrics]              = useState({ pr: 0, pas: 0, ppd: 0 });
+  const [amAnimatedMetrics,      setAmAnimatedMetrics]      = useState({ pr: 0, pas: 0, ppd: 0 });
   const [amTerritoryFacilities,  setAmTerritoryFacilities]  = useState([]);
 
   // ── team / manager data ───────────────────────────────────────────────────
@@ -654,8 +653,8 @@ export default function Dashboard() {
   const [personCoaching,  setPersonCoaching]  = useState([]);
   const [personFileTab,   setPersonFileTab]   = useState("decisions");
 
-  const [facilityMetrics,         setFacilityMetrics]         = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
-  const [animatedFacilityMetrics, setAnimatedFacilityMetrics] = useState({ pr: 0, pas: 0, tpr: 0, ppd: 0 });
+  const [facilityMetrics,         setFacilityMetrics]         = useState({ pr: 0, pas: 0, ppd: 0 });
+  const [animatedFacilityMetrics, setAnimatedFacilityMetrics] = useState({ pr: 0, pas: 0, ppd: 0 });
   const [facilityBreakdown,       setFacilityBreakdown]       = useState(getMockBreakdown(""));
 
   // ── misc ─────────────────────────────────────────────────────────────────
@@ -683,8 +682,10 @@ export default function Dashboard() {
   const [resolutionNoteId,      setResolutionNoteId]      = useState(null); // id awaiting resolution
   const [resolutionText,        setResolutionText]        = useState("");
 
-  // ── employee signature (Feature 3) ───────────────────────────────────────
-  const [signatureStatus, setSignatureStatus] = useState("");
+  // ── GM virtual signature (GM document flow only) ─────────────────────────
+  const [gmSignatureText, setGmSignatureText] = useState("");
+
+  const router = useRouter();
 
   // ── derived role flags ────────────────────────────────────────────────────
   const currentRoleLevel     = useMemo(() => ROLE_LEVELS[profile?.role] || 1, [profile]);
@@ -746,7 +747,7 @@ export default function Dashboard() {
           setDashboardLoading(true);
           try {
             const metrics = await loadGmDashboardMetrics(prof);
-            if (mounted) setGmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr });
+            if (mounted) setGmMetrics({ pr: metrics.pr, pas: metrics.pas });
           } catch (e) { console.error("GM metrics load error:", e); }
           finally { if (mounted) setDashboardLoading(false); }
         } else if (prof?.role === "Area Manager") {
@@ -758,7 +759,7 @@ export default function Dashboard() {
               loadAmTerritoryData(prof),
             ]);
             if (mounted) {
-              setAmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr, ppd: metrics.ppd });
+              setAmMetrics({ pr: metrics.pr, pas: metrics.pas, ppd: metrics.ppd });
               setAmTerritoryFacilities(territory);
             }
           } catch (e) { console.error("AM metrics load error:", e); }
@@ -817,19 +818,19 @@ export default function Dashboard() {
 
   // Facility metrics animation (Facilities tab)
   useEffect(() => {
-    if (!selectedFacility) { setAnimatedFacilityMetrics({ pr: 0, pas: 0, tpr: 0, ppd: 0 }); return; }
+    if (!selectedFacility) { setAnimatedFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); return; }
     return animateMetrics(facilityMetrics, setAnimatedFacilityMetrics);
   }, [facilityMetrics, selectedFacility]);
 
   // GM dashboard animation
   useEffect(() => {
-    if (!Object.values(gmMetrics).some((v) => v > 0)) { setGmAnimatedMetrics({ pr: 0, pas: 0, tpr: 0 }); return; }
+    if (!Object.values(gmMetrics).some((v) => v > 0)) { setGmAnimatedMetrics({ pr: 0, pas: 0 }); return; }
     return animateMetrics(gmMetrics, setGmAnimatedMetrics);
   }, [gmMetrics]);
 
   // AM dashboard animation
   useEffect(() => {
-    if (!Object.values(amMetrics).some((v) => v > 0)) { setAmAnimatedMetrics({ pr: 0, pas: 0, tpr: 0, ppd: 0 }); return; }
+    if (!Object.values(amMetrics).some((v) => v > 0)) { setAmAnimatedMetrics({ pr: 0, pas: 0, ppd: 0 }); return; }
     return animateMetrics(amMetrics, setAmAnimatedMetrics);
   }, [amMetrics]);
 
@@ -944,12 +945,13 @@ export default function Dashboard() {
         category_confidence: categoryManuallySet ? "high" : detected.confidence,
         category_score: categoryManuallySet ? null : detected.score,
         policy_referenced: decisionPolicy.trim() || null,
-        signature_status: signatureStatus || null,
+        // GM: store virtual signature text. Manager: no signature field.
+        signature_status: isGeneralManager ? (gmSignatureText.trim() || null) : null,
         is_read: false,
       }]);
       if (error) throw error;
       setDecisionSituation(""); setDecisionAction(""); setDecisionCategory("");
-      setDecisionPolicy(""); setCategoryManuallySet(false); setSignatureStatus("");
+      setDecisionPolicy(""); setCategoryManuallySet(false); setGmSignatureText("");
       setDecisionMessage("Decision submitted successfully.");
     } catch (err) {
       console.error("Decision submit error:", err);
@@ -1176,7 +1178,7 @@ export default function Dashboard() {
 
       setFacilityMetrics(me || !metrics
         ? getMockFacilityMetrics(facility.facility_number)
-        : { pr: +metrics.pr_percent, pas: +metrics.pas_percent, tpr: +metrics.tpr_percent, ppd: +metrics.ppd_percent }
+        : { pr: +metrics.pr_percent, pas: +metrics.pas_percent, ppd: +metrics.ppd_percent }
       );
 
       setFacilityBreakdown(be || !breakdown?.length
@@ -1311,13 +1313,13 @@ export default function Dashboard() {
     try {
       if (isGeneralManager) {
         const metrics = await loadGmDashboardMetrics(profile);
-        setGmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr });
+        setGmMetrics({ pr: metrics.pr, pas: metrics.pas });
       } else if (isAreaManager) {
         const [metrics, territory] = await Promise.all([
           loadAmDashboardMetrics(profile),
           loadAmTerritoryData(profile),
         ]);
-        setAmMetrics({ pr: metrics.pr, pas: metrics.pas, tpr: metrics.tpr, ppd: metrics.ppd });
+        setAmMetrics({ pr: metrics.pr, pas: metrics.pas, ppd: metrics.ppd });
         setAmTerritoryFacilities(territory);
       }
     } catch (err) { console.error("Dashboard load error:", err); }
@@ -1462,9 +1464,18 @@ export default function Dashboard() {
               <div style={styles.panelCard}><p style={styles.message}>Loading metrics...</p></div>
             ) : (
               <div style={styles.metricsGrid} className="fade-up">
-                {GM_METRIC_DEFS.map((metric) => (
-                  <MetricCard key={metric.key} metric={metric} value={gmAnimatedMetrics[metric.key] || 0} />
-                ))}
+                {GM_METRIC_DEFS.map((metric) => {
+                  const drillRoutes = { pr: "/gm-pr-breakdown", pas: "/gm-pas-breakdown" };
+                  const route = drillRoutes[metric.key];
+                  return (
+                    <MetricCard
+                      key={metric.key}
+                      metric={metric}
+                      value={gmAnimatedMetrics[metric.key] || 0}
+                      onClick={route ? () => router.push(route) : undefined}
+                    />
+                  );
+                })}
               </div>
             )}
 
@@ -1647,29 +1658,41 @@ export default function Dashboard() {
               <input type="text" value={decisionPolicy} onChange={(e) => setDecisionPolicy(e.target.value)}
                 placeholder="Policy referenced (optional)" style={styles.policyInput} />
 
-              {/* ── Employee Signature (Feature 3) ── */}
-              <div style={styles.sectionDivider} />
-              <div style={styles.sectionTitle}>Employee Signature</div>
-              <div style={styles.signatureRow}>
-                {SIGNATURE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    style={{
-                      ...styles.signatureOption,
-                      ...(signatureStatus === opt.value ? styles.signatureOptionActive : {}),
-                    }}
-                    onClick={() => setSignatureStatus(signatureStatus === opt.value ? "" : opt.value)}
-                    type="button"
-                  >
-                    {signatureStatus === opt.value && <span style={{ marginRight: "6px", fontSize: "12px" }}>✓</span>}
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              {!signatureStatus && (
-                <div style={styles.sigWarning}>
-                  ⚠ HR recommends having EE signatures before submitting documents.
-                </div>
+              {/* ── GM-only: Virtual Signature Box ── */}
+              {isGeneralManager && (
+                <>
+                  <div style={styles.sectionDivider} />
+                  <div style={styles.sectionTitle}>Employee Signature</div>
+                  <div style={styles.sigBoxWrap}>
+                    <div style={styles.sigBoxLabel}>Type employee's full name as digital signature</div>
+                    <input
+                      type="text"
+                      value={gmSignatureText}
+                      onChange={(e) => setGmSignatureText(e.target.value)}
+                      placeholder="Sign here…"
+                      style={styles.sigBoxInput}
+                      autoComplete="off"
+                    />
+                    {gmSignatureText.trim() && (
+                      <div style={styles.sigBoxPreview}>
+                        <span style={styles.sigBoxPreviewLabel}>Signed as:</span>
+                        <span style={styles.sigBoxPreviewName}>{gmSignatureText.trim()}</span>
+                        <button
+                          type="button"
+                          style={styles.sigBoxClear}
+                          onClick={() => setGmSignatureText("")}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                    {!gmSignatureText.trim() && (
+                      <div style={styles.sigWarning}>
+                        ⚠ HR recommends having EE signatures before submitting documents.
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               <button
@@ -1954,7 +1977,7 @@ export default function Dashboard() {
                     ← Back to People
                   </button>
                 ) : selectedFacility ? (
-                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, tpr: 0, ppd: 0 }); setFacilityBreakdown(getMockBreakdown("")); }}>
+                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(getMockBreakdown("")); }}>
                     ← All Facilities
                   </button>
                 ) : null}
@@ -2661,18 +2684,41 @@ const styles = {
   emptyStateText:  { fontSize: "12px", color: PALETTE.textMuted },
   emptyStateTight: { textAlign: "center", padding: "24px 0", fontSize: "13px", color: PALETTE.textSoft },
 
-  // ── EMPLOYEE SIGNATURE (Feature 3)
-  signatureRow: { display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "10px" },
-  signatureOption: {
-    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
-    color: PALETTE.textSoft, borderRadius: "14px", padding: "10px 15px",
-    fontSize: "13px", fontWeight: 700, cursor: "pointer",
-    display: "inline-flex", alignItems: "center",
+  // ── CLICKABLE METRIC CARDS (GM drill-through)
+  metricCardClickable: {
+    cursor: "pointer",
+    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+    border: `1px solid rgba(61,104,153,0.32)`,
+    boxShadow: "0 8px 20px rgba(0,0,0,0.18), 0 0 0 0 rgba(61,104,153,0)",
   },
-  signatureOptionActive: {
-    border: `1px solid rgba(74, 124, 97, 0.5)`,
-    background: "rgba(74, 124, 97, 0.12)",
-    color: "#7ac4a0",
+  metricCardDrillHint: {
+    fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em",
+    color: "#6a92c0", textTransform: "uppercase", marginBottom: "10px",
+    textAlign: "right",
+  },
+
+  // ── GM VIRTUAL SIGNATURE BOX
+  sigBoxWrap: { marginTop: "4px" },
+  sigBoxLabel: { fontSize: "13px", color: PALETTE.textSoft, marginBottom: "10px", fontWeight: 600 },
+  sigBoxInput: {
+    width: "100%", borderRadius: "14px",
+    border: `1px solid ${PALETTE.borderStrong}`, background: PALETTE.panelAlt,
+    color: "#c8dcf0", padding: "14px 18px", fontSize: "20px",
+    fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic",
+    outline: "none", boxSizing: "border-box", letterSpacing: "0.03em",
+  },
+  sigBoxPreview: {
+    display: "flex", alignItems: "center", gap: "10px", marginTop: "10px", flexWrap: "wrap",
+  },
+  sigBoxPreviewLabel: { fontSize: "11px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" },
+  sigBoxPreviewName: {
+    fontSize: "18px", fontFamily: "Georgia, 'Times New Roman', serif",
+    fontStyle: "italic", color: "#7ac4a0", letterSpacing: "0.02em",
+  },
+  sigBoxClear: {
+    background: "transparent", border: `1px solid ${PALETTE.borderStrong}`,
+    color: PALETTE.textMuted, borderRadius: "8px", padding: "4px 10px",
+    fontSize: "11px", fontWeight: 700, cursor: "pointer",
   },
   sigWarning: {
     background: "rgba(154, 120, 64, 0.10)",
