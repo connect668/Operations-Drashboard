@@ -55,7 +55,8 @@ const NOTE_TYPE_LABEL = Object.fromEntries(
 
 const NOTE_PRIORITIES = ["low", "normal", "high", "urgent"];
 
-const NOTE_STATUSES = ["open", "in_progress", "closed"];
+const NOTE_STATUSES  = ["pending", "open", "closed"];
+const NOTE_STATUS_ORDER = { pending: 0, open: 1, closed: 2 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // METRIC DEFINITIONS
@@ -1301,7 +1302,12 @@ export default function Dashboard() {
       if (!canManageFacilityNotes) q = q.neq("status", "closed");
       const { data, error } = await q;
       if (error) throw error;
-      setFacilityNotes(data || []);
+      const sorted = (data || []).slice().sort((a, b) => {
+        const sd = (NOTE_STATUS_ORDER[a.status] ?? 1) - (NOTE_STATUS_ORDER[b.status] ?? 1);
+        if (sd !== 0) return sd;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+      setFacilityNotes(sorted);
     } catch (err) {
       console.error("Fetch facility notes error:", err);
       setFacilityNotesMessage(err.message || "Failed to load facility notes.");
@@ -2389,8 +2395,8 @@ export default function Dashboard() {
                       : note.priority === "high"   ? PALETTE.amber
                       : note.priority === "low"    ? PALETTE.textMuted
                       : PALETTE.textSoft;
-                    const statusColor = note.status === "closed"      ? PALETTE.green
-                      : note.status === "in_progress" ? PALETTE.amber
+                    const statusColor = note.status === "closed"  ? PALETTE.green
+                      : note.status === "pending" ? PALETTE.amber
                       : PALETTE.blue;
                     return (
                       <div key={note.id} style={{ ...styles.feedCard, opacity: note.status === "closed" ? 0.75 : 1 }}>
@@ -2459,13 +2465,13 @@ export default function Dashboard() {
                             {note.status === "open" && (
                               <button
                                 style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
-                                onClick={() => handleNoteStatusUpdate(note.id, "in_progress")}
+                                onClick={() => handleNoteStatusUpdate(note.id, "pending")}
                                 disabled={!!noteStatusUpdating}
                               >
                                 Mark In Progress
                               </button>
                             )}
-                            {(note.status === "open" || note.status === "in_progress") && (
+                            {(note.status === "open" || note.status === "pending") && (
                               <button
                                 style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
                                 onClick={() => handleNoteStatusUpdate(note.id, "closed")}
