@@ -69,6 +69,7 @@ const ALL_METRIC_DEFS = [
 
 const GM_METRIC_DEFS = ALL_METRIC_DEFS.filter((m) => m.key !== "ppd");
 const AM_METRIC_DEFS = ALL_METRIC_DEFS;
+const OPEN_NOTES_METRIC_DEF = { key: "open_notes", label: "Open Notes", desc: "Open facility issues", unit: "" };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOUR PALETTE  — trading terminal / financial dark
@@ -194,6 +195,19 @@ function formatDate(value) {
   catch { return value; }
 }
 
+function timeAgo(dateString) {
+  if (!dateString) return "—";
+  const diff  = Date.now() - new Date(dateString).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  <  1)  return "just now";
+  if (mins  < 60)  return `${mins}m ago`;
+  if (hours < 24)  return `${hours}h ago`;
+  if (days  < 30)  return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 function applyCompanyScope(query, scope) {
   const cid = scope?.company_id;
   if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid))
@@ -218,6 +232,11 @@ function getCategoryStyle(category) {
 // PP/D: < 38 green · 38–55 amber · > 55 red
 // All other metrics: ≥ 85 green · ≥ 70 amber · < 70 red
 function scoreMetricColor(metricKey, value) {
+  if (metricKey === "open_notes") {
+    if (value === 0) return PALETTE.green;
+    if (value <= 3)  return PALETTE.amber;
+    return PALETTE.red;
+  }
   if (metricKey === "ppd") {
     if (value < 38) return PALETTE.green;
     if (value > 55) return PALETTE.red;
@@ -394,9 +413,11 @@ function normalizeBreakdownRows(rows, facilityNumber) {
 // SUB-COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MetricCard({ metric, value, onClick }) {
+function MetricCard({ metric, value, onClick, barMax }) {
   const color = scoreMetricColor(metric.key, value);
-  const barWidth = Math.max(0, Math.min(100, value));
+  const barWidth = barMax
+    ? Math.max(0, Math.min(100, (value / barMax) * 100))
+    : Math.max(0, Math.min(100, value));
   const isClickable = typeof onClick === "function";
   return (
     <div
@@ -680,6 +701,10 @@ export default function Dashboard() {
   const [facilityMetrics,         setFacilityMetrics]         = useState({ pr: 0, pas: 0, ppd: 0 });
   const [animatedFacilityMetrics, setAnimatedFacilityMetrics] = useState({ pr: 0, pas: 0, ppd: 0 });
   const [facilityBreakdown,       setFacilityBreakdown]       = useState(getMockBreakdown(""));
+  const [facilityOpenNotes,        setFacilityOpenNotes]        = useState([]);
+  const [facilityOpenNotesCount,   setFacilityOpenNotesCount]   = useState(0);
+  const [facilityOpenNotesLoading, setFacilityOpenNotesLoading] = useState(false);
+  const [showFacilityNotesView,    setShowFacilityNotesView]    = useState(false);
 
   // ── misc ─────────────────────────────────────────────────────────────────
   const [isMobile,      setIsMobile]      = useState(false);
@@ -1173,7 +1198,10 @@ export default function Dashboard() {
   const fetchFacilityPeople = async (facility) => {
     setSelectedFacility(facility); setSelectedPerson(null);
     setPersonDecisions([]); setPersonCoaching([]); setFacilityPeople([]);
+    setShowFacilityNotesView(false);
+    setFacilityOpenNotes([]); setFacilityOpenNotesCount(0);
     setFacilityPeopleLoading(true); setFacilitiesMessage("");
+    fetchFacilityOpenNotes(facility);
     const scope = facility?.company_id ? { company_id: facility.company_id } : { company: facility.company };
     try {
       let pq = supabase.from("profiles")
@@ -1217,6 +1245,30 @@ export default function Dashboard() {
       setFacilityBreakdown(getMockBreakdown(facility.facility_number));
       setFacilitiesMessage(err.message || "Failed to load facility data.");
     } finally { setFacilityPeopleLoading(false); }
+  };
+
+  const fetchFacilityOpenNotes = async (facility) => {
+    setFacilityOpenNotesLoading(true);
+    const scope = facility?.company_id ? { company_id: facility.company_id } : { company: facility.company };
+    try {
+      let q = supabase
+        .from("facility_notes")
+        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at")
+        .eq("facility_number", facility.facility_number)
+        .eq("status", "open")
+        .order("created_at", { ascending: false });
+      q = applyCompanyScope(q, scope);
+      const { data, error } = await q;
+      if (error) throw error;
+      setFacilityOpenNotes(data || []);
+      setFacilityOpenNotesCount((data || []).length);
+    } catch (err) {
+      console.error("Fetch facility open notes error:", err);
+      setFacilityOpenNotes([]);
+      setFacilityOpenNotesCount(0);
+    } finally {
+      setFacilityOpenNotesLoading(false);
+    }
   };
 
   const openPersonFile = async (person) => {
@@ -2022,8 +2074,12 @@ export default function Dashboard() {
                   <button style={styles.secondaryButton} onClick={() => { setSelectedPerson(null); setPersonDecisions([]); setPersonCoaching([]); }}>
                     ← Back to People
                   </button>
+                ) : showFacilityNotesView ? (
+                  <button style={styles.secondaryButton} onClick={() => setShowFacilityNotesView(false)}>
+                    ← Back to Facility
+                  </button>
                 ) : selectedFacility ? (
-                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(getMockBreakdown("")); }}>
+                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(getMockBreakdown("")); setFacilityOpenNotes([]); setFacilityOpenNotesCount(0); setShowFacilityNotesView(false); }}>
                     ← All Facilities
                   </button>
                 ) : null}
@@ -2046,6 +2102,12 @@ export default function Dashboard() {
                     <>
                       <span style={styles.breadcrumbSep}>›</span>
                       <span style={styles.breadcrumbCurrent}>{selectedPerson.full_name}</span>
+                    </>
+                  )}
+                  {showFacilityNotesView && !selectedPerson && (
+                    <>
+                      <span style={styles.breadcrumbSep}>›</span>
+                      <span style={styles.breadcrumbCurrent}>Open Notes</span>
                     </>
                   )}
                 </div>
@@ -2082,8 +2144,66 @@ export default function Dashboard() {
                   {AM_METRIC_DEFS.map((metric) => (
                     <MetricCard key={metric.key} metric={metric} value={animatedFacilityMetrics[metric.key] || 0} />
                   ))}
+                  <MetricCard
+                    metric={OPEN_NOTES_METRIC_DEF}
+                    value={facilityOpenNotesCount}
+                    barMax={10}
+                    onClick={() => setShowFacilityNotesView(true)}
+                  />
                 </div>
 
+                {showFacilityNotesView && (
+                  <div style={styles.panelCard} className="fade-up">
+                    <div style={styles.sectionTopRow}>
+                      <div style={styles.sectionHeading}>Open Notes · Facility {selectedFacility?.facility_number}</div>
+                      <button style={styles.secondaryButton} onClick={() => fetchFacilityOpenNotes(selectedFacility)}>Refresh</button>
+                    </div>
+                    <div style={styles.sectionDivider} />
+                    {facilityOpenNotesLoading ? (
+                      <p style={styles.message}>Loading notes...</p>
+                    ) : facilityOpenNotes.length === 0 ? (
+                      <div style={styles.emptyStateTight}>No open notes for this facility.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        {facilityOpenNotes.map((note) => {
+                          const priorityColor = note.priority === "urgent" ? PALETTE.red
+                            : note.priority === "high"   ? PALETTE.amber
+                            : note.priority === "low"    ? PALETTE.textMuted
+                            : PALETTE.textSoft;
+                          return (
+                            <div key={note.id} style={styles.feedCard}>
+                              <div style={styles.feedTop}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={styles.feedName}>
+                                    {NOTE_TYPE_LABEL[note.note_type] || note.note_type}
+                                  </div>
+                                  <div style={styles.feedMeta}>
+                                    {note.created_by_name || "Unknown"}{note.created_by_role ? ` · ${note.created_by_role}` : ""} · {formatDate(note.created_at)}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "5px", flexShrink: 0 }}>
+                                  <span style={{ ...styles.notePriorityBadge, color: priorityColor, borderColor: priorityColor }}>
+                                    {note.priority}
+                                  </span>
+                                  <span style={{ fontSize: "11px", color: PALETTE.textMuted, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                                    {timeAgo(note.created_at)}
+                                  </span>
+                                </div>
+                              </div>
+                              {note.note_text && (
+                                <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: `1px solid ${PALETTE.border}`, fontSize: "13px", color: PALETTE.textSoft, lineHeight: 1.6 }}>
+                                  {note.note_text}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!showFacilityNotesView && (<>
                 <div style={styles.panelCard} className="fade-up">
                   <div style={styles.sectionTopRow}>
                     <div style={styles.sectionHeading}>Facility Category Mix</div>
@@ -2144,6 +2264,7 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
+                </>)}
               </>
             )}
 
