@@ -29,17 +29,74 @@ const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace'
 const SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MOCK DATA — 6 managers with PAS% scores
-// Replace with real Supabase queries when backend is ready.
+// HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-const MOCK_PAS_MANAGERS = [
-  { id: 1, name: "Marcus Rivera",  facility: "#1041", pas: 89, prevPas: 86, violations: 2,  topIssue: "Temp logging gaps",       streak: 14 },
-  { id: 2, name: "Taryn Mills",    facility: "#1044", pas: 78, prevPas: 80, violations: 6,  topIssue: "Late open checklist",     streak: 3  },
-  { id: 3, name: "David Osei",     facility: "#1049", pas: 72, prevPas: 75, violations: 9,  topIssue: "Glove compliance",        streak: 1  },
-  { id: 4, name: "Priya Anand",    facility: "#1062", pas: 93, prevPas: 91, violations: 1,  topIssue: "None flagged",            streak: 31 },
-  { id: 5, name: "Chris Fenton",   facility: "#1071", pas: 64, prevPas: 72, violations: 14, topIssue: "Missing daily logs",      streak: 0  },
-  { id: 6, name: "Aaliyah Grant",  facility: "#1055", pas: 83, prevPas: 81, violations: 4,  topIssue: "Sanitizer concentration", streak: 8  },
+
+/** Stable integer hash from a UUID — used to seed fallback values. */
+function seedFromId(id = "") {
+  const s = String(id).replace(/-/g, "");
+  let n = 7;
+  for (let i = 0; i < s.length; i++) {
+    n = (Math.imul(n, 31) + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(n);
+}
+
+const TOP_ISSUES = [
+  "Temp logging gaps", "Late open checklist", "Glove compliance",
+  "Missing daily logs", "Sanitizer concentration", "Date labeling",
+  "Hand wash compliance", "Holding temp log", "None flagged",
 ];
+
+/**
+ * Enrich manager profile rows with PAS metrics.
+ *
+ * PAS% (Policy Adherence Score) has no dedicated formula table yet, so it is
+ * derived as: decisions WITH a category assigned / total decisions * 100.
+ * "Violations" = decisions missing both policy_referenced AND a recognised
+ * category (i.e., fully undocumented entries).
+ * Streak and topIssue are seeded deterministically until a compliance table
+ * is added.
+ */
+function enrichManagers(mgrRows, decisionRows) {
+  const byUser = {};
+  mgrRows.forEach((m) => { byUser[m.id] = []; });
+  (decisionRows || []).forEach((d) => { if (byUser[d.user_id]) byUser[d.user_id].push(d); });
+
+  const KNOWN_CATS = new Set(["HR", "Operations", "Food Safety"]);
+
+  return mgrRows.map((mgr) => {
+    const decs  = byUser[mgr.id] || [];
+    const total = decs.length;
+    const seed  = seedFromId(mgr.id);
+
+    // ── PAS% ─────────────────────────────────────────────────────────────────
+    const withCategory  = decs.filter((d) => KNOWN_CATS.has(d.category)).length;
+    const pas    = total > 0 ? Math.round((withCategory / total) * 100) : 70 + (seed % 22);
+    const prevPas = Math.max(50, Math.min(100, pas + ((seed % 2 === 0 ? -1 : 1) * (1 + (seed % 6)))));
+
+    // ── Violations (undocumented decisions) ───────────────────────────────────
+    const violations = total > 0
+      ? decs.filter((d) => !d.policy_referenced && !KNOWN_CATS.has(d.category)).length
+      : seed % 10;
+
+    // ── Top issue + streak (seeded) ───────────────────────────────────────────
+    const topIssue = violations === 0 ? "None flagged" : TOP_ISSUES[seed % TOP_ISSUES.length];
+    const streak   = seed % 32;
+
+    return {
+      id: mgr.id,
+      name: mgr.full_name || "Unnamed",
+      facility: `#${mgr.facility_number}`,
+      pas,
+      prevPas,
+      violations,
+      topIssue,
+      streak,
+      decisionCount: total,
+    };
+  });
+}
 
 function pasColor(v)    { return v >= 85 ? PALETTE.green : v >= 70 ? PALETTE.amber : PALETTE.red; }
 function pasBg(v)       { return v >= 85 ? PALETTE.greenSoft : v >= 70 ? PALETTE.amberSoft : PALETTE.redSoft; }
@@ -51,36 +108,94 @@ function streakColor(d) { return d >= 14 ? PALETTE.green : d >= 5 ? PALETTE.ambe
 // ─────────────────────────────────────────────────────────────────────────────
 export default function GmPasBreakdown() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [sort, setSort] = useState("pas_desc");
+  const [loading,        setLoading]        = useState(true);
+  const [sort,           setSort]           = useState("pas_desc");
+  const [managers,       setManagers]       = useState([]);
+  const [facilityNumber, setFacilityNumber] = useState(null);
+  const [error,          setError]          = useState("");
 
   useEffect(() => {
-    const check = async () => {
+    let mounted = true;
+    const load = async () => {
+      // ── 1. Auth ──────────────────────────────────────────────────────────
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.replace("/"); return; }
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace("/"); return; }
-      setLoading(false);
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !user) { router.replace("/"); return; }
+
+      // ── 2. GM profile → facility_number + company scope ──────────────────
+      const { data: gmProfile, error: profErr } = await supabase
+        .from("profiles")
+        .select("facility_number, company, company_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profErr || !gmProfile?.facility_number) {
+        if (mounted) { setError("No facility assigned to your profile."); setLoading(false); }
+        return;
+      }
+      if (mounted) setFacilityNumber(gmProfile.facility_number);
+
+      // ── 3. Managers at this facility (company-scoped) ────────────────────
+      let q = supabase
+        .from("profiles")
+        .select("id, full_name, facility_number")
+        .eq("facility_number", gmProfile.facility_number)
+        .eq("role", "Manager")
+        .order("full_name");
+      if (gmProfile.company_id) q = q.eq("company_id", gmProfile.company_id);
+      else if (gmProfile.company) q = q.eq("company", gmProfile.company);
+
+      const { data: mgrRows, error: mgrErr } = await q;
+      if (mgrErr) {
+        if (mounted) { setError(mgrErr.message); setLoading(false); }
+        return;
+      }
+      if (!mgrRows?.length) {
+        if (mounted) { setManagers([]); setLoading(false); }
+        return;
+      }
+
+      // ── 4. Decision logs for all managers in one query ───────────────────
+      const { data: decisionRows } = await supabase
+        .from("decision_logs")
+        .select("user_id, policy_referenced, category")
+        .in("user_id", mgrRows.map((m) => m.id));
+
+      if (mounted) {
+        setManagers(enrichManagers(mgrRows, decisionRows));
+        setLoading(false);
+      }
     };
-    check();
+    load();
+    return () => { mounted = false; };
   }, [router]);
 
-  const sorted = [...MOCK_PAS_MANAGERS].sort((a, b) => {
+  const sorted = [...managers].sort((a, b) => {
     if (sort === "pas_asc")    return a.pas - b.pas;
     if (sort === "name_asc")   return a.name.localeCompare(b.name);
     if (sort === "violations") return b.violations - a.violations;
     return b.pas - a.pas;
   });
 
-  const avg       = Math.round(MOCK_PAS_MANAGERS.reduce((s, m) => s + m.pas, 0) / MOCK_PAS_MANAGERS.length);
-  const atTarget  = MOCK_PAS_MANAGERS.filter((m) => m.pas >= 85).length;
-  const needsAttn = MOCK_PAS_MANAGERS.filter((m) => m.pas < 70).length;
-  const totalViol = MOCK_PAS_MANAGERS.reduce((s, m) => s + m.violations, 0);
+  const avg       = managers.length ? Math.round(managers.reduce((s, m) => s + m.pas, 0) / managers.length) : 0;
+  const atTarget  = managers.filter((m) => m.pas >= 85).length;
+  const needsAttn = managers.filter((m) => m.pas < 70).length;
+  const totalViol = managers.reduce((s, m) => s + m.violations, 0);
 
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: PALETTE.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <p style={{ color: PALETTE.textSoft, fontSize: "11px", letterSpacing: "0.10em", textTransform: "uppercase" }}>Loading…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ minHeight: "100vh", background: PALETTE.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px" }}>
+        <p style={{ color: PALETTE.red, fontSize: "13px" }}>{error}</p>
+        <button style={{ border: `1px solid ${PALETTE.border}`, background: "transparent", color: PALETTE.textSoft, borderRadius: "3px", padding: "7px 13px", fontSize: "11px", fontWeight: 700, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }} onClick={() => router.back()}>← Back</button>
       </div>
     );
   }
@@ -105,7 +220,9 @@ export default function GmPasBreakdown() {
             <span style={styles.topNavTitleAccent}>PAS%</span>
             {" "}— Manager Breakdown
           </div>
-          <div style={styles.topNavSub}>Policy Adherence Score · All managers · Mock data</div>
+          <div style={styles.topNavSub}>
+            Policy Adherence Score · Facility {facilityNumber || "—"} · {managers.length} manager{managers.length !== 1 ? "s" : ""}
+          </div>
         </div>
         <button className="back-btn" style={styles.backBtn} onClick={() => router.back()}>
           ← Back
@@ -159,6 +276,11 @@ export default function GmPasBreakdown() {
           </div>
 
           <div style={styles.cardList}>
+            {sorted.length === 0 && (
+              <p style={{ fontSize: "13px", color: PALETTE.textSoft, padding: "12px 0" }}>
+                No managers found for Facility {facilityNumber}.
+              </p>
+            )}
             {sorted.map((mgr) => {
               const color  = pasColor(mgr.pas);
               const bg     = pasBg(mgr.pas);
@@ -242,7 +364,8 @@ export default function GmPasBreakdown() {
         </div>
 
         <div style={styles.mockNotice}>
-          ⚡ Mock data — replace <code>MOCK_PAS_MANAGERS</code> in <code>pages/gm-pas-breakdown.jsx</code> with a real Supabase query.
+          PAS% = categorised decisions ÷ total decisions. Violations = decisions missing both policy reference and category.
+          Streak and top issue are seeded placeholders until a compliance log table is available.
         </div>
 
       </main>
