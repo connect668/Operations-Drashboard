@@ -39,6 +39,20 @@ const NOTE_TYPES = [
   "Other",
 ];
 
+// Maps UI display label → DB-stored value (must match facility_notes_note_type_check constraint)
+const NOTE_TYPE_DB = {
+  "Equipment / Repair": "equipment_repair",
+  "Safety Concern":     "safety_concern",
+  "Maintenance":        "maintenance",
+  "Operational Issue":  "operational_issue",
+  "Staffing Issue":     "staffing_issue",
+  "Other":              "other",
+};
+// Reverse map for rendering stored values back as friendly labels
+const NOTE_TYPE_LABEL = Object.fromEntries(
+  Object.entries(NOTE_TYPE_DB).map(([label, val]) => [val, label])
+);
+
 const NOTE_PRIORITIES = ["low", "normal", "high", "urgent"];
 
 const NOTE_STATUSES = ["open", "in_progress", "closed"];
@@ -1244,13 +1258,15 @@ export default function Dashboard() {
 
   const handleNewNoteSubmit = async () => {
     if (!newNoteText.trim()) { setFacilityNotesMessage("Please describe the issue."); return; }
+    const noteTypeDb = NOTE_TYPE_DB[newNoteType];
+    if (!noteTypeDb) { setFacilityNotesMessage("Invalid note type selected."); return; }
     setNewNoteSubmitting(true); setFacilityNotesMessage("");
     try {
       const { error } = await supabase.from("facility_notes").insert([{
         facility_number: profile.facility_number,
         company:         profile?.company           || null,
         company_id:      safeUuid(profile?.company_id),
-        note_type:       newNoteType,
+        note_type:       noteTypeDb,
         priority:        newNotePriority,
         note_text:       newNoteText.trim(),
         status:          "open",
@@ -2256,7 +2272,7 @@ export default function Dashboard() {
                       <div key={note.id} style={{ ...styles.feedCard, opacity: note.status === "closed" ? 0.75 : 1 }}>
                         <div style={styles.feedTop}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={styles.feedName}>{note.note_type}</div>
+                            <div style={styles.feedName}>{NOTE_TYPE_LABEL[note.note_type] || note.note_type}</div>
                             <div style={styles.feedMeta}>
                               {note.created_by_name || "Unknown"} · {note.created_by_role || ""} · {formatDate(note.created_at)}
                             </div>
