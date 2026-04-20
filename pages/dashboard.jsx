@@ -186,6 +186,9 @@ function applyCompanyScope(query, scope) {
   return query;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function safeUuid(v) { return UUID_RE.test(v) ? v : null; }
+
 function getCategoryStyle(category) {
   return (
     CATEGORY_STYLES[category] || {
@@ -900,7 +903,7 @@ export default function Dashboard() {
       await supabase.from("policy_pull_logs").insert([{
         user_id: user.id,
         company: profile?.company || null,
-        company_id: profile?.company_id || null,
+        company_id: safeUuid(profile?.company_id),
         facility_number: profile?.facility_number || null,
         user_role: profile?.role || null,
         situation_text: policyText.trim(),
@@ -937,7 +940,7 @@ export default function Dashboard() {
       const { error } = await supabase.from("decision_logs").insert([{
         user_id: user.id,
         company: profile?.company || null,
-        company_id: profile?.company_id || null,
+        company_id: safeUuid(profile?.company_id),
         facility_number: profile?.facility_number || null,
         user_name: profile?.full_name || "Unknown",
         user_role: profile?.role || "Manager",
@@ -973,7 +976,7 @@ export default function Dashboard() {
       const { error } = await supabase.from("coaching_requests").insert([{
         user_id: user.id,
         company: profile?.company || null,
-        company_id: profile?.company_id || null,
+        company_id: safeUuid(profile?.company_id),
         facility_number: profile?.facility_number || null,
         requester_name: profile?.full_name || "Unknown",
         requester_role: profile?.role || "Manager",
@@ -1245,8 +1248,8 @@ export default function Dashboard() {
     try {
       const { error } = await supabase.from("facility_notes").insert([{
         facility_number: profile.facility_number,
-        company:         profile?.company    || null,
-        company_id:      profile?.company_id || null,
+        company:         profile?.company           || null,
+        company_id:      safeUuid(profile?.company_id),
         note_type:       newNoteType,
         priority:        newNotePriority,
         note_text:       newNoteText.trim(),
