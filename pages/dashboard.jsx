@@ -1481,7 +1481,7 @@ export default function Dashboard() {
         .from("facility_notes")
         .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at")
         .eq("facility_number", facility.facility_number)
-        .eq("status", "open")
+        .neq("status", "closed")
         .order("created_at", { ascending: false });
       q = applyCompanyScope(q, scope);
       const { data, error } = await q;
