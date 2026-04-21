@@ -360,25 +360,75 @@ async function loadGmDashboardMetrics(profile) {
   return getMockGmMetrics(profile?.facility_number);
 }
 
-/** Load AM dashboard metrics. Replace body with real Supabase query. */
+/** Load AM dashboard metrics — aggregate across all assigned facilities. */
 async function loadAmDashboardMetrics(profile) {
-  // TODO: real query →
-  // const { data } = await supabase.from("area_metrics")
-  //   .select("pr_percent, pas_percent, ppd_percent")
-  //   .eq("area_manager_id", profile.id)
-  //   .maybeSingle();
-  // if (data) return { pr: data.pr_percent, pas: data.pas_percent, ppd: data.ppd_percent };
-  return getMockAmMetrics(profile?.facility_number);
+  try {
+    const { data: assigned } = await supabase
+      .from("area_manager_facilities")
+      .select("facility_number")
+      .eq("area_manager_id", profile.id);
+
+    if (!assigned?.length) return { pr: 0, pas: 0, ppd: 0 };
+    const nums = assigned.map((f) => f.facility_number);
+
+    const [{ data: decisions }, { data: pulls }] = await Promise.all([
+      supabase.from("decision_logs").select("policy_referenced, category").in("facility_number", nums),
+      supabase.from("policy_pull_logs").select("id").in("facility_number", nums),
+    ]);
+
+    const total        = decisions?.length || 0;
+    const KNOWN_CATS   = new Set(["HR", "Operations", "Food Safety"]);
+    const withPolicy   = (decisions || []).filter((d) => d.policy_referenced).length;
+    const withCategory = (decisions || []).filter((d) => KNOWN_CATS.has(d.category)).length;
+    const pullCount    = pulls?.length || 0;
+
+    return {
+      pr:  total > 0 ? Math.round((withPolicy   / total) * 100) : 0,
+      pas: total > 0 ? Math.round((withCategory / total) * 100) : 0,
+      ppd: total > 0 ? Math.round((pullCount    / total) * 100) : 0,
+    };
+  } catch (err) {
+    console.error("loadAmDashboardMetrics error:", err);
+    return { pr: 0, pas: 0, ppd: 0 };
+  }
 }
 
-/** Load AM territory facilities. Replace body with real Supabase query. */
+/** Load AM territory facilities — real per-facility metrics from decision_logs. */
 async function loadAmTerritoryData(profile) {
-  // TODO: real query →
-  // const { data } = await supabase.from("area_manager_facilities")
-  //   .select("facility_number, pr_percent, pas_percent, ppd_percent")
-  //   .eq("area_manager_id", profile.id);
-  // if (data?.length) return data.map(f => ({ number: `#${f.facility_number}`, ... }));
-  return getMockTerritoryFacilities(profile?.facility_number);
+  try {
+    const { data: assigned } = await supabase
+      .from("area_manager_facilities")
+      .select("facility_number")
+      .eq("area_manager_id", profile.id);
+
+    if (!assigned?.length) return [];
+    const nums = assigned.map((f) => f.facility_number);
+
+    const [{ data: decisions }, { data: pulls }] = await Promise.all([
+      supabase.from("decision_logs").select("facility_number, policy_referenced, category").in("facility_number", nums),
+      supabase.from("policy_pull_logs").select("facility_number").in("facility_number", nums),
+    ]);
+
+    const KNOWN_CATS = new Set(["HR", "Operations", "Food Safety"]);
+
+    return nums.map((facNum) => {
+      const decs     = (decisions || []).filter((d) => d.facility_number === facNum);
+      const facPulls = (pulls    || []).filter((p) => p.facility_number === facNum);
+      const total        = decs.length;
+      const withPolicy   = decs.filter((d) => d.policy_referenced).length;
+      const withCategory = decs.filter((d) => KNOWN_CATS.has(d.category)).length;
+      const pullCount    = facPulls.length;
+      return {
+        number: `#${facNum}`,
+        pr:  total > 0 ? Math.round((withPolicy   / total) * 100) : 0,
+        pas: total > 0 ? Math.round((withCategory / total) * 100) : 0,
+        ppd: total > 0 ? Math.round((pullCount    / total) * 100) : 0,
+      };
+    });
+  } catch (err) {
+    console.error("loadAmTerritoryData error:", err);
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,10 +453,9 @@ function animateMetrics(targetMetrics, setAnimated, duration = 1300) {
   return () => cancelAnimationFrame(rafId);
 }
 
-function normalizeBreakdownRows(rows, facilityNumber) {
-  if (!rows?.length) return getMockBreakdown(facilityNumber);
+function normalizeBreakdownRows(rows) {
   const map = { HR: 0, Operations: 0, "Food Safety": 0 };
-  rows.forEach((r) => { if (map[r.category] !== undefined) map[r.category] = Number(r.category_percent || 0); });
+  (rows || []).forEach((r) => { if (map[r.category] !== undefined) map[r.category] = Number(r.category_percent || 0); });
   return CATEGORIES.map((c) => ({ category: c, category_percent: map[c] }));
 }
 
@@ -701,7 +750,7 @@ export default function Dashboard() {
 
   const [facilityMetrics,         setFacilityMetrics]         = useState({ pr: 0, pas: 0, ppd: 0 });
   const [animatedFacilityMetrics, setAnimatedFacilityMetrics] = useState({ pr: 0, pas: 0, ppd: 0 });
-  const [facilityBreakdown,       setFacilityBreakdown]       = useState(getMockBreakdown(""));
+  const [facilityBreakdown,       setFacilityBreakdown]       = useState(CATEGORIES.map((c) => ({ category: c, category_percent: 0 })));
   const [facilityOpenNotes,        setFacilityOpenNotes]        = useState([]);
   const [facilityOpenNotesCount,   setFacilityOpenNotesCount]   = useState(0);
   const [facilityOpenNotesLoading, setFacilityOpenNotesLoading] = useState(false);
@@ -1225,8 +1274,23 @@ export default function Dashboard() {
         .eq("facility_number", facility.facility_number);
       bq = applyCompanyScope(bq, scope);
 
-      const [{ data: people, error: pe }, { data: metrics, error: me }, { data: breakdown, error: be }] =
-        await Promise.all([pq, mq, bq]);
+      let dq = supabase.from("decision_logs")
+        .select("policy_referenced, category")
+        .eq("facility_number", facility.facility_number);
+      dq = applyCompanyScope(dq, scope);
+
+      let plq = supabase.from("policy_pull_logs")
+        .select("id")
+        .eq("facility_number", facility.facility_number);
+      plq = applyCompanyScope(plq, scope);
+
+      const [
+        { data: people, error: pe },
+        { data: metrics, error: me },
+        { data: breakdown, error: be },
+        { data: decisions },
+        { data: pulls },
+      ] = await Promise.all([pq, mq, bq, dq, plq]);
       if (pe) throw pe;
 
       const sorted = (people || []).sort((a, b) => {
@@ -1236,21 +1300,41 @@ export default function Dashboard() {
       });
       setFacilityPeople(sorted);
 
-      setFacilityMetrics(me || !metrics
-        ? getMockFacilityMetrics(facility.facility_number)
-        : { pr: +metrics.pr_percent, pas: +metrics.pas_percent, ppd: +metrics.ppd_percent }
+      // Compute metrics from real decision_logs; prefer facility_metrics table if populated
+      const KNOWN_CATS  = new Set(["HR", "Operations", "Food Safety"]);
+      const decTotal    = decisions?.length || 0;
+      const withPolicy  = (decisions || []).filter((d) => d.policy_referenced).length;
+      const withCat     = (decisions || []).filter((d) => KNOWN_CATS.has(d.category)).length;
+      const pullCount   = pulls?.length || 0;
+      const computedMetrics = {
+        pr:  decTotal > 0 ? Math.round((withPolicy / decTotal) * 100) : 0,
+        pas: decTotal > 0 ? Math.round((withCat    / decTotal) * 100) : 0,
+        ppd: decTotal > 0 ? Math.round((pullCount  / decTotal) * 100) : 0,
+      };
+      setFacilityMetrics(
+        (!me && metrics)
+          ? { pr: +metrics.pr_percent, pas: +metrics.pas_percent, ppd: +metrics.ppd_percent }
+          : computedMetrics
       );
 
-      setFacilityBreakdown(be || !breakdown?.length
-        ? getMockBreakdown(facility.facility_number)
-        : normalizeBreakdownRows(breakdown, facility.facility_number)
+      // Compute category breakdown from decision_logs; prefer breakdown table if populated
+      const catCounts = { HR: 0, Operations: 0, "Food Safety": 0 };
+      (decisions || []).forEach((d) => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
+      const computedBreakdown = CATEGORIES.map((c) => ({
+        category: c,
+        category_percent: decTotal > 0 ? +((catCounts[c] / decTotal) * 100).toFixed(2) : 0,
+      }));
+      setFacilityBreakdown(
+        (!be && breakdown?.length)
+          ? normalizeBreakdownRows(breakdown)
+          : computedBreakdown
       );
 
       if (!sorted.length) setFacilitiesMessage("No staff found in this facility.");
     } catch (err) {
       console.error("Fetch facility people error:", err);
-      setFacilityMetrics(getMockFacilityMetrics(facility.facility_number));
-      setFacilityBreakdown(getMockBreakdown(facility.facility_number));
+      setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 });
+      setFacilityBreakdown(CATEGORIES.map((c) => ({ category: c, category_percent: 0 })));
       setFacilitiesMessage(err.message || "Failed to load facility data.");
     } finally { setFacilityPeopleLoading(false); }
   };
@@ -1638,7 +1722,7 @@ export default function Dashboard() {
               <div style={styles.panelCard} className="fade-up">
                 <div style={styles.sectionTopRow}>
                   <div style={styles.sectionHeading}>Facility Breakdown</div>
-                  <div style={styles.sectionHint}>All facilities · Mock territory data</div>
+                  <div style={styles.sectionHint}>All assigned facilities</div>
                 </div>
                 <TerritoryTable facilities={amTerritoryFacilities} />
               </div>
@@ -2093,7 +2177,7 @@ export default function Dashboard() {
                     ← Back to Facility
                   </button>
                 ) : selectedFacility ? (
-                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(getMockBreakdown("")); setFacilityOpenNotes([]); setFacilityOpenNotesCount(0); setShowFacilityNotesView(false); }}>
+                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(CATEGORIES.map((c) => ({ category: c, category_percent: 0 }))); setFacilityOpenNotes([]); setFacilityOpenNotesCount(0); setShowFacilityNotesView(false); }}>
                     ← All Facilities
                   </button>
                 ) : null}
