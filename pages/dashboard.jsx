@@ -614,6 +614,17 @@ function PolicyResultCard({ policy, onUse, isSelected, isExpanded, onToggle }) {
             <span style={{ fontSize: "10px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.04em" }}>
               {isExpanded ? "▲" : "▼"}
             </span>
+            {policy.policy_pdf_url && (
+              <a
+                href={policy.policy_pdf_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...styles.secondaryButton, whiteSpace: "nowrap", padding: "6px 12px", fontSize: "10px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                View Full Policy ↗
+              </a>
+            )}
             <button
               style={{ ...styles.primaryButton, whiteSpace: "nowrap", padding: "6px 12px", fontSize: "10px" }}
               onClick={(e) => { e.stopPropagation(); onUse(policy); }}
@@ -721,14 +732,24 @@ function PolicyResultCard({ policy, onUse, isSelected, isExpanded, onToggle }) {
             </div>
           )}
 
-          {/* Use button inside detail */}
-          <div>
+          {/* Action buttons inside detail */}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button
               style={{ ...styles.primaryButton }}
               onClick={() => onUse(policy)}
             >
               Use This Policy →
             </button>
+            {policy.policy_pdf_url && (
+              <a
+                href={policy.policy_pdf_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...styles.secondaryButton, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              >
+                View Full Policy ↗
+              </a>
+            )}
           </div>
         </div>
       )}
@@ -1088,7 +1109,7 @@ export default function Dashboard() {
       const runQuery = async (withCategory) => {
         let q = supabase
           .from("company_policies")
-          .select("id, title, policy_code, policy_text, category, version, is_active, summary, keywords, action_steps, escalation_guidance, role_guidance, correct_examples, incorrect_examples, severity, updated_at")
+          .select("id, title, policy_code, policy_text, category, version, is_active, summary, keywords, action_steps, escalation_guidance, role_guidance, correct_examples, incorrect_examples, severity, updated_at, policy_pdf_url")
           .eq("is_active", true)
           .or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,policy_code.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`)
           .order("title", { ascending: true })
