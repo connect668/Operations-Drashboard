@@ -977,13 +977,14 @@ export default function Dashboard() {
     const finalCategory = categoryManuallySet ? decisionCategory : decisionCategory || detected.category;
     if (!finalCategory) { setDecisionMessage("Please select a category."); return; }
     if (!user)          { setDecisionMessage("You must be logged in.");    return; }
+    if (!profile)       { setDecisionMessage("Profile not loaded — please refresh."); return; }
     setDecisionLoading(true);
     try {
       const { error } = await supabase.from("decision_logs").insert([{
         user_id: user.id,
-        company: profile?.company || null,
-        company_id: safeUuid(profile?.company_id),
-        facility_number: profile?.facility_number || null,
+        company: profile.company || null,
+        company_id: safeUuid(profile.company_id),
+        facility_number: profile.facility_number || null,
         user_name: profile?.full_name || "Unknown",
         user_role: profile?.role || "Manager",
         submitted_by_role: profile?.role || "Manager",
