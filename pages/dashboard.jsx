@@ -558,48 +558,178 @@ function CoachingCard({ item, formatDateFn }) {
   );
 }
 
-function PolicyResultCard({ policy, onUse, isSelected }) {
+const SEVERITY_STYLE = {
+  low:      { color: PALETTE.textSoft,  bg: "rgba(77,106,132,0.10)",   border: "rgba(77,106,132,0.25)"   },
+  medium:   { color: PALETTE.amber,     bg: PALETTE.amberSoft,          border: "rgba(232,152,10,0.28)"   },
+  high:     { color: PALETTE.red,       bg: PALETTE.redSoft,            border: "rgba(232,50,72,0.28)"    },
+  critical: { color: "#ff2244",         bg: "rgba(255,34,68,0.12)",     border: "rgba(255,34,68,0.35)"    },
+};
+
+function PolicyResultCard({ policy, onUse, isSelected, isExpanded, onToggle }) {
   const catStyle = getCategoryStyle(policy.category);
-  const snippet = policy.policy_text
-    ? policy.policy_text.length > 260
-      ? policy.policy_text.slice(0, 260).trimEnd() + "…"
-      : policy.policy_text
-    : null;
+  const sev = SEVERITY_STYLE[policy.severity] || null;
+  const steps = policy.action_steps
+    ? policy.action_steps.split("\n").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const kwTags = policy.keywords
+    ? policy.keywords.split(",").map((k) => k.trim()).filter(Boolean)
+    : [];
+
   return (
     <div style={{
-      ...styles.feedCard,
-      border: isSelected
-        ? `1px solid rgba(26,128,255,0.40)`
-        : `1px solid ${PALETTE.border}`,
+      border: isSelected ? `1px solid rgba(26,128,255,0.40)` : `1px solid ${PALETTE.border}`,
       background: isSelected ? "rgba(26,128,255,0.07)" : PALETTE.panelAlt,
+      borderRadius: "4px", overflow: "hidden",
     }}>
-      <div style={styles.feedTop}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={styles.feedName}>{policy.title || "Untitled Policy"}</div>
-          <div style={styles.feedInlineRow}>
-            {policy.policy_code && (
-              <span style={styles.policyCodeBadge}>{policy.policy_code}</span>
-            )}
-            {policy.category && (
-              <span style={{ ...styles.categoryBadge, color: catStyle.color, background: catStyle.bg, border: `1px solid ${catStyle.border}` }}>
-                {policy.category}
-              </span>
-            )}
-            {policy.version && (
-              <span style={styles.versionTag}>v{policy.version}</span>
-            )}
+
+      {/* ── Compact header row (always visible) ── */}
+      <div
+        style={{ padding: "14px 16px", cursor: "pointer" }}
+        onClick={onToggle}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && onToggle()}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "6px" }}>
+              {policy.title || "Untitled Policy"}
+            </div>
+            <div style={styles.feedInlineRow}>
+              {policy.policy_code && <span style={styles.policyCodeBadge}>{policy.policy_code}</span>}
+              {policy.category && (
+                <span style={{ ...styles.categoryBadge, color: catStyle.color, background: catStyle.bg, border: `1px solid ${catStyle.border}` }}>
+                  {policy.category}
+                </span>
+              )}
+              {sev && policy.severity !== "medium" && (
+                <span style={{ ...styles.categoryBadge, color: sev.color, background: sev.bg, border: `1px solid ${sev.border}` }}>
+                  {policy.severity}
+                </span>
+              )}
+              {policy.version && <span style={styles.versionTag}>v{policy.version}</span>}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+            <span style={{ fontSize: "10px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.04em" }}>
+              {isExpanded ? "▲" : "▼"}
+            </span>
+            <button
+              style={{ ...styles.primaryButton, whiteSpace: "nowrap", padding: "6px 12px", fontSize: "10px" }}
+              onClick={(e) => { e.stopPropagation(); onUse(policy); }}
+            >
+              Use →
+            </button>
           </div>
         </div>
-        <button
-          style={{ ...styles.primaryButton, whiteSpace: "nowrap", flexShrink: 0 }}
-          onClick={() => onUse(policy)}
-        >
-          Use This Policy
-        </button>
+        {!isExpanded && (policy.summary || policy.policy_text) && (
+          <div style={{ fontSize: "12px", color: PALETTE.textSoft, marginTop: "8px", lineHeight: 1.55 }}>
+            {policy.summary
+              ? policy.summary
+              : policy.policy_text.slice(0, 200).trimEnd() + (policy.policy_text.length > 200 ? "…" : "")}
+          </div>
+        )}
       </div>
-      {snippet && (
-        <div style={{ ...styles.feedBody, fontSize: "13px", marginTop: "6px", color: PALETTE.textSoft }}>
-          {snippet}
+
+      {/* ── Expanded detail panel ── */}
+      {isExpanded && (
+        <div style={{ borderTop: `1px solid ${PALETTE.border}`, padding: "16px 18px", display: "flex", flexDirection: "column", gap: "18px" }}>
+
+          {/* Summary */}
+          {(policy.summary || policy.policy_text) && (
+            <div>
+              <div style={styles.policyDetailLabel}>Summary</div>
+              <div style={styles.policyDetailText}>{policy.summary || policy.policy_text}</div>
+            </div>
+          )}
+
+          {/* Action Steps */}
+          {steps.length > 0 && (
+            <div>
+              <div style={styles.policyDetailLabel}>Action Steps</div>
+              <ol style={{ margin: 0, paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "7px" }}>
+                {steps.map((step, i) => (
+                  <li key={i} style={{ ...styles.policyDetailText, paddingLeft: "4px" }}>
+                    {step.replace(/^\d+[\.\)]\s*/, "")}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* Escalation */}
+          {policy.escalation_guidance && (
+            <div>
+              <div style={styles.policyDetailLabel}>When to Escalate</div>
+              <div style={{ ...styles.policyDetailText, borderLeft: `2px solid ${PALETTE.amber}`, paddingLeft: "12px", color: PALETTE.textSoft }}>
+                {policy.escalation_guidance}
+              </div>
+            </div>
+          )}
+
+          {/* Role guidance */}
+          {policy.role_guidance && (
+            <div>
+              <div style={styles.policyDetailLabel}>Role Guidance</div>
+              <div style={{ ...styles.policyDetailText, background: PALETTE.panelAlt, border: `1px solid ${PALETTE.border}`, borderRadius: "3px", padding: "10px 12px" }}>
+                {policy.role_guidance}
+              </div>
+            </div>
+          )}
+
+          {/* Examples */}
+          {(policy.correct_examples || policy.incorrect_examples) && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+              {policy.correct_examples && (
+                <div style={{ background: "rgba(0,200,122,0.05)", border: "1px solid rgba(0,200,122,0.18)", borderRadius: "3px", padding: "10px 12px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 800, color: PALETTE.green, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "7px" }}>
+                    ✓ Correct Handling
+                  </div>
+                  <div style={{ ...styles.policyDetailText, color: PALETTE.textSoft }}>{policy.correct_examples}</div>
+                </div>
+              )}
+              {policy.incorrect_examples && (
+                <div style={{ background: "rgba(232,50,72,0.05)", border: "1px solid rgba(232,50,72,0.18)", borderRadius: "3px", padding: "10px 12px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 800, color: PALETTE.red, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "7px" }}>
+                    ✗ Incorrect Handling
+                  </div>
+                  <div style={{ ...styles.policyDetailText, color: PALETTE.textSoft }}>{policy.incorrect_examples}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Keywords + meta */}
+          {(kwTags.length > 0 || policy.updated_at) && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+              {kwTags.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                  {kwTags.map((kw, i) => (
+                    <span key={i} style={{
+                      fontSize: "10px", padding: "2px 7px", borderRadius: "2px",
+                      background: "rgba(26,128,255,0.06)", border: `1px solid ${PALETTE.border}`,
+                      color: PALETTE.textMuted, letterSpacing: "0.03em",
+                    }}>{kw}</span>
+                  ))}
+                </div>
+              )}
+              {policy.updated_at && (
+                <span style={{ fontSize: "10px", color: PALETTE.textMuted, fontFamily: MONO }}>
+                  Updated {new Date(policy.updated_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Use button inside detail */}
+          <div>
+            <button
+              style={{ ...styles.primaryButton }}
+              onClick={() => onUse(policy)}
+            >
+              Use This Policy →
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -767,6 +897,8 @@ export default function Dashboard() {
   const [policySearchError,    setPolicySearchError]    = useState("");
   const [selectedPolicy,       setSelectedPolicy]       = useState(null);
   const [policySearchCategory, setPolicySearchCategory] = useState("");
+  const [expandedPolicyId,     setExpandedPolicyId]     = useState(null);
+  const [policyFilterCategory, setPolicyFilterCategory] = useState("");
 
   // ── facility notes (Feature 1 & 2) ───────────────────────────────────────
   const [facilityNotes,         setFacilityNotes]         = useState([]);
@@ -944,6 +1076,8 @@ export default function Dashboard() {
     setPolicySearchLoading(true);
     setPolicySearchError("");
     setPolicyResults([]);
+    setExpandedPolicyId(null);
+    setPolicyFilterCategory("");
     const term = searchText.trim();
     if (!term) { setPolicySearchLoading(false); return; }
     try {
@@ -954,11 +1088,11 @@ export default function Dashboard() {
       const runQuery = async (withCategory) => {
         let q = supabase
           .from("company_policies")
-          .select("id, title, policy_code, policy_text, category, version, is_active")
+          .select("id, title, policy_code, policy_text, category, version, is_active, summary, keywords, action_steps, escalation_guidance, role_guidance, correct_examples, incorrect_examples, severity, updated_at")
           .eq("is_active", true)
-          .or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,policy_code.ilike.%${term}%`)
+          .or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,policy_code.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`)
           .order("title", { ascending: true })
-          .limit(10);
+          .limit(15);
         q = applyCompanyScope(q, profile);
         if (withCategory) q = q.eq("category", withCategory);
         return q;
@@ -1758,13 +1892,20 @@ export default function Dashboard() {
           <>
             <div style={styles.headerCard}>
               <h1 style={styles.title}>Request Policy</h1>
-              <p style={styles.subtitle}>Describe the situation to search your company policy library. Select a policy to pre-fill Document Decision.</p>
+              <p style={styles.subtitle}>Search your company policy library by situation, keyword, or category. Open any result to see step-by-step guidance, escalation notes, and examples.</p>
             </div>
             <div style={styles.panelCard}>
               <label style={styles.label}>Describe the situation</label>
               <textarea
                 value={policyText}
-                onChange={(e) => { setPolicyText(e.target.value); if (policyResults.length || policySearchError) { setPolicyResults([]); setPolicySearchError(""); setSelectedPolicy(null); setPolicyMessage(""); } }}
+                onChange={(e) => {
+                  setPolicyText(e.target.value);
+                  if (policyResults.length || policySearchError) {
+                    setPolicyResults([]); setPolicySearchError("");
+                    setSelectedPolicy(null); setPolicyMessage("");
+                    setExpandedPolicyId(null); setPolicyFilterCategory("");
+                  }
+                }}
                 placeholder="Example: An employee showed up 30 minutes late without calling. What does company policy say I should do?"
                 style={styles.textarea}
               />
@@ -1798,24 +1939,58 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {/* Category filter chips */}
+                {!policySearchLoading && !policySearchError && policyResults.length > 0 && (
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "14px" }}>
+                    {["", ...CATEGORIES].map((cat) => {
+                      const active = policyFilterCategory === cat;
+                      return (
+                        <button
+                          key={cat || "all"}
+                          style={{
+                            border: active ? `1px solid rgba(26,128,255,0.40)` : `1px solid ${PALETTE.border}`,
+                            background: active ? PALETTE.blueSoft : "transparent",
+                            color: active ? PALETTE.blue : PALETTE.textSoft,
+                            borderRadius: "3px", padding: "4px 10px",
+                            fontSize: "10px", fontWeight: 700, cursor: "pointer",
+                            letterSpacing: "0.05em", textTransform: "uppercase",
+                          }}
+                          onClick={() => setPolicyFilterCategory(cat)}
+                        >
+                          {cat || "All"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {policySearchError ? (
                   <p style={{ ...styles.message, color: PALETTE.red }}>{policySearchError}</p>
                 ) : policySearchLoading ? (
                   <p style={styles.message}>Loading…</p>
                 ) : policyResults.length === 0 ? (
                   <p style={styles.message}>No matching policies found. Try rephrasing your description.</p>
-                ) : (
-                  <div style={styles.cardList}>
-                    {policyResults.map((policy) => (
-                      <PolicyResultCard
-                        key={policy.id}
-                        policy={policy}
-                        onUse={handleUsePolicy}
-                        isSelected={selectedPolicy?.id === policy.id}
-                      />
-                    ))}
-                  </div>
-                )}
+                ) : (() => {
+                  const filtered = policyFilterCategory
+                    ? policyResults.filter((p) => p.category === policyFilterCategory)
+                    : policyResults;
+                  return filtered.length === 0 ? (
+                    <p style={styles.message}>No {policyFilterCategory} policies in these results.</p>
+                  ) : (
+                    <div style={styles.cardList}>
+                      {filtered.map((policy) => (
+                        <PolicyResultCard
+                          key={policy.id}
+                          policy={policy}
+                          onUse={handleUsePolicy}
+                          isSelected={selectedPolicy?.id === policy.id}
+                          isExpanded={expandedPolicyId === policy.id}
+                          onToggle={() => setExpandedPolicyId(expandedPolicyId === policy.id ? null : policy.id)}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </>
@@ -2999,6 +3174,13 @@ const styles = {
   personStatDivider:{ width: "1px", height: "30px", background: PALETTE.border },
 
   // ── POLICY RESULT CARDS
+  policyDetailLabel: {
+    fontSize: "10px", fontWeight: 700, color: PALETTE.textSoft,
+    textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "8px",
+  },
+  policyDetailText: {
+    fontSize: "13px", color: PALETTE.text, lineHeight: 1.65, margin: 0,
+  },
   policyCodeBadge: {
     display: "inline-flex", alignItems: "center", padding: "3px 7px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
