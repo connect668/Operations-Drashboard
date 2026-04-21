@@ -96,6 +96,7 @@ function enrichManagers(mgrRows, decisionRows) {
       foodSafety,
       trend: pr >= prevPr ? "up" : "down",
       decisionCount: total,
+      withPolicy,
     };
   });
 }
@@ -307,15 +308,26 @@ export default function GmPrBreakdown() {
                       }}>
                         {delta >= 0 ? "+" : ""}{delta}% vs prior
                       </span>
-                      <span style={{
-                        fontSize: "26px", fontWeight: 700, fontFamily: MONO,
-                        fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-                        color, background: bg,
-                        border: `1px solid ${border}`,
-                        borderRadius: "3px", padding: "5px 14px",
-                      }}>
-                        {mgr.pr}%
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                        <span style={{
+                          fontSize: "26px", fontWeight: 700, fontFamily: MONO,
+                          fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
+                          color, background: bg,
+                          border: `1px solid ${border}`,
+                          borderRadius: "3px", padding: "5px 14px",
+                        }}>
+                          {mgr.pr}%
+                        </span>
+                        {mgr.decisionCount > 0 && (
+                          <span style={{
+                            fontSize: "10px", fontFamily: MONO, fontWeight: 600,
+                            color: PALETTE.textSoft, letterSpacing: "0.04em",
+                            fontVariantNumeric: "tabular-nums",
+                          }}>
+                            {mgr.withPolicy}/{mgr.decisionCount} docs
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
