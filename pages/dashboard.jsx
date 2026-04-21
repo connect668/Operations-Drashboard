@@ -73,49 +73,49 @@ const AM_METRIC_DEFS = ALL_METRIC_DEFS;
 const OPEN_NOTES_METRIC_DEF = { key: "open_notes", label: "Open Notes", desc: "Open facility issues", unit: "" };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COLOUR PALETTE  — trading terminal / financial dark
+// COLOUR PALETTE  — graphite / slate operations system
 // ─────────────────────────────────────────────────────────────────────────────
 const PALETTE = {
-  bg:           "#03070f",
-  panel:        "#070f1c",
-  panelAlt:     "#0a1626",
-  panelDeep:    "#050b18",
-  border:       "#0e1e30",
-  borderStrong: "#162840",
-  borderBright: "#1d3a55",
-  text:         "#ccd9ea",
-  textSoft:     "#4d6a84",
-  textMuted:    "#283d52",
-  blue:         "#1a80ff",
-  blueSoft:     "rgba(26, 128, 255, 0.10)",
-  blueGlow:     "rgba(26, 128, 255, 0.06)",
-  green:        "#00c87a",
-  greenSoft:    "rgba(0, 200, 122, 0.10)",
-  amber:        "#e8980a",
-  amberSoft:    "rgba(232, 152, 10, 0.10)",
-  red:          "#e83248",
-  redSoft:      "rgba(232, 50, 72, 0.10)",
-  cyan:         "#00b8d4",
-  cyanSoft:     "rgba(0, 184, 212, 0.08)",
-  indigo:       "#6478c8",
-  indigoSoft:   "rgba(100, 120, 200, 0.10)",
+  bg:           "#10161D",
+  panel:        "#151E27",
+  panelAlt:     "#1B2631",
+  panelDeep:    "#0D141A",
+  border:       "#314252",
+  borderStrong: "#3D5268",
+  borderBright: "#4A6680",
+  text:         "#E7EDF3",
+  textSoft:     "#A4B2C0",
+  textMuted:    "#748395",
+  blue:         "#4D7EA8",
+  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueGlow:     "rgba(77, 126, 168, 0.07)",
+  green:        "#6E9477",
+  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  amber:        "#B7925A",
+  amberSoft:    "rgba(183, 146, 90, 0.12)",
+  red:          "#A86161",
+  redSoft:      "rgba(168, 97, 97, 0.12)",
+  cyan:         "#5F86B3",
+  cyanSoft:     "rgba(95, 134, 179, 0.08)",
+  indigo:       "#6B7F95",
+  indigoSoft:   "rgba(107, 127, 149, 0.10)",
 };
 
 const CATEGORY_STYLES = {
   HR: {
-    color:  "#4da6ff",
-    bg:     "rgba(26, 128, 255, 0.08)",
-    border: "rgba(26, 128, 255, 0.22)",
+    color:  "#9A7B8C",
+    bg:     "rgba(139, 110, 126, 0.10)",
+    border: "rgba(139, 110, 126, 0.30)",
   },
   Operations: {
-    color:  "#00c87a",
-    bg:     "rgba(0, 200, 122, 0.08)",
-    border: "rgba(0, 200, 122, 0.22)",
+    color:  "#7A9E85",
+    bg:     "rgba(111, 141, 122, 0.10)",
+    border: "rgba(111, 141, 122, 0.30)",
   },
   "Food Safety": {
-    color:  "#e8980a",
-    bg:     "rgba(232, 152, 10, 0.08)",
-    border: "rgba(232, 152, 10, 0.22)",
+    color:  "#B7925A",
+    bg:     "rgba(183, 146, 90, 0.10)",
+    border: "rgba(183, 146, 90, 0.30)",
   },
 };
 
@@ -559,10 +559,10 @@ function CoachingCard({ item, formatDateFn }) {
 }
 
 const SEVERITY_STYLE = {
-  low:      { color: PALETTE.textSoft,  bg: "rgba(77,106,132,0.10)",   border: "rgba(77,106,132,0.25)"   },
-  medium:   { color: PALETTE.amber,     bg: PALETTE.amberSoft,          border: "rgba(232,152,10,0.28)"   },
-  high:     { color: PALETTE.red,       bg: PALETTE.redSoft,            border: "rgba(232,50,72,0.28)"    },
-  critical: { color: "#ff2244",         bg: "rgba(255,34,68,0.12)",     border: "rgba(255,34,68,0.35)"    },
+  low:      { color: PALETTE.textSoft,  bg: "rgba(116,131,149,0.10)",  border: "rgba(116,131,149,0.25)"  },
+  medium:   { color: PALETTE.amber,     bg: PALETTE.amberSoft,          border: "rgba(183,146,90,0.30)"   },
+  high:     { color: PALETTE.red,       bg: PALETTE.redSoft,            border: "rgba(168,97,97,0.30)"    },
+  critical: { color: "#C97070",         bg: "rgba(168,97,97,0.16)",     border: "rgba(168,97,97,0.45)"    },
 };
 
 function PolicyResultCard({ policy, onUse, isSelected, isExpanded, onToggle }) {
@@ -1694,23 +1694,23 @@ export default function Dashboard() {
           to   { opacity: 1; transform: translateY(0); }
         }
         .fade-up { animation: fadeUp 0.20s ease both; }
-        .nav-tab:hover { color: #ccd9ea !important; }
-        .person-row:hover { border-left-color: #1a80ff !important; background: rgba(26,128,255,0.04) !important; }
-        .metric-card-click:hover { box-shadow: 0 0 0 1px rgba(26,128,255,0.35), 0 4px 20px rgba(26,128,255,0.08) !important; transform: translateY(-1px); }
+        .nav-tab:hover { color: #E7EDF3 !important; }
+        .person-row:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
+        .metric-card-click:hover { box-shadow: 0 0 0 1px rgba(77,126,168,0.40), 0 4px 20px rgba(77,126,168,0.10) !important; transform: translateY(-1px); }
         .metric-card-click { transition: box-shadow 0.18s ease, transform 0.18s ease; }
         textarea:focus, input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus {
-          border-color: rgba(26,128,255,0.45) !important;
-          box-shadow: 0 0 0 3px rgba(26,128,255,0.07) !important;
+          border-color: rgba(77,126,168,0.60) !important;
+          box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important;
           outline: none !important;
         }
         ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: #03070f; }
-        ::-webkit-scrollbar-thumb { background: #162840; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #1d3a55; }
-        .manager-row-btn:hover { border-left-color: #1a80ff !important; background: rgba(26,128,255,0.04) !important; }
-        .log-type-btn:hover { border-top-color: #1a80ff !important; }
-        .facility-pill:hover { border-color: #1a80ff !important; background: rgba(26,128,255,0.06) !important; }
-        .sort-btn:hover { color: #ccd9ea !important; border-color: #1d3a55 !important; }
+        ::-webkit-scrollbar-track { background: #10161D; }
+        ::-webkit-scrollbar-thumb { background: #314252; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3D5268; }
+        .manager-row-btn:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
+        .log-type-btn:hover { border-top-color: #4D7EA8 !important; }
+        .facility-pill:hover { border-color: #4D7EA8 !important; background: rgba(77,126,168,0.08) !important; }
+        .sort-btn:hover { color: #E7EDF3 !important; border-color: #3D5268 !important; }
       `}} />
 
       {/* ── TOP HEADER ── */}
@@ -2950,7 +2950,7 @@ const styles = {
   // ── BUTTONS
   primaryButton: {
     border: `1px solid ${PALETTE.blue}`,
-    background: "rgba(26,128,255,0.12)",
+    background: "rgba(77,126,168,0.14)",
     color: PALETTE.blue, borderRadius: "3px", padding: "8px 16px",
     fontSize: "11px", fontWeight: 700, cursor: "pointer",
     letterSpacing: "0.07em", textTransform: "uppercase",
@@ -3003,7 +3003,7 @@ const styles = {
   roleBadge: {
     padding: "4px 10px", borderRadius: "2px", fontSize: "10px",
     fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase",
-    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.28)`,
+    background: "rgba(77,126,168,0.12)", border: `1px solid rgba(77,126,168,0.32)`,
     color: PALETTE.blue, flexShrink: 0, alignSelf: "flex-start", marginTop: "4px",
   },
 
@@ -3063,13 +3063,13 @@ const styles = {
   policyTag: {
     display: "inline-flex", alignItems: "center", padding: "3px 8px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.22)`, color: PALETTE.blue,
+    background: "rgba(77,126,168,0.10)", border: `1px solid rgba(77,126,168,0.28)`, color: PALETTE.blue,
     letterSpacing: "0.04em",
   },
   unreadBadge: {
     display: "inline-flex", alignItems: "center", padding: "3px 8px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: PALETTE.amberSoft, border: `1px solid rgba(232,152,10,0.28)`, color: PALETTE.amber,
+    background: PALETTE.amberSoft, border: `1px solid rgba(183,146,90,0.32)`, color: PALETTE.amber,
     letterSpacing: "0.04em",
   },
   categoryBadge: {
@@ -3178,8 +3178,8 @@ const styles = {
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
     letterSpacing: "0.06em", textTransform: "uppercase",
   },
-  personRoleBadgeGm:  { background: "rgba(26,128,255,0.10)", color: PALETTE.blue, border: `1px solid rgba(26,128,255,0.24)` },
-  personRoleBadgeMgr: { background: PALETTE.indigoSoft, color: "#a0b4e8", border: `1px solid rgba(100,120,200,0.24)` },
+  personRoleBadgeGm:  { background: "rgba(77,126,168,0.12)", color: PALETTE.blue, border: `1px solid rgba(77,126,168,0.30)` },
+  personRoleBadgeMgr: { background: PALETTE.indigoSoft, color: PALETTE.indigo, border: `1px solid rgba(107,127,149,0.28)` },
   personChevron: { color: PALETTE.textMuted, fontSize: "16px", lineHeight: 1 },
 
   personFileStack:  { display: "flex", flexDirection: "column", gap: "12px" },
@@ -3203,7 +3203,7 @@ const styles = {
     display: "inline-flex", alignItems: "center", padding: "3px 7px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
     letterSpacing: "0.06em", textTransform: "uppercase",
-    background: "rgba(26,128,255,0.10)", border: `1px solid rgba(26,128,255,0.24)`, color: PALETTE.blue,
+    background: "rgba(77,126,168,0.10)", border: `1px solid rgba(77,126,168,0.28)`, color: PALETTE.blue,
   },
   versionTag: {
     display: "inline-flex", alignItems: "center", padding: "3px 7px",
@@ -3220,7 +3220,7 @@ const styles = {
   // ── CLICKABLE METRIC CARDS (GM drill-through)
   metricCardClickable: {
     cursor: "pointer",
-    border: `1px solid rgba(26,128,255,0.20)`,
+    border: `1px solid rgba(77,126,168,0.28)`,
   },
   metricCardDrillHint: {
     fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
@@ -3234,7 +3234,7 @@ const styles = {
   sigBoxInput: {
     width: "100%", borderRadius: "3px",
     border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    color: "#c8dcf0", padding: "14px 18px", fontSize: "20px",
+    color: PALETTE.text, padding: "14px 18px", fontSize: "20px",
     fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic",
     outline: "none", boxSizing: "border-box", letterSpacing: "0.03em",
   },
@@ -3253,7 +3253,7 @@ const styles = {
   },
   sigWarning: {
     background: PALETTE.amberSoft,
-    border: `1px solid rgba(232,152,10,0.30)`,
+    border: `1px solid rgba(183,146,90,0.32)`,
     borderRadius: "3px",
     padding: "10px 14px",
     fontSize: "12px",
@@ -3277,8 +3277,8 @@ const styles = {
   },
   noteResolutionBlock: {
     marginTop: "12px",
-    background: "rgba(0,200,122,0.07)",
-    border: `1px solid rgba(0,200,122,0.20)`,
+    background: "rgba(110,148,119,0.08)",
+    border: `1px solid rgba(110,148,119,0.22)`,
     borderLeft: `2px solid ${PALETTE.green}`,
     borderRadius: "3px",
     padding: "12px 14px",

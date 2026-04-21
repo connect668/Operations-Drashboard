@@ -6,23 +6,23 @@ import { supabase } from "../lib/supabaseClient";
 // PALETTE  — trading terminal (matches dashboard.jsx)
 // ─────────────────────────────────────────────────────────────────────────────
 const PALETTE = {
-  bg:           "#03070f",
-  panel:        "#070f1c",
-  panelAlt:     "#0a1626",
-  border:       "#0e1e30",
-  borderStrong: "#162840",
-  text:         "#ccd9ea",
-  textSoft:     "#4d6a84",
-  textMuted:    "#283d52",
-  blue:         "#1a80ff",
-  blueSoft:     "rgba(26, 128, 255, 0.10)",
-  blueGlow:     "rgba(26, 128, 255, 0.06)",
-  green:        "#00c87a",
-  greenSoft:    "rgba(0, 200, 122, 0.10)",
-  amber:        "#e8980a",
-  amberSoft:    "rgba(232, 152, 10, 0.10)",
-  red:          "#e83248",
-  redSoft:      "rgba(232, 50, 72, 0.10)",
+  bg:           "#10161D",
+  panel:        "#151E27",
+  panelAlt:     "#1B2631",
+  border:       "#314252",
+  borderStrong: "#3D5268",
+  text:         "#E7EDF3",
+  textSoft:     "#A4B2C0",
+  textMuted:    "#748395",
+  blue:         "#4D7EA8",
+  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueGlow:     "rgba(77, 126, 168, 0.07)",
+  green:        "#6E9477",
+  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  amber:        "#B7925A",
+  amberSoft:    "rgba(183, 146, 90, 0.12)",
+  red:          "#A86161",
+  redSoft:      "rgba(168, 97, 97, 0.12)",
 };
 
 const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
@@ -100,7 +100,7 @@ function enrichManagers(mgrRows, decisionRows) {
 
 function pasColor(v)    { return v >= 85 ? PALETTE.green : v >= 70 ? PALETTE.amber : PALETTE.red; }
 function pasBg(v)       { return v >= 85 ? PALETTE.greenSoft : v >= 70 ? PALETTE.amberSoft : PALETTE.redSoft; }
-function pasBorder(v)   { return v >= 85 ? "rgba(0,200,122,0.28)" : v >= 70 ? "rgba(232,152,10,0.28)" : "rgba(232,50,72,0.28)"; }
+function pasBorder(v)   { return v >= 85 ? "rgba(110,148,119,0.30)" : v >= 70 ? "rgba(183,146,90,0.30)" : "rgba(168,97,97,0.30)"; }
 function streakColor(d) { return d >= 14 ? PALETTE.green : d >= 5 ? PALETTE.amber : PALETTE.red; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,10 +208,10 @@ export default function GmPasBreakdown() {
         .fade-up { animation: fadeUp 0.20s ease both; }
         .bar-fill { transition: width 0.65s cubic-bezier(0.16,1,0.3,1); }
         ::-webkit-scrollbar { width:5px; height:5px; }
-        ::-webkit-scrollbar-track { background:#03070f; }
-        ::-webkit-scrollbar-thumb { background:#162840; border-radius:3px; }
-        .sort-btn:hover { color:#ccd9ea !important; border-color:#1d3a55 !important; }
-        .back-btn:hover { color:#ccd9ea !important; border-color:#1d3a55 !important; }
+        ::-webkit-scrollbar-track { background:#10161D; }
+        ::-webkit-scrollbar-thumb { background:#314252; border-radius:3px; }
+        .sort-btn:hover { color:#E7EDF3 !important; border-color:#3D5268 !important; }
+        .back-btn:hover { color:#E7EDF3 !important; border-color:#3D5268 !important; }
       `}} />
 
       {/* ── HEADER ── */}
@@ -303,7 +303,7 @@ export default function GmPasBreakdown() {
                         borderRadius: "2px", letterSpacing: "0.06em",
                         color:      delta >= 0 ? PALETTE.green : PALETTE.red,
                         background: delta >= 0 ? PALETTE.greenSoft : PALETTE.redSoft,
-                        border:     `1px solid ${delta >= 0 ? "rgba(0,200,122,0.28)" : "rgba(232,50,72,0.28)"}`,
+                        border:     `1px solid ${delta >= 0 ? "rgba(110,148,119,0.30)" : "rgba(168,97,97,0.30)"}`,
                       }}>
                         {delta >= 0 ? "+" : ""}{delta}% vs prior
                       </span>
@@ -432,7 +432,7 @@ const styles = {
   },
   sortBtnActive: {
     background: PALETTE.blueSoft, color: PALETTE.blue,
-    border: `1px solid rgba(26,128,255,0.35)`,
+    border: `1px solid rgba(77,126,168,0.35)`,
   },
   cardList: { display: "flex", flexDirection: "column", gap: "10px" },
   mgrCard: {

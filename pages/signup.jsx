@@ -4,16 +4,20 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
 const PALETTE = {
-  bg:       "#03070f",
-  panel:    "#070f1c",
-  border:   "#0e1e30",
-  text:     "#ccd9ea",
-  textSoft: "#4d6a84",
-  textMuted:"#283d52",
-  blue:     "#1a80ff",
-  blueSoft: "rgba(26,128,255,0.10)",
-  green:    "#00c87a",
-  red:      "#e83248",
+  bg:           "#10161D",
+  panel:        "#151E27",
+  panelDeep:    "#0D141A",
+  border:       "#314252",
+  borderStrong: "#3D5268",
+  text:         "#E7EDF3",
+  textSoft:     "#A4B2C0",
+  textMuted:    "#748395",
+  blue:         "#4D7EA8",
+  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  green:        "#6E9477",
+  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  red:          "#A86161",
+  redSoft:      "rgba(168, 97, 97, 0.12)",
 }
 
 const MONO = '"JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace'
@@ -84,9 +88,9 @@ export default function SignupPage() {
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
-        input:focus { border-color: rgba(26,128,255,0.50) !important; box-shadow: 0 0 0 3px rgba(26,128,255,0.08) !important; outline: none !important; }
-        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#03070f; } ::-webkit-scrollbar-thumb { background:#162840; border-radius:3px; }
-        .signup-btn:hover:not(:disabled) { background: rgba(26,128,255,0.18) !important; }
+        input:focus { border-color: rgba(77,126,168,0.55) !important; box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important; outline: none !important; }
+        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#10161D; } ::-webkit-scrollbar-thumb { background:#314252; border-radius:3px; }
+        .signup-btn:hover:not(:disabled) { background: rgba(77,126,168,0.20) !important; }
       `}} />
 
       {/* ── Grid background decoration ── */}
@@ -153,7 +157,7 @@ export default function SignupPage() {
           </div>
 
           {message && (
-            <p style={{ ...s.msgBox, background: isError ? 'rgba(232,50,72,0.10)' : 'rgba(0,200,122,0.08)', borderColor: isError ? 'rgba(232,50,72,0.28)' : 'rgba(0,200,122,0.25)', color: isError ? PALETTE.red : PALETTE.green }}>
+            <p style={{ ...s.msgBox, background: isError ? 'rgba(168,97,97,0.10)' : 'rgba(110,148,119,0.10)', borderColor: isError ? 'rgba(168,97,97,0.30)' : 'rgba(110,148,119,0.28)', color: isError ? PALETTE.red : PALETTE.green }}>
               {message}
             </p>
           )}
@@ -194,8 +198,8 @@ const s = {
   gridBg: {
     position: 'fixed', inset: 0, pointerEvents: 'none',
     backgroundImage:
-      `linear-gradient(rgba(26,128,255,0.03) 1px, transparent 1px),
-       linear-gradient(90deg, rgba(26,128,255,0.03) 1px, transparent 1px)`,
+      `linear-gradient(rgba(77,126,168,0.04) 1px, transparent 1px),
+       linear-gradient(90deg, rgba(77,126,168,0.04) 1px, transparent 1px)`,
     backgroundSize: '48px 48px',
     zIndex: 0,
   },
@@ -203,7 +207,7 @@ const s = {
     position: 'relative', zIndex: 1,
     width: '100%', maxWidth: '420px',
     background: PALETTE.panel,
-    border: `1px solid rgba(26,128,255,0.20)`,
+    border: `1px solid rgba(77,126,168,0.22)`,
     borderTop: `2px solid ${PALETTE.blue}`,
     borderRadius: '4px',
     padding: '32px 28px',
@@ -236,7 +240,7 @@ const s = {
   input: {
     padding: '11px 13px', borderRadius: '3px',
     border: `1px solid ${PALETTE.border}`,
-    background: '#050d1a',
+    background: PALETTE.panelDeep,
     color: PALETTE.text, outline: 'none',
     fontSize: '14px', boxSizing: 'border-box', width: '100%',
     fontFamily: SANS,
