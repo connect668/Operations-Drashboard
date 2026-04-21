@@ -1043,6 +1043,7 @@ export default function Dashboard() {
       let q = supabase.from("decision_logs").select("*")
         .eq("visible_to_role", profile.role).eq("is_read", false)
         .neq("user_id", user?.id || "").order("created_at", { ascending: false });
+      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
       q = applyCompanyScope(q, profile);
       const { data, error } = await q;
       if (error) throw error;
@@ -1061,6 +1062,7 @@ export default function Dashboard() {
         .eq("visible_to_role", profile.role).neq("user_id", user?.id || "")
         .or("guidance_given.is.null,guidance_given.eq.false")
         .order("created_at", { ascending: false });
+      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
       q = applyCompanyScope(q, profile);
       const { data, error } = await q;
       if (error) throw error;
@@ -1078,6 +1080,7 @@ export default function Dashboard() {
       let q = supabase.from("profiles")
         .select("id, full_name, role, company, company_id, facility_number")
         .eq("role", "Manager").order("full_name", { ascending: true });
+      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
       q = applyCompanyScope(q, profile);
       const { data, error } = await q;
       if (error) throw error;
@@ -1092,9 +1095,12 @@ export default function Dashboard() {
     setSelectedManager(manager); setSelectedManagerLoading(true);
     setManagersMessage(""); setManagerFileTab(null);
     try {
+      const facNum = manager.facility_number;
       const [{ data: decisions, error: de }, { data: coaching, error: ce }] = await Promise.all([
-        supabase.from("decision_logs").select("*").eq("user_id", manager.id).order("created_at", { ascending: false }),
-        supabase.from("coaching_requests").select("*").eq("user_id", manager.id).order("created_at", { ascending: false }),
+        supabase.from("decision_logs").select("*").eq("user_id", manager.id)
+          .eq("facility_number", facNum).order("created_at", { ascending: false }),
+        supabase.from("coaching_requests").select("*").eq("user_id", manager.id)
+          .eq("facility_number", facNum).order("created_at", { ascending: false }),
       ]);
       if (de) throw de; if (ce) throw ce;
       setSelectedManagerDecisions(decisions || []);
@@ -1276,9 +1282,12 @@ export default function Dashboard() {
     setSelectedPerson(person); setPersonFileLoading(true);
     setPersonDecisions([]); setPersonCoaching([]); setPersonFileTab("decisions");
     try {
+      const facNum = person.facility_number;
       const [{ data: decisions, error: de }, { data: coaching, error: ce }] = await Promise.all([
-        supabase.from("decision_logs").select("*").eq("user_id", person.id).order("created_at", { ascending: false }),
-        supabase.from("coaching_requests").select("*").eq("user_id", person.id).order("created_at", { ascending: false }),
+        supabase.from("decision_logs").select("*").eq("user_id", person.id)
+          .eq("facility_number", facNum).order("created_at", { ascending: false }),
+        supabase.from("coaching_requests").select("*").eq("user_id", person.id)
+          .eq("facility_number", facNum).order("created_at", { ascending: false }),
       ]);
       if (de) throw de; if (ce) throw ce;
       setPersonDecisions(decisions || []); setPersonCoaching(coaching || []);

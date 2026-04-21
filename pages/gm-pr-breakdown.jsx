@@ -167,6 +167,7 @@ export default function GmPrBreakdown() {
       const { data: decisionRows } = await supabase
         .from("decision_logs")
         .select("user_id, policy_referenced, category")
+        .eq("facility_number", gmProfile.facility_number)
         .in("user_id", mgrRows.map((m) => m.id));
 
       if (mounted) {
