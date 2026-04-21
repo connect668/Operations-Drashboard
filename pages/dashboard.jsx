@@ -1475,16 +1475,13 @@ export default function Dashboard() {
 
   const fetchFacilityOpenNotes = async (facility) => {
     setFacilityOpenNotesLoading(true);
-    const scope = facility?.company_id ? { company_id: facility.company_id } : { company: facility.company };
     try {
-      let q = supabase
+      const { data, error } = await supabase
         .from("facility_notes")
-        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at")
+        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at, status")
         .eq("facility_number", facility.facility_number)
         .neq("status", "closed")
         .order("created_at", { ascending: false });
-      q = applyCompanyScope(q, scope);
-      const { data, error } = await q;
       if (error) throw error;
       setFacilityOpenNotes(data || []);
       setFacilityOpenNotesCount((data || []).length);
