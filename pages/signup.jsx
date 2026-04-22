@@ -1,3 +1,4 @@
+import Head from 'next/head'
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
@@ -85,6 +86,7 @@ export default function SignupPage() {
 
   return (
     <div style={s.page}>
+      <Head><title>Create Account — ThinkView by OSS</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
@@ -101,7 +103,7 @@ export default function SignupPage() {
         <div style={s.cardHeader}>
           <div style={s.logoRow}>
             <span style={s.logoDot} />
-            <span style={s.logoText}>OPS</span>
+            <span style={s.logoText}>OSS</span>
           </div>
           <h1 style={s.title}>Create Account</h1>
           <p style={s.subtitle}>Set up your credentials to request platform access</p>

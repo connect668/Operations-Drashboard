@@ -1,17 +1,21 @@
+import Head from 'next/head'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
 const PALETTE = {
-  bg:      "#03070f",
-  panel:   "#070f1c",
-  border:  "#0e1e30",
-  text:    "#ccd9ea",
-  textSoft:"#4d6a84",
-  textMuted:"#283d52",
-  blue:    "#1a80ff",
-  blueSoft:"rgba(26,128,255,0.10)",
+  bg:        "#0B1118",
+  panel:     "#141D26",
+  panelDeep: "#0C1219",
+  border:    "#2A3B4E",
+  borderStr: "#3A5068",
+  text:      "#E8EDF3",
+  textSoft:  "#A6B4C2",
+  textMuted: "#7E8F9E",
+  blue:      "#4D7EA8",
+  blueSoft:  "rgba(77, 126, 168, 0.13)",
+  red:       "#A86161",
 }
 
 const MONO = '"JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace'
@@ -55,12 +59,13 @@ export default function Home() {
 
   return (
     <div style={s.page}>
+      <Head><title>ThinkView by OSS</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
-        input:focus { border-color: rgba(26,128,255,0.50) !important; box-shadow: 0 0 0 3px rgba(26,128,255,0.08) !important; outline: none !important; }
-        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#03070f; } ::-webkit-scrollbar-thumb { background:#162840; border-radius:3px; }
-        .login-btn:hover:not(:disabled) { background: rgba(26,128,255,0.18) !important; }
+        input:focus { border-color: rgba(77,126,168,0.55) !important; box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important; outline: none !important; }
+        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#0B1118; } ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
+        .login-btn:hover:not(:disabled) { background: rgba(77,126,168,0.20) !important; }
       `}} />
 
       {/* ── Grid background decoration ── */}
@@ -71,10 +76,10 @@ export default function Home() {
         <div style={s.cardHeader}>
           <div style={s.logoRow}>
             <span style={s.logoDot} />
-            <span style={s.logoText}>OPS</span>
+            <span style={s.logoText}>OSS</span>
           </div>
-          <h1 style={s.title}>Operations Dashboard</h1>
-          <p style={s.subtitle}>Enter your credentials to access the platform</p>
+          <h1 style={s.title}>ThinkView by OSS</h1>
+          <p style={s.subtitle}>Understand your team's thinking</p>
         </div>
 
         <form onSubmit={handleLogin} style={s.form}>
@@ -140,8 +145,8 @@ const s = {
   gridBg: {
     position: 'fixed', inset: 0, pointerEvents: 'none',
     backgroundImage:
-      `linear-gradient(rgba(26,128,255,0.03) 1px, transparent 1px),
-       linear-gradient(90deg, rgba(26,128,255,0.03) 1px, transparent 1px)`,
+      `linear-gradient(rgba(77,126,168,0.04) 1px, transparent 1px),
+       linear-gradient(90deg, rgba(77,126,168,0.04) 1px, transparent 1px)`,
     backgroundSize: '48px 48px',
     zIndex: 0,
   },
@@ -149,12 +154,13 @@ const s = {
     position: 'relative', zIndex: 1,
     width: '100%', maxWidth: '400px',
     background: PALETTE.panel,
-    border: `1px solid rgba(26,128,255,0.20)`,
+    border: `1px solid rgba(77,126,168,0.22)`,
     borderTop: `2px solid ${PALETTE.blue}`,
     borderRadius: '4px',
     padding: '32px 28px',
     boxSizing: 'border-box',
     color: PALETTE.text,
+    boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
   },
   cardHeader: { marginBottom: '28px' },
   logoRow: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' },
@@ -182,7 +188,7 @@ const s = {
   input: {
     padding: '11px 13px', borderRadius: '3px',
     border: `1px solid ${PALETTE.border}`,
-    background: '#050d1a',
+    background: PALETTE.panelDeep,
     color: PALETTE.text, outline: 'none',
     fontSize: '14px', boxSizing: 'border-box', width: '100%',
     fontFamily: SANS,
@@ -190,9 +196,9 @@ const s = {
   },
   error: {
     margin: 0, padding: '10px 13px', borderRadius: '3px',
-    background: 'rgba(232,50,72,0.10)',
-    border: '1px solid rgba(232,50,72,0.28)',
-    color: '#e83248', fontSize: '12px', lineHeight: 1.5,
+    background: 'rgba(168,97,97,0.10)',
+    border: '1px solid rgba(168,97,97,0.32)',
+    color: PALETTE.red, fontSize: '12px', lineHeight: 1.5,
   },
   btn: {
     padding: '11px 16px', borderRadius: '3px',

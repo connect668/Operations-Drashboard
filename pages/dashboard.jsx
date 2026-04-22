@@ -1,3 +1,4 @@
+import Head from "next/head";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
@@ -1687,6 +1688,7 @@ export default function Dashboard() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
+      <Head><title>ThinkView by OSS</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         @keyframes fadeUp {
@@ -1694,7 +1696,7 @@ export default function Dashboard() {
           to   { opacity: 1; transform: translateY(0); }
         }
         .fade-up { animation: fadeUp 0.20s ease both; }
-        .nav-tab:hover { color: #E7EDF3 !important; }
+        .nav-tab:hover { color: #E8EDF3 !important; }
         .person-row:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
         .metric-card-click:hover { box-shadow: 0 0 0 1px rgba(77,126,168,0.40), 0 4px 20px rgba(77,126,168,0.10) !important; transform: translateY(-1px); }
         .metric-card-click { transition: box-shadow 0.18s ease, transform 0.18s ease; }
@@ -1716,11 +1718,11 @@ export default function Dashboard() {
       {/* ── TOP HEADER ── */}
       <header style={styles.topNav}>
         <div style={styles.topNavBrand}>
-          <div style={{ ...styles.topNavName, fontSize: isMobile ? "17px" : "14px" }}>
-            {profile?.full_name || "Dashboard"}
+          <div style={{ ...styles.topNavName, fontSize: isMobile ? "15px" : "13px" }}>
+            ThinkView by OSS
           </div>
-          <div style={{ ...styles.topNavMeta, fontSize: isMobile ? "13px" : "11px" }}>
-            {profile?.role} · {profile?.company}
+          <div style={{ ...styles.topNavMeta, fontSize: isMobile ? "12px" : "10px" }}>
+            {profile?.full_name}{profile?.role ? ` · ${profile.role}` : ""}
           </div>
         </div>
 
