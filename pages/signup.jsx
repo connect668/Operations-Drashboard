@@ -4,20 +4,20 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
 const PALETTE = {
-  bg:           "#10161D",
-  panel:        "#151E27",
-  panelDeep:    "#0D141A",
-  border:       "#314252",
-  borderStrong: "#3D5268",
-  text:         "#E7EDF3",
-  textSoft:     "#A4B2C0",
-  textMuted:    "#748395",
+  bg:           "#0B1118",
+  panel:        "#141D26",
+  panelDeep:    "#0C1219",
+  border:       "#2A3B4E",
+  borderStrong: "#3A5068",
+  text:         "#E8EDF3",
+  textSoft:     "#A6B4C2",
+  textMuted:    "#7E8F9E",
   blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueSoft:     "rgba(77, 126, 168, 0.13)",
   green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  greenSoft:    "rgba(110, 148, 119, 0.13)",
   red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.12)",
+  redSoft:      "rgba(168, 97, 97, 0.13)",
 }
 
 const MONO = '"JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace'
@@ -89,7 +89,7 @@ export default function SignupPage() {
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
         input:focus { border-color: rgba(77,126,168,0.55) !important; box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important; outline: none !important; }
-        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#10161D; } ::-webkit-scrollbar-thumb { background:#314252; border-radius:3px; }
+        ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:#0B1118; } ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
         .signup-btn:hover:not(:disabled) { background: rgba(77,126,168,0.20) !important; }
       `}} />
 

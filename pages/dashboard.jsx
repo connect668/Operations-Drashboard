@@ -76,25 +76,25 @@ const OPEN_NOTES_METRIC_DEF = { key: "open_notes", label: "Open Notes", desc: "O
 // COLOUR PALETTE  — graphite / slate operations system
 // ─────────────────────────────────────────────────────────────────────────────
 const PALETTE = {
-  bg:           "#10161D",
-  panel:        "#151E27",
-  panelAlt:     "#1B2631",
-  panelDeep:    "#0D141A",
-  border:       "#314252",
-  borderStrong: "#3D5268",
+  bg:           "#0B1118",
+  panel:        "#141D26",
+  panelAlt:     "#1B2839",
+  panelDeep:    "#0C1219",
+  border:       "#2A3B4E",
+  borderStrong: "#3A5068",
   borderBright: "#4A6680",
-  text:         "#E7EDF3",
-  textSoft:     "#A4B2C0",
-  textMuted:    "#748395",
+  text:         "#E8EDF3",
+  textSoft:     "#A6B4C2",
+  textMuted:    "#7E8F9E",
   blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueSoft:     "rgba(77, 126, 168, 0.13)",
   blueGlow:     "rgba(77, 126, 168, 0.07)",
   green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  greenSoft:    "rgba(110, 148, 119, 0.13)",
   amber:        "#B7925A",
-  amberSoft:    "rgba(183, 146, 90, 0.12)",
+  amberSoft:    "rgba(183, 146, 90, 0.13)",
   red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.12)",
+  redSoft:      "rgba(168, 97, 97, 0.13)",
   cyan:         "#5F86B3",
   cyanSoft:     "rgba(95, 134, 179, 0.08)",
   indigo:       "#6B7F95",
@@ -103,19 +103,19 @@ const PALETTE = {
 
 const CATEGORY_STYLES = {
   HR: {
-    color:  "#9A7B8C",
-    bg:     "rgba(139, 110, 126, 0.10)",
-    border: "rgba(139, 110, 126, 0.30)",
+    color:  "#B08EA0",
+    bg:     "rgba(154, 124, 140, 0.13)",
+    border: "rgba(154, 124, 140, 0.35)",
   },
   Operations: {
-    color:  "#7A9E85",
-    bg:     "rgba(111, 141, 122, 0.10)",
-    border: "rgba(111, 141, 122, 0.30)",
+    color:  "#82A98C",
+    bg:     "rgba(114, 144, 124, 0.13)",
+    border: "rgba(114, 144, 124, 0.35)",
   },
   "Food Safety": {
-    color:  "#B7925A",
-    bg:     "rgba(183, 146, 90, 0.10)",
-    border: "rgba(183, 146, 90, 0.30)",
+    color:  "#C09A62",
+    bg:     "rgba(185, 148, 90, 0.13)",
+    border: "rgba(185, 148, 90, 0.35)",
   },
 };
 
@@ -1704,9 +1704,9 @@ export default function Dashboard() {
           outline: none !important;
         }
         ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: #10161D; }
-        ::-webkit-scrollbar-thumb { background: #314252; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3D5268; }
+        ::-webkit-scrollbar-track { background: #0B1118; }
+        ::-webkit-scrollbar-thumb { background: #2A3B4E; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3A5068; }
         .manager-row-btn:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
         .log-type-btn:hover { border-top-color: #4D7EA8 !important; }
         .facility-pill:hover { border-color: #4D7EA8 !important; background: rgba(77,126,168,0.08) !important; }
@@ -2812,7 +2812,7 @@ const styles = {
   // ── TOP NAV — full-width sticky terminal toolbar
   topNav: {
     background: PALETTE.panel,
-    borderBottom: `1px solid ${PALETTE.border}`,
+    borderBottom: `1px solid ${PALETTE.borderStrong}`,
     display: "flex", alignItems: "center",
     justifyContent: "space-between",
     position: "sticky", top: 0, zIndex: 100,
@@ -2821,6 +2821,7 @@ const styles = {
     paddingRight: "16px",
     boxSizing: "border-box",
     gap: "0",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.30)",
   },
   topNavBrand: { minWidth: "200px", flexShrink: 0 },
   topNavName:  { fontWeight: 700, color: PALETTE.text, lineHeight: 1.1, fontSize: "13px", letterSpacing: "0.01em" },
@@ -2892,13 +2893,17 @@ const styles = {
   headerCard: {
     background: PALETTE.panel,
     border: `1px solid ${PALETTE.border}`,
+    borderTop: `1px solid ${PALETTE.borderStrong}`,
     borderLeft: `3px solid ${PALETTE.blue}`,
     borderRadius: "4px", padding: "20px 22px",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
   },
   panelCard: {
     background: PALETTE.panel,
     border: `1px solid ${PALETTE.border}`,
+    borderTop: `1px solid ${PALETTE.borderStrong}`,
     borderRadius: "4px", padding: "20px 22px",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
   },
 
   // ── TYPOGRAPHY
@@ -2910,9 +2915,14 @@ const styles = {
     display: "flex", alignItems: "center", justifyContent: "space-between",
     gap: "12px", flexWrap: "wrap", marginBottom: "16px",
   },
-  sectionHeading: { fontSize: "11px", fontWeight: 800, color: PALETTE.text, textTransform: "uppercase", letterSpacing: "0.10em" },
+  sectionHeading: {
+    fontSize: "11px", fontWeight: 800, color: PALETTE.text,
+    textTransform: "uppercase", letterSpacing: "0.11em",
+    paddingLeft: "8px", borderLeft: `2px solid ${PALETTE.borderBright}`,
+    lineHeight: "14px",
+  },
   sectionHint:    { fontSize: "11px", color: PALETTE.textMuted, letterSpacing: "0.04em" },
-  sectionDivider: { height: "1px", background: PALETTE.border, margin: "4px 0 16px" },
+  sectionDivider: { height: "1px", background: PALETTE.borderStrong, margin: "4px 0 16px" },
   sectionTitle: {
     marginBottom: "10px", fontSize: "10px", letterSpacing: "0.11em",
     textTransform: "uppercase", color: PALETTE.textMuted, fontWeight: 800,
@@ -2973,6 +2983,7 @@ const styles = {
     border: `1px solid ${PALETTE.border}`,
     borderTop: "2px solid transparent",
     borderRadius: "4px", padding: "20px 18px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.22)",
   },
   metricLabel: {
     fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase",
@@ -3013,8 +3024,9 @@ const styles = {
     gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
   },
   thresholdItem: {
-    background: PALETTE.panelAlt, border: `1px solid ${PALETTE.border}`,
+    background: PALETTE.panelAlt, border: `1px solid ${PALETTE.borderStrong}`,
     borderRadius: "4px", padding: "16px",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
   },
   thresholdLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted, marginBottom: "8px" },
   thresholdValue: { fontSize: "18px", fontWeight: 700, color: PALETTE.text, marginBottom: "4px", fontVariantNumeric: "tabular-nums", fontFamily: MONO },
@@ -3043,8 +3055,9 @@ const styles = {
   cardList: { display: "flex", flexDirection: "column", gap: "8px" },
   feedCard: {
     background: PALETTE.panelAlt,
-    border: `1px solid ${PALETTE.border}`,
+    border: `1px solid ${PALETTE.borderStrong}`,
     borderRadius: "4px", padding: "14px 16px",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.028), 0 1px 4px rgba(0,0,0,0.18)",
   },
   feedTop: {
     display: "flex", alignItems: "flex-start", justifyContent: "space-between",
@@ -3052,7 +3065,7 @@ const styles = {
   },
   feedName:   { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "3px" },
   feedMeta:   { fontSize: "12px", color: PALETTE.textSoft },
-  feedDate:   { fontSize: "11px", color: PALETTE.textMuted, fontFamily: MONO, fontVariantNumeric: "tabular-nums" },
+  feedDate:   { fontSize: "11px", color: "#8F9EAD", fontFamily: MONO, fontVariantNumeric: "tabular-nums" },
   feedInlineRow: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" },
   feedSection:   { marginTop: "10px" },
   feedLabel: {
@@ -3063,13 +3076,13 @@ const styles = {
   policyTag: {
     display: "inline-flex", alignItems: "center", padding: "3px 8px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: "rgba(77,126,168,0.10)", border: `1px solid rgba(77,126,168,0.28)`, color: PALETTE.blue,
+    background: "rgba(77,126,168,0.15)", border: `1px solid rgba(77,126,168,0.42)`, color: PALETTE.blue,
     letterSpacing: "0.04em",
   },
   unreadBadge: {
     display: "inline-flex", alignItems: "center", padding: "3px 8px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: PALETTE.amberSoft, border: `1px solid rgba(183,146,90,0.32)`, color: PALETTE.amber,
+    background: "rgba(183,146,90,0.16)", border: `1px solid rgba(183,146,90,0.50)`, color: PALETTE.amber,
     letterSpacing: "0.04em",
   },
   categoryBadge: {
@@ -3203,7 +3216,7 @@ const styles = {
     display: "inline-flex", alignItems: "center", padding: "3px 7px",
     borderRadius: "2px", fontSize: "10px", fontWeight: 700,
     letterSpacing: "0.06em", textTransform: "uppercase",
-    background: "rgba(77,126,168,0.10)", border: `1px solid rgba(77,126,168,0.28)`, color: PALETTE.blue,
+    background: "rgba(77,126,168,0.15)", border: `1px solid rgba(77,126,168,0.42)`, color: PALETTE.blue,
   },
   versionTag: {
     display: "inline-flex", alignItems: "center", padding: "3px 7px",

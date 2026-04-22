@@ -3,22 +3,22 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
 const PALETTE = {
-  bg:           "#10161D",
-  panel:        "#151E27",
-  panelAlt:     "#1B2631",
-  border:       "#314252",
-  borderStrong: "#3D5268",
-  text:         "#E7EDF3",
-  textSoft:     "#A4B2C0",
-  textMuted:    "#748395",
+  bg:           "#0B1118",
+  panel:        "#141D26",
+  panelAlt:     "#1B2839",
+  border:       "#2A3B4E",
+  borderStrong: "#3A5068",
+  text:         "#E8EDF3",
+  textSoft:     "#A6B4C2",
+  textMuted:    "#7E8F9E",
   blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueSoft:     "rgba(77, 126, 168, 0.13)",
   green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  greenSoft:    "rgba(110, 148, 119, 0.13)",
   amber:        "#B7925A",
-  amberSoft:    "rgba(183, 146, 90, 0.12)",
+  amberSoft:    "rgba(183, 146, 90, 0.13)",
   red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.12)",
+  redSoft:      "rgba(168, 97, 97, 0.13)",
 }
 
 const MONO = '"JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace'
@@ -120,8 +120,8 @@ export default function SupportPage() {
           outline: none !important;
         }
         ::-webkit-scrollbar { width:5px; }
-        ::-webkit-scrollbar-track { background:#10161D; }
-        ::-webkit-scrollbar-thumb { background:#314252; border-radius:3px; }
+        ::-webkit-scrollbar-track { background:#0B1118; }
+        ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
       `}} />
 
       {/* ── TOP NAV ── */}

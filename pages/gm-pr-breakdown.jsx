@@ -6,24 +6,24 @@ import { supabase } from "../lib/supabaseClient";
 // PALETTE  — trading terminal (matches dashboard.jsx)
 // ─────────────────────────────────────────────────────────────────────────────
 const PALETTE = {
-  bg:           "#10161D",
-  panel:        "#151E27",
-  panelAlt:     "#1B2631",
-  border:       "#314252",
-  borderStrong: "#3D5268",
+  bg:           "#0B1118",
+  panel:        "#141D26",
+  panelAlt:     "#1B2839",
+  border:       "#2A3B4E",
+  borderStrong: "#3A5068",
   borderBright: "#4A6680",
-  text:         "#E7EDF3",
-  textSoft:     "#A4B2C0",
-  textMuted:    "#748395",
+  text:         "#E8EDF3",
+  textSoft:     "#A6B4C2",
+  textMuted:    "#7E8F9E",
   blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.12)",
+  blueSoft:     "rgba(77, 126, 168, 0.13)",
   blueGlow:     "rgba(77, 126, 168, 0.07)",
   green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.12)",
+  greenSoft:    "rgba(110, 148, 119, 0.13)",
   amber:        "#B7925A",
-  amberSoft:    "rgba(183, 146, 90, 0.12)",
+  amberSoft:    "rgba(183, 146, 90, 0.13)",
   red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.12)",
+  redSoft:      "rgba(168, 97, 97, 0.13)",
 };
 
 const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
@@ -106,9 +106,9 @@ function prBg(v)     { return v >= 85 ? PALETTE.greenSoft : v >= 70 ? PALETTE.am
 function prBorder(v) { return v >= 85 ? "rgba(110,148,119,0.35)" : v >= 70 ? "rgba(183,146,90,0.35)" : "rgba(168,97,97,0.35)"; }
 
 const CAT_COLORS = {
-  HR:           { color: "#9A7B8C", bg: "rgba(139,110,126,0.10)", border: "rgba(139,110,126,0.30)" },
-  Operations:   { color: "#7A9E85", bg: "rgba(111,141,122,0.10)", border: "rgba(111,141,122,0.30)" },
-  "Food Safety":{ color: "#B7925A", bg: "rgba(183,146,90,0.10)",  border: "rgba(183,146,90,0.30)"  },
+  HR:           { color: "#B08EA0", bg: "rgba(154,124,140,0.13)", border: "rgba(154,124,140,0.35)" },
+  Operations:   { color: "#82A98C", bg: "rgba(114,144,124,0.13)", border: "rgba(114,144,124,0.35)" },
+  "Food Safety":{ color: "#C09A62", bg: "rgba(185,148,90,0.13)",  border: "rgba(185,148,90,0.35)"  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,10 +214,10 @@ export default function GmPrBreakdown() {
         .fade-up { animation: fadeUp 0.20s ease both; }
         .bar-fill { transition: width 0.65s cubic-bezier(0.16,1,0.3,1); }
         ::-webkit-scrollbar { width:5px; height:5px; }
-        ::-webkit-scrollbar-track { background:#10161D; }
-        ::-webkit-scrollbar-thumb { background:#314252; border-radius:3px; }
-        .sort-btn:hover { color:#E7EDF3 !important; border-color:#3D5268 !important; }
-        .back-btn:hover { color:#E7EDF3 !important; border-color:#3D5268 !important; }
+        ::-webkit-scrollbar-track { background:#0B1118; }
+        ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
+        .sort-btn:hover { color:#E8EDF3 !important; border-color:#3A5068 !important; }
+        .back-btn:hover { color:#E8EDF3 !important; border-color:#3A5068 !important; }
       `}} />
 
       {/* ── HEADER ── */}
