@@ -112,7 +112,7 @@ export default function SupportPage() {
 
   return (
     <div style={s.page}>
-      <Head><title>Support — ThinkView by OSS</title></Head>
+      <Head><title>Support — ThinkView</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
@@ -130,7 +130,7 @@ export default function SupportPage() {
       <header style={s.topNav}>
         <div style={s.topNavBrand}>
           <div style={s.topNavName}>Support</div>
-          <div style={s.topNavMeta}>ThinkView by OSS</div>
+          <div style={s.topNavMeta}>ThinkView</div>
         </div>
         <div style={s.topNavRight}>
           <button style={s.backBtn} onClick={() => router.back()}>← Back</button>

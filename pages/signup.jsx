@@ -86,7 +86,7 @@ export default function SignupPage() {
 
   return (
     <div style={s.page}>
-      <Head><title>Create Account — ThinkView by OSS</title></Head>
+      <Head><title>Create Account — ThinkView</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }

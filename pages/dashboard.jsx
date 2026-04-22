@@ -1688,7 +1688,7 @@ export default function Dashboard() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
-      <Head><title>ThinkView by OSS</title></Head>
+      <Head><title>ThinkView</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         @keyframes fadeUp {
@@ -1719,7 +1719,7 @@ export default function Dashboard() {
       <header style={styles.topNav}>
         <div style={styles.topNavBrand}>
           <div style={{ ...styles.topNavName, fontSize: isMobile ? "15px" : "13px" }}>
-            ThinkView by OSS
+            ThinkView
           </div>
           <div style={{ ...styles.topNavMeta, fontSize: isMobile ? "12px" : "10px" }}>
             {profile?.full_name}{profile?.role ? ` · ${profile.role}` : ""}
@@ -2785,6 +2785,7 @@ export default function Dashboard() {
       {/* ── APP FOOTER ── */}
       <footer style={styles.appFooter}>
         <a href="/support" style={styles.appFooterLink}>Contact Support</a>
+        <div style={styles.appFooterBrand}>Operator Support Systems</div>
       </footer>
     </div>
   );
@@ -3313,5 +3314,9 @@ const styles = {
   appFooterLink: {
     fontSize: "11px", fontWeight: 600, color: PALETTE.textSoft,
     textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase",
+  },
+  appFooterBrand: {
+    marginTop: "6px", fontSize: "10px", color: PALETTE.textMuted,
+    letterSpacing: "0.04em",
   },
 };

@@ -59,7 +59,7 @@ export default function Home() {
 
   return (
     <div style={s.page}>
-      <Head><title>ThinkView by OSS</title></Head>
+      <Head><title>ThinkView</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
@@ -78,7 +78,7 @@ export default function Home() {
             <span style={s.logoDot} />
             <span style={s.logoText}>OSS</span>
           </div>
-          <h1 style={s.title}>ThinkView by OSS</h1>
+          <h1 style={s.title}>ThinkView</h1>
           <p style={s.subtitle}>Understand your team's thinking</p>
         </div>
 
