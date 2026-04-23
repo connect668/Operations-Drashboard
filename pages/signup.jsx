@@ -65,7 +65,7 @@ export default function SignupPage() {
       email:     authUser.email,
       full_name: name.trim(),
       company:   company.trim() || null,
-      role:      'pending',
+      role:      'user',
     })
 
     if (profileError) {
