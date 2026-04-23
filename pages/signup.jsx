@@ -86,7 +86,7 @@ export default function SignupPage() {
 
   return (
     <div style={s.page}>
-      <Head><title>Create Account — ThinkView</title></Head>
+      <Head><title>Create Account — Playbook</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
@@ -106,7 +106,7 @@ export default function SignupPage() {
             <span style={s.logoText}>OSS</span>
           </div>
           <h1 style={s.title}>Create Account</h1>
-          <p style={s.subtitle}>Set up your credentials to request platform access</p>
+          <p style={s.subtitle}>Set up your credentials to request Playbook access</p>
         </div>
 
         <form onSubmit={handleSignup} style={s.form}>

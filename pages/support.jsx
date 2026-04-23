@@ -112,7 +112,7 @@ export default function SupportPage() {
 
   return (
     <div style={s.page}>
-      <Head><title>Support — ThinkView</title></Head>
+      <Head><title>Support — Playbook</title></Head>
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
         body { margin: 0; }
@@ -130,7 +130,7 @@ export default function SupportPage() {
       <header style={s.topNav}>
         <div style={s.topNavBrand}>
           <div style={s.topNavName}>Support</div>
-          <div style={s.topNavMeta}>ThinkView</div>
+          <div style={s.topNavMeta}>Playbook</div>
         </div>
         <div style={s.topNavRight}>
           <button style={s.backBtn} onClick={() => router.back()}>← Back</button>
@@ -251,7 +251,7 @@ const s = {
   },
   topNavBrand: { display: 'flex', flexDirection: 'column', gap: '2px' },
   topNavName:  { fontWeight: 700, color: PALETTE.text, fontSize: '13px', letterSpacing: '0.01em' },
-  topNavMeta:  { color: PALETTE.textSoft, fontSize: '10px', letterSpacing: '0.04em', textTransform: 'uppercase' },
+  topNavMeta:  { color: PALETTE.textSoft, fontSize: '10px', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: MONO },
   topNavRight: { display: 'flex', alignItems: 'center' },
   backBtn: {
     border: `1px solid ${PALETTE.border}`,

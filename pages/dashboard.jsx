@@ -1,81 +1,9 @@
 import Head from "next/head";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TABS
-// ─────────────────────────────────────────────────────────────────────────────
-const TABS = {
-  dashboard:     "dashboard",       // GM + AM home overview
-  policy:        "policy",
-  decision:      "decision",
-  coaching:      "coaching",
-  myLogs:        "my_logs",
-  teamDecisions: "team_decisions",
-  teamCoaching:  "team_coaching",
-  managers:      "managers",
-  facilities:    "facilities",
-  facilityNotes: "facility_notes",  // NEW — visible to any user with a facility_number
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ROLE LEVELS
-// ─────────────────────────────────────────────────────────────────────────────
-const ROLE_LEVELS = {
-  Manager: 1,
-  "General Manager": 2,
-  "Area Coach": 3,
-  "Area Manager": 3,
-};
-
-const CATEGORIES = ["HR", "Operations", "Food Safety"];
-
-const NOTE_TYPES = [
-  "Equipment / Repair",
-  "Safety Concern",
-  "Maintenance",
-  "Operational Issue",
-  "Staffing Issue",
-  "Other",
-];
-
-// Maps UI display label → DB-stored value (must match facility_notes_note_type_check constraint)
-const NOTE_TYPE_DB = {
-  "Equipment / Repair": "equipment_repair",
-  "Safety Concern":     "safety_concern",
-  "Maintenance":        "maintenance",
-  "Operational Issue":  "operational_issue",
-  "Staffing Issue":     "staffing_issue",
-  "Other":              "other",
-};
-// Reverse map for rendering stored values back as friendly labels
-const NOTE_TYPE_LABEL = Object.fromEntries(
-  Object.entries(NOTE_TYPE_DB).map(([label, val]) => [val, label])
-);
-
-const NOTE_PRIORITIES = ["low", "normal", "high", "urgent"];
-
-const NOTE_STATUSES  = ["pending", "open", "closed"];
-const NOTE_STATUS_ORDER = { pending: 0, open: 1, closed: 2 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// METRIC DEFINITIONS
-// GM sees PR / PAS only.  AM sees PR / PAS / PP/D.
-// ─────────────────────────────────────────────────────────────────────────────
-const ALL_METRIC_DEFS = [
-  { key: "pr",  label: "PR%",  desc: "Policy Reference Rate",             target: 78, unit: "%" },
-  { key: "pas", label: "PAS%", desc: "Policy Adherence Score",            target: 85, unit: "%" },
-  { key: "ppd", label: "PP/D", desc: "Policy Pull / Documented Decision", target: 38, unit: "%" },
-];
-
-const GM_METRIC_DEFS = ALL_METRIC_DEFS.filter((m) => m.key !== "ppd");
-const AM_METRIC_DEFS = ALL_METRIC_DEFS;
-const OPEN_NOTES_METRIC_DEF = { key: "open_notes", label: "Open Notes", desc: "Open facility issues", unit: "" };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COLOUR PALETTE  — graphite / slate operations system
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── PALETTE ─────────────────────────────────────────────────────────────────
 const PALETTE = {
   bg:           "#0B1118",
   panel:        "#141D26",
@@ -96,120 +24,38 @@ const PALETTE = {
   amberSoft:    "rgba(183, 146, 90, 0.13)",
   red:          "#A86161",
   redSoft:      "rgba(168, 97, 97, 0.13)",
-  cyan:         "#5F86B3",
-  cyanSoft:     "rgba(95, 134, 179, 0.08)",
-  indigo:       "#6B7F95",
-  indigoSoft:   "rgba(107, 127, 149, 0.10)",
 };
 
-const CATEGORY_STYLES = {
-  HR: {
-    color:  "#B08EA0",
-    bg:     "rgba(154, 124, 140, 0.13)",
-    border: "rgba(154, 124, 140, 0.35)",
-  },
-  Operations: {
-    color:  "#82A98C",
-    bg:     "rgba(114, 144, 124, 0.13)",
-    border: "rgba(114, 144, 124, 0.35)",
-  },
-  "Food Safety": {
-    color:  "#C09A62",
-    bg:     "rgba(185, 148, 90, 0.13)",
-    border: "rgba(185, 148, 90, 0.35)",
-  },
+const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
+const SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif';
+
+// ─── ROLE LEVELS ─────────────────────────────────────────────────────────────
+const ROLE_LEVELS = {
+  Manager:           1,
+  "General Manager": 2,
+  "Area Coach":      3,
+  "Area Manager":    3,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KEYWORD MAP (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-const FALLBACK_CATEGORY_KEYWORDS = {
-  HR: [
-    { keyword: "employee",   weight: 2 },
-    { keyword: "attendance", weight: 3 },
-    { keyword: "late",       weight: 2 },
-    { keyword: "tardy",      weight: 2 },
-    { keyword: "call out",   weight: 2 },
-    { keyword: "no call",    weight: 3 },
-    { keyword: "no show",    weight: 3 },
-    { keyword: "write up",   weight: 4 },
-    { keyword: "harassment", weight: 5 },
-    { keyword: "termination",weight: 5 },
-    { keyword: "discipline", weight: 4 },
-    { keyword: "schedule",   weight: 2 },
-    { keyword: "shift",      weight: 2 },
-    { keyword: "payroll",    weight: 3 },
-    { keyword: "hiring",     weight: 3 },
-    { keyword: "interview",  weight: 2 },
-  ],
-  Operations: [
-    { keyword: "deployment",   weight: 4 },
-    { keyword: "positioning",  weight: 3 },
-    { keyword: "labor",        weight: 3 },
-    { keyword: "ticket times", weight: 4 },
-    { keyword: "rush",         weight: 2 },
-    { keyword: "line",         weight: 2 },
-    { keyword: "bottleneck",   weight: 4 },
-    { keyword: "staffing",     weight: 3 },
-    { keyword: "service",      weight: 2 },
-    { keyword: "customer flow",weight: 3 },
-    { keyword: "drawer",       weight: 2 },
-    { keyword: "cash",         weight: 2 },
-    { keyword: "register",     weight: 2 },
-    { keyword: "coverage",     weight: 2 },
-    { keyword: "floor",        weight: 2 },
-    { keyword: "inventory",    weight: 3 },
-  ],
-  "Food Safety": [
-    { keyword: "temperature",       weight: 4 },
-    { keyword: "temp",              weight: 3 },
-    { keyword: "sanitizer",         weight: 4 },
-    { keyword: "glove",             weight: 2 },
-    { keyword: "gloves",            weight: 2 },
-    { keyword: "expired",           weight: 4 },
-    { keyword: "expiration",        weight: 4 },
-    { keyword: "dated",             weight: 2 },
-    { keyword: "holding",           weight: 3 },
-    { keyword: "contamination",     weight: 5 },
-    { keyword: "cross contamination",weight: 5 },
-    { keyword: "cook temp",         weight: 4 },
-    { keyword: "raw",               weight: 3 },
-    { keyword: "thaw",              weight: 3 },
-    { keyword: "label",             weight: 2 },
-    { keyword: "clean",             weight: 1 },
-    { keyword: "hand wash",         weight: 3 },
-    { keyword: "food safety",       weight: 5 },
-  ],
-};
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+const TABS = { home: "home", notes: "notes" };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UTILITY HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-function getNextRole(role) {
-  if (role === "Manager") return "General Manager";
-  if (role === "General Manager") return "Area Coach";
-  return null;
-}
+// ─── FEEDBACK FLAGS ───────────────────────────────────────────────────────────
+const FEEDBACK_FLAGS = [
+  "Hard to understand",
+  "Not specific enough",
+  "Did not match situation",
+  "Missing escalation guidance",
+  "Could not find answer fast enough",
+];
 
-function formatDate(value) {
-  if (!value) return "Unknown date";
-  try { return new Date(value).toLocaleString(); }
-  catch { return value; }
-}
+// ─── FACILITY NOTES ───────────────────────────────────────────────────────────
+const NOTE_TYPES     = ["Equipment / Repair","Safety Concern","Maintenance","Operational Issue","Staffing Issue","Other"];
+const NOTE_TYPE_DB   = { "Equipment / Repair":"equipment_repair","Safety Concern":"safety_concern","Maintenance":"maintenance","Operational Issue":"operational_issue","Staffing Issue":"staffing_issue","Other":"other" };
+const NOTE_TYPE_LABEL = Object.fromEntries(Object.entries(NOTE_TYPE_DB).map(([l,v])=>[v,l]));
+const NOTE_PRIORITIES = ["low","normal","high","urgent"];
 
-function timeAgo(dateString) {
-  if (!dateString) return "—";
-  const diff  = Date.now() - new Date(dateString).getTime();
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins  <  1)  return "just now";
-  if (mins  < 60)  return `${mins}m ago`;
-  if (hours < 24)  return `${hours}h ago`;
-  if (days  < 30)  return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
-
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function applyCompanyScope(query, scope) {
   const cid = scope?.company_id;
   if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid))
@@ -218,833 +64,90 @@ function applyCompanyScope(query, scope) {
   return query;
 }
 
+function timeAgo(d) {
+  if (!d) return "—";
+  const diff = Date.now() - new Date(d).getTime();
+  const mins = Math.floor(diff / 60000), hrs = Math.floor(diff / 3600000), days = Math.floor(diff / 86400000);
+  if (mins < 1)  return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hrs  < 24) return `${hrs}h ago`;
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function safeUuid(v) { return UUID_RE.test(v) ? v : null; }
 
-function getCategoryStyle(category) {
-  return (
-    CATEGORY_STYLES[category] || {
-      color:  PALETTE.textSoft,
-      bg:     "rgba(148, 163, 184, 0.08)",
-      border: "rgba(148, 163, 184, 0.18)",
-    }
-  );
+function priorityStyle(p) {
+  if (p === "urgent") return { color: PALETTE.red,      background: PALETTE.redSoft,   border: "1px solid rgba(168,97,97,0.32)"  };
+  if (p === "high")   return { color: PALETTE.amber,    background: PALETTE.amberSoft, border: "1px solid rgba(183,146,90,0.32)" };
+  return                     { color: PALETTE.textSoft, background: "transparent",     border: `1px solid ${PALETTE.border}`     };
 }
 
-// PP/D: < 38 green · 38–55 amber · > 55 red
-// All other metrics: ≥ 85 green · ≥ 70 amber · < 70 red
-function scoreMetricColor(metricKey, value) {
-  if (metricKey === "open_notes") {
-    if (value === 0) return PALETTE.green;
-    if (value <= 3)  return PALETTE.amber;
-    return PALETTE.red;
-  }
-  if (metricKey === "ppd") {
-    if (value < 38) return PALETTE.green;
-    if (value > 55) return PALETTE.red;
-    return PALETTE.amber;
-  }
-  if (value >= 85) return PALETTE.green;
-  if (value >= 70) return PALETTE.amber;
-  return PALETTE.red;
-}
-
-function resolveCategory(item) { return item?.category || null; }
-
-function buildKeywordMapFromRows(rows) {
-  const map = { HR: [], Operations: [], "Food Safety": [] };
-  rows.forEach((row) => {
-    if (map[row.category]) map[row.category].push({ keyword: row.keyword, weight: row.weight || 1 });
-  });
-  return map;
-}
-
-function detectCategory(situation = "", action = "", keywordMap = FALLBACK_CATEGORY_KEYWORDS) {
-  const text = `${situation} ${action}`.toLowerCase().trim();
-  if (!text) return { category: "", confidence: "review", score: 0 };
-
-  const scores = Object.entries(keywordMap).map(([category, keywords]) => ({
-    category,
-    score: keywords.reduce(
-      (t, e) => (text.includes(String(e.keyword).toLowerCase()) ? t + Number(e.weight || 1) : t),
-      0
-    ),
-  }));
-  scores.sort((a, b) => b.score - a.score);
-  const top = scores[0];
-  const second = scores[1];
-
-  if (!top || top.score <= 0) return { category: "", confidence: "review", score: 0 };
-  if (second && top.score === second.score) return { category: "", confidence: "review", score: top.score };
-  if (top.score >= 8) return { category: top.category, confidence: "high",   score: top.score };
-  if (top.score >= 4) return { category: top.category, confidence: "medium", score: top.score };
-  return { category: top.category, confidence: "low", score: top.score };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MOCK DATA LAYER
-// ─────────────────────────────────────────────────────────────────────────────
-// These functions provide deterministic mock values seeded from facility number.
-// SWAP these with real Supabase queries when the backend is ready.
-// Each returns: { pr, pas, ppd }   (ppd optional for GM)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function seedFromFacility(facilityNumber = "") {
-  const cleaned = String(facilityNumber).replace(/\D/g, "");
-  const base = cleaned ? Number(cleaned) : 7;
-  return Number.isNaN(base) ? 7 : base;
-}
-
-/** GM facility-level snapshot — PR, PAS */
-function getMockGmMetrics(facilityNumber) {
-  const s = seedFromFacility(facilityNumber);
-  return {
-    pr:  72 + (s % 10),
-    pas: 80 + (s % 8),
-  };
-}
-
-/** AM area-level aggregate — PR, PAS, PP/D */
-function getMockAmMetrics(facilityNumber) {
-  const s = seedFromFacility(facilityNumber);
-  return {
-    pr:  74 + (s % 8),
-    pas: 82 + (s % 7),
-    ppd: 33  + (s % 12),
-  };
-}
-
-/** AM territory table — 4 mock facilities */
-function getMockTerritoryFacilities(facilityNumber) {
-  const s = seedFromFacility(facilityNumber);
-  return [
-    { number: `#${1040 + (s % 7)}`,           pr: 76 + (s % 8),        pas: 83 + (s % 6),        ppd: 29 + (s % 10) },
-    { number: `#${1048 + ((s + 3) % 7)}`,      pr: 70 + ((s * 2) % 10), pas: 80 + (s % 7),        ppd: 40 + (s % 14) },
-    { number: `#${1060 + (s % 9)}`,            pr: 78 + (s % 7),        pas: 85 + (s % 5),        ppd: 27 + ((s * 3) % 8) },
-    { number: `#${1070 + ((s + 5) % 9)}`,      pr: 66 + ((s * 3) % 12), pas: 77 + (s % 8),        ppd: 52 + (s % 10) },
-  ];
-}
-
-/** Facility-level metrics used in the Facilities tab (Area Manager) */
-function getMockFacilityMetrics(facilityNumber) {
-  const s = seedFromFacility(facilityNumber);
-  return { pr: 72 + (s % 9), pas: 80 + (s % 8), ppd: 34 + (s % 9) };
-}
-
-/** Category breakdown for a single facility */
-function getMockBreakdown(facilityNumber) {
-  const s = seedFromFacility(facilityNumber);
-  const hr  = 32 + (s % 18);
-  const ops = 28 + ((s * 2) % 20);
-  const food = Math.max(15, 100 - hr - ops);
-  const total = hr + ops + food;
-  return [
-    { category: "HR",          category_percent: +((hr   / total) * 100).toFixed(2) },
-    { category: "Operations",  category_percent: +((ops  / total) * 100).toFixed(2) },
-    { category: "Food Safety", category_percent: +((food / total) * 100).toFixed(2) },
-  ];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// METRIC LOADING  (async wrappers — swap internals for real queries later)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Load GM dashboard metrics. Replace body with real Supabase query. */
-async function loadGmDashboardMetrics(profile) {
-  // TODO: real query →
-  // const { data } = await supabase.from("facility_metrics")
-  //   .select("pr_percent, pas_percent")
-  //   .eq("facility_number", profile.facility_number)
-  //   .eq("company_id", profile.company_id)
-  //   .maybeSingle();
-  // if (data) return { pr: data.pr_percent, pas: data.pas_percent };
-  return getMockGmMetrics(profile?.facility_number);
-}
-
-/** Load AM dashboard metrics — aggregate across all assigned facilities. */
-async function loadAmDashboardMetrics(profile) {
-  try {
-    const { data: assigned } = await supabase
-      .from("area_manager_facilities")
-      .select("facility_number")
-      .eq("area_manager_id", profile.id);
-
-    if (!assigned?.length) return { pr: 0, pas: 0, ppd: 0 };
-    const nums = assigned.map((f) => f.facility_number);
-
-    const [{ data: decisions }, { data: pulls }] = await Promise.all([
-      supabase.from("decision_logs").select("policy_referenced, category").in("facility_number", nums),
-      supabase.from("policy_pull_logs").select("id").in("facility_number", nums),
-    ]);
-
-    const total        = decisions?.length || 0;
-    const KNOWN_CATS   = new Set(["HR", "Operations", "Food Safety"]);
-    const withPolicy   = (decisions || []).filter((d) => d.policy_referenced).length;
-    const withCategory = (decisions || []).filter((d) => KNOWN_CATS.has(d.category)).length;
-    const pullCount    = pulls?.length || 0;
-
-    return {
-      pr:  total > 0 ? Math.round((withPolicy   / total) * 100) : 0,
-      pas: total > 0 ? Math.round((withCategory / total) * 100) : 0,
-      ppd: total > 0 ? Math.round((pullCount    / total) * 100) : 0,
-    };
-  } catch (err) {
-    console.error("loadAmDashboardMetrics error:", err);
-    return { pr: 0, pas: 0, ppd: 0 };
-  }
-}
-
-/** Load AM territory facilities — real per-facility metrics from decision_logs. */
-async function loadAmTerritoryData(profile) {
-  try {
-    const { data: assigned } = await supabase
-      .from("area_manager_facilities")
-      .select("facility_number")
-      .eq("area_manager_id", profile.id);
-
-    if (!assigned?.length) return [];
-    const nums = assigned.map((f) => f.facility_number);
-
-    const [{ data: decisions }, { data: pulls }] = await Promise.all([
-      supabase.from("decision_logs").select("facility_number, policy_referenced, category").in("facility_number", nums),
-      supabase.from("policy_pull_logs").select("facility_number").in("facility_number", nums),
-    ]);
-
-    const KNOWN_CATS = new Set(["HR", "Operations", "Food Safety"]);
-
-    return nums.map((facNum) => {
-      const decs     = (decisions || []).filter((d) => d.facility_number === facNum);
-      const facPulls = (pulls    || []).filter((p) => p.facility_number === facNum);
-      const total        = decs.length;
-      const withPolicy   = decs.filter((d) => d.policy_referenced).length;
-      const withCategory = decs.filter((d) => KNOWN_CATS.has(d.category)).length;
-      const pullCount    = facPulls.length;
-      return {
-        number: `#${facNum}`,
-        pr:  total > 0 ? Math.round((withPolicy   / total) * 100) : 0,
-        pas: total > 0 ? Math.round((withCategory / total) * 100) : 0,
-        ppd: total > 0 ? Math.round((pullCount    / total) * 100) : 0,
-      };
-    });
-  } catch (err) {
-    console.error("loadAmTerritoryData error:", err);
-    return [];
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SHARED ANIMATION
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Runs a requestAnimationFrame count-up from 0 → target. Returns cancel fn. */
-function animateMetrics(targetMetrics, setAnimated, duration = 1300) {
-  const start = performance.now();
-  const keys = Object.keys(targetMetrics).filter((k) => targetMetrics[k] != null);
-
-  let rafId;
-  const tick = (now) => {
-    const t = Math.min((now - start) / duration, 1);
-    const eased = 1 - Math.pow(1 - t, 3);
-    const next = {};
-    keys.forEach((k) => { next[k] = Math.round(targetMetrics[k] * eased); });
-    setAnimated((prev) => ({ ...prev, ...next }));
-    if (t < 1) rafId = requestAnimationFrame(tick);
-  };
-  rafId = requestAnimationFrame(tick);
-  return () => cancelAnimationFrame(rafId);
-}
-
-function normalizeBreakdownRows(rows) {
-  const map = { HR: 0, Operations: 0, "Food Safety": 0 };
-  (rows || []).forEach((r) => { if (map[r.category] !== undefined) map[r.category] = Number(r.category_percent || 0); });
-  return CATEGORIES.map((c) => ({ category: c, category_percent: map[c] }));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-function MetricCard({ metric, value, onClick, barMax }) {
-  const color = scoreMetricColor(metric.key, value);
-  const barWidth = barMax
-    ? Math.max(0, Math.min(100, (value / barMax) * 100))
-    : Math.max(0, Math.min(100, value));
-  const isClickable = typeof onClick === "function";
-  return (
-    <div
-      className={isClickable ? "metric-card-click" : undefined}
-      style={{
-        ...styles.metricCard,
-        borderTop: `2px solid ${color}`,
-        ...(isClickable ? styles.metricCardClickable : {}),
-      }}
-      onClick={onClick}
-      role={isClickable ? "button" : undefined}
-      tabIndex={isClickable ? 0 : undefined}
-      onKeyDown={isClickable ? (e) => e.key === "Enter" && onClick() : undefined}
-    >
-      {isClickable && (
-        <div style={styles.metricCardDrillHint}>VIEW BREAKDOWN →</div>
-      )}
-      <div style={styles.metricLabel}>{metric.label}</div>
-      <div style={{ ...styles.metricValue, color }}>
-        {Math.round(value)}{metric.unit}
-      </div>
-      <div style={styles.metricBarTrack}>
-        <div style={{ ...styles.metricBarFill, width: `${barWidth}%`, background: color, boxShadow: `0 0 6px ${color}60` }} />
-      </div>
-      <div style={styles.metricDesc}>{metric.desc}</div>
-      {metric.key === "ppd" && (
-        <div style={styles.metricTarget}>Target: under 38%</div>
-      )}
-    </div>
-  );
-}
-
-function CategoryBadge({ category }) {
-  if (!category) return null;
-  const tone = getCategoryStyle(category);
-  return (
-    <span style={{ ...styles.categoryBadge, color: tone.color, background: tone.bg, border: `1px solid ${tone.border}` }}>
-      {category}
-    </span>
-  );
-}
-
-function DecisionCard({ item, title, meta, formatDateFn, actions }) {
-  return (
-    <div style={styles.feedCard}>
-      <div style={styles.feedTop}>
-        <div>
-          <div style={styles.feedName}>{title}</div>
-          {meta && <div style={styles.feedMeta}>{meta}</div>}
-        </div>
-        <div style={styles.feedDate}>{formatDateFn(item.created_at)}</div>
-      </div>
-      <div style={styles.feedInlineRow}>
-        <CategoryBadge category={resolveCategory(item)} />
-        {item.policy_referenced && <span style={styles.policyTag}>Policy: {item.policy_referenced}</span>}
-        {item.is_read === false && <span style={styles.unreadBadge}>Unread</span>}
-      </div>
-      <div style={styles.feedSection}>
-        <div style={styles.feedLabel}>Situation</div>
-        <div style={styles.feedBody}>{item.situation || "—"}</div>
-      </div>
-      <div style={styles.feedSection}>
-        <div style={styles.feedLabel}>Action Taken</div>
-        <div style={styles.feedBody}>{item.action_taken || "—"}</div>
-      </div>
-      {actions && <div style={styles.actionRow}>{actions}</div>}
-    </div>
-  );
-}
-
-function CoachingCard({ item, formatDateFn }) {
-  return (
-    <div style={styles.feedCard}>
-      <div style={styles.feedTop}>
-        <div>
-          <div style={styles.feedName}>{formatDateFn(item.created_at)}</div>
-          <div style={styles.feedMeta}>{item.status || "open"}</div>
-        </div>
-      </div>
-      <div style={styles.feedBody}>{item.request_text || "—"}</div>
-      {item.leadership_notes && (
-        <div style={styles.guidanceBlock}>
-          <div style={styles.guidanceLabel}>Guidance</div>
-          <div style={styles.feedBody}>{item.leadership_notes}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const SEVERITY_STYLE = {
-  low:      { color: PALETTE.textSoft,  bg: "rgba(116,131,149,0.10)",  border: "rgba(116,131,149,0.25)"  },
-  medium:   { color: PALETTE.amber,     bg: PALETTE.amberSoft,          border: "rgba(183,146,90,0.30)"   },
-  high:     { color: PALETTE.red,       bg: PALETTE.redSoft,            border: "rgba(168,97,97,0.30)"    },
-  critical: { color: "#C97070",         bg: "rgba(168,97,97,0.16)",     border: "rgba(168,97,97,0.45)"    },
-};
-
-function PolicyResultCard({ policy, onUse, isSelected, isExpanded, onToggle }) {
-  const catStyle = getCategoryStyle(policy.category);
-  const sev = SEVERITY_STYLE[policy.severity] || null;
-  const steps = policy.action_steps
-    ? policy.action_steps.split("\n").map((s) => s.trim()).filter(Boolean)
-    : [];
-  const kwTags = policy.keywords
-    ? policy.keywords.split(",").map((k) => k.trim()).filter(Boolean)
-    : [];
-
-  return (
-    <div style={{
-      border: isSelected ? `1px solid rgba(26,128,255,0.40)` : `1px solid ${PALETTE.border}`,
-      background: isSelected ? "rgba(26,128,255,0.07)" : PALETTE.panelAlt,
-      borderRadius: "4px", overflow: "hidden",
-    }}>
-
-      {/* ── Compact header row (always visible) ── */}
-      <div
-        style={{ padding: "14px 16px", cursor: "pointer" }}
-        onClick={onToggle}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && onToggle()}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "6px" }}>
-              {policy.title || "Untitled Policy"}
-            </div>
-            <div style={styles.feedInlineRow}>
-              {policy.policy_code && <span style={styles.policyCodeBadge}>{policy.policy_code}</span>}
-              {policy.category && (
-                <span style={{ ...styles.categoryBadge, color: catStyle.color, background: catStyle.bg, border: `1px solid ${catStyle.border}` }}>
-                  {policy.category}
-                </span>
-              )}
-              {sev && policy.severity !== "medium" && (
-                <span style={{ ...styles.categoryBadge, color: sev.color, background: sev.bg, border: `1px solid ${sev.border}` }}>
-                  {policy.severity}
-                </span>
-              )}
-              {policy.version && <span style={styles.versionTag}>v{policy.version}</span>}
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-            <span style={{ fontSize: "10px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.04em" }}>
-              {isExpanded ? "▲" : "▼"}
-            </span>
-            {policy.policy_pdf_url && (
-              <a
-                href={policy.policy_pdf_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ ...styles.secondaryButton, whiteSpace: "nowrap", padding: "6px 12px", fontSize: "10px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                View Full Policy ↗
-              </a>
-            )}
-            <button
-              style={{ ...styles.primaryButton, whiteSpace: "nowrap", padding: "6px 12px", fontSize: "10px" }}
-              onClick={(e) => { e.stopPropagation(); onUse(policy); }}
-            >
-              Use →
-            </button>
-          </div>
-        </div>
-        {!isExpanded && (policy.summary || policy.policy_text) && (
-          <div style={{ fontSize: "12px", color: PALETTE.textSoft, marginTop: "8px", lineHeight: 1.55 }}>
-            {policy.summary
-              ? policy.summary
-              : policy.policy_text.slice(0, 200).trimEnd() + (policy.policy_text.length > 200 ? "…" : "")}
-          </div>
-        )}
-      </div>
-
-      {/* ── Expanded detail panel ── */}
-      {isExpanded && (
-        <div style={{ borderTop: `1px solid ${PALETTE.border}`, padding: "16px 18px", display: "flex", flexDirection: "column", gap: "18px" }}>
-
-          {/* Summary */}
-          {(policy.summary || policy.policy_text) && (
-            <div>
-              <div style={styles.policyDetailLabel}>Summary</div>
-              <div style={styles.policyDetailText}>{policy.summary || policy.policy_text}</div>
-            </div>
-          )}
-
-          {/* Action Steps */}
-          {steps.length > 0 && (
-            <div>
-              <div style={styles.policyDetailLabel}>Action Steps</div>
-              <ol style={{ margin: 0, paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "7px" }}>
-                {steps.map((step, i) => (
-                  <li key={i} style={{ ...styles.policyDetailText, paddingLeft: "4px" }}>
-                    {step.replace(/^\d+[\.\)]\s*/, "")}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {/* Escalation */}
-          {policy.escalation_guidance && (
-            <div>
-              <div style={styles.policyDetailLabel}>When to Escalate</div>
-              <div style={{ ...styles.policyDetailText, borderLeft: `2px solid ${PALETTE.amber}`, paddingLeft: "12px", color: PALETTE.textSoft }}>
-                {policy.escalation_guidance}
-              </div>
-            </div>
-          )}
-
-          {/* Role guidance */}
-          {policy.role_guidance && (
-            <div>
-              <div style={styles.policyDetailLabel}>Role Guidance</div>
-              <div style={{ ...styles.policyDetailText, background: PALETTE.panelAlt, border: `1px solid ${PALETTE.border}`, borderRadius: "3px", padding: "10px 12px" }}>
-                {policy.role_guidance}
-              </div>
-            </div>
-          )}
-
-          {/* Examples */}
-          {(policy.correct_examples || policy.incorrect_examples) && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
-              {policy.correct_examples && (
-                <div style={{ background: "rgba(0,200,122,0.05)", border: "1px solid rgba(0,200,122,0.18)", borderRadius: "3px", padding: "10px 12px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 800, color: PALETTE.green, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "7px" }}>
-                    ✓ Correct Handling
-                  </div>
-                  <div style={{ ...styles.policyDetailText, color: PALETTE.textSoft }}>{policy.correct_examples}</div>
-                </div>
-              )}
-              {policy.incorrect_examples && (
-                <div style={{ background: "rgba(232,50,72,0.05)", border: "1px solid rgba(232,50,72,0.18)", borderRadius: "3px", padding: "10px 12px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 800, color: PALETTE.red, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "7px" }}>
-                    ✗ Incorrect Handling
-                  </div>
-                  <div style={{ ...styles.policyDetailText, color: PALETTE.textSoft }}>{policy.incorrect_examples}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Keywords + meta */}
-          {(kwTags.length > 0 || policy.updated_at) && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-              {kwTags.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                  {kwTags.map((kw, i) => (
-                    <span key={i} style={{
-                      fontSize: "10px", padding: "2px 7px", borderRadius: "2px",
-                      background: "rgba(26,128,255,0.06)", border: `1px solid ${PALETTE.border}`,
-                      color: PALETTE.textMuted, letterSpacing: "0.03em",
-                    }}>{kw}</span>
-                  ))}
-                </div>
-              )}
-              {policy.updated_at && (
-                <span style={{ fontSize: "10px", color: PALETTE.textMuted, fontFamily: MONO }}>
-                  Updated {new Date(policy.updated_at).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Action buttons inside detail */}
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button
-              style={{ ...styles.primaryButton }}
-              onClick={() => onUse(policy)}
-            >
-              Use This Policy →
-            </button>
-            {policy.policy_pdf_url && (
-              <a
-                href={policy.policy_pdf_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ ...styles.secondaryButton, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-              >
-                View Full Policy ↗
-              </a>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TERRITORY TABLE (AM-specific sub-component)
-// ─────────────────────────────────────────────────────────────────────────────
-function TerritoryTable({ facilities }) {
-  return (
-    <div style={styles.territoryTableWrap}>
-      <div style={styles.territoryHeaderRow}>
-        <div style={{ ...styles.territoryCell, flex: "0 0 88px", ...styles.territoryCellLabel }}>Facility</div>
-        {AM_METRIC_DEFS.map((m) => (
-          <div key={m.key} style={{ ...styles.territoryCell, ...styles.territoryCellLabel }}>{m.label}</div>
-        ))}
-        <div style={{ ...styles.territoryCell, flex: "0 0 96px", ...styles.territoryCellLabel }}>Status</div>
-      </div>
-
-      {facilities.map((fac) => {
-        const colors = {
-          pr:  scoreMetricColor("pr",  fac.pr),
-          pas: scoreMetricColor("pas", fac.pas),
-          ppd: scoreMetricColor("ppd", fac.ppd),
-        };
-        const alertCount = Object.values(colors).filter((c) => c === PALETTE.red).length;
-        const warnCount  = Object.values(colors).filter((c) => c === PALETTE.amber).length;
-        const statusLabel = alertCount > 0 ? "Alert" : warnCount > 1 ? "Attention" : "On Track";
-        const statusColor = alertCount > 0 ? PALETTE.red : warnCount > 1 ? PALETTE.amber : PALETTE.green;
-        const statusBg    = alertCount > 0 ? PALETTE.redSoft : warnCount > 1 ? PALETTE.amberSoft : PALETTE.greenSoft;
-        const statusBorder= alertCount > 0
-          ? "rgba(232,50,72,0.28)"
-          : warnCount > 1
-          ? "rgba(232,152,10,0.28)"
-          : "rgba(0,200,122,0.28)";
-
-        return (
-          <div key={fac.number} style={styles.territoryDataRow}>
-            <div style={{ ...styles.territoryCell, flex: "0 0 88px", fontWeight: 700, color: PALETTE.text, fontSize: "14px" }}>
-              {fac.number}
-            </div>
-            {[
-              { key: "pr",  val: fac.pr  },
-              { key: "pas", val: fac.pas },
-              { key: "ppd", val: fac.ppd },
-            ].map(({ key, val }) => (
-              <div key={key} style={{ ...styles.territoryCell, color: colors[key], fontWeight: 700, fontSize: "14px" }}>
-                {val}%
-              </div>
-            ))}
-            <div style={{ ...styles.territoryCell, flex: "0 0 96px" }}>
-              <span style={{
-                display: "inline-flex", alignItems: "center", gap: "5px",
-                padding: "4px 9px", borderRadius: "999px",
-                fontSize: "11px", fontWeight: 700,
-                background: statusBg, border: `1px solid ${statusBorder}`, color: statusColor,
-                letterSpacing: "0.04em",
-              }}>
-                <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
-                {statusLabel}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN DASHBOARD COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
-export default function Dashboard() {
-  // ── core auth state ──────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState(TABS.policy);
-  const [user,    setUser]    = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // ── form state ───────────────────────────────────────────────────────────
-  const [policyText,          setPolicyText]          = useState("");
-  const [decisionSituation,   setDecisionSituation]   = useState("");
-  const [decisionAction,      setDecisionAction]      = useState("");
-  const [decisionCategory,    setDecisionCategory]    = useState("");
-  const [decisionPolicy,      setDecisionPolicy]      = useState("");
-  const [coachingText,        setCoachingText]        = useState("");
-  const [categoryManuallySet, setCategoryManuallySet] = useState(false);
-
-  // ── message state ────────────────────────────────────────────────────────
-  const [policyMessage,        setPolicyMessage]        = useState("");
-  const [decisionMessage,      setDecisionMessage]      = useState("");
-  const [coachingMessage,      setCoachingMessage]      = useState("");
-  const [teamDecisionsMessage, setTeamDecisionsMessage] = useState("");
-  const [teamCoachingMessage,  setTeamCoachingMessage]  = useState("");
-  const [managersMessage,      setManagersMessage]      = useState("");
-  const [facilitiesMessage,    setFacilitiesMessage]    = useState("");
-
-  // ── loading flags ────────────────────────────────────────────────────────
-  const [decisionLoading,        setDecisionLoading]        = useState(false);
-  const [coachingLoading,        setCoachingLoading]        = useState(false);
-  const [teamDecisionsLoading,   setTeamDecisionsLoading]   = useState(false);
-  const [teamCoachingLoading,    setTeamCoachingLoading]    = useState(false);
-  const [managersLoading,        setManagersLoading]        = useState(false);
-  const [selectedManagerLoading, setSelectedManagerLoading] = useState(false);
-  const [myLogsLoading,          setMyLogsLoading]          = useState(false);
-  const [facilitiesLoading,      setFacilitiesLoading]      = useState(false);
-  const [facilityPeopleLoading,  setFacilityPeopleLoading]  = useState(false);
-  const [personFileLoading,      setPersonFileLoading]      = useState(false);
-  const [dashboardLoading,       setDashboardLoading]       = useState(false);
-
-  // ── guidance ─────────────────────────────────────────────────────────────
-  const [guidanceActiveId,     setGuidanceActiveId]     = useState(null);
-  const [guidanceText,         setGuidanceText]         = useState("");
-  const [guidanceSubmittingId, setGuidanceSubmittingId] = useState(null);
-
-  // ── GM dashboard metrics ─────────────────────────────────────────────────
-  const [gmMetrics,         setGmMetrics]         = useState({ pr: 0, pas: 0 });
-  const [gmAnimatedMetrics, setGmAnimatedMetrics] = useState({ pr: 0, pas: 0 });
-
-  // ── AM dashboard metrics ─────────────────────────────────────────────────
-  const [amMetrics,              setAmMetrics]              = useState({ pr: 0, pas: 0, ppd: 0 });
-  const [amAnimatedMetrics,      setAmAnimatedMetrics]      = useState({ pr: 0, pas: 0, ppd: 0 });
-  const [amTerritoryFacilities,  setAmTerritoryFacilities]  = useState([]);
-
-  // ── team / manager data ───────────────────────────────────────────────────
-  const [teamDecisions,          setTeamDecisions]          = useState([]);
-  const [teamCoachingRequests,   setTeamCoachingRequests]   = useState([]);
-  const [managers,               setManagers]               = useState([]);
-  const [selectedManager,        setSelectedManager]        = useState(null);
-  const [selectedManagerDecisions, setSelectedManagerDecisions] = useState([]);
-  const [selectedManagerCoaching,  setSelectedManagerCoaching]  = useState([]);
-  const [managerFileTab,         setManagerFileTab]         = useState(null);
-
-  // ── my logs ──────────────────────────────────────────────────────────────
-  const [myLogType,   setMyLogType]   = useState(null);
-  const [myDecisions, setMyDecisions] = useState([]);
-  const [myCoaching,  setMyCoaching]  = useState([]);
-
-  // ── facilities (AM view) ──────────────────────────────────────────────────
-  const [facilities,      setFacilities]      = useState([]);
-  const [selectedFacility,setSelectedFacility]= useState(null);
-  const [facilityPeople,  setFacilityPeople]  = useState([]);
-  const [selectedPerson,  setSelectedPerson]  = useState(null);
-  const [personDecisions, setPersonDecisions] = useState([]);
-  const [personCoaching,  setPersonCoaching]  = useState([]);
-  const [personFileTab,   setPersonFileTab]   = useState("decisions");
-
-  const [facilityMetrics,         setFacilityMetrics]         = useState({ pr: 0, pas: 0, ppd: 0 });
-  const [animatedFacilityMetrics, setAnimatedFacilityMetrics] = useState({ pr: 0, pas: 0, ppd: 0 });
-  const [facilityBreakdown,       setFacilityBreakdown]       = useState(CATEGORIES.map((c) => ({ category: c, category_percent: 0 })));
-  const [facilityOpenNotes,        setFacilityOpenNotes]        = useState([]);
-  const [facilityOpenNotesCount,   setFacilityOpenNotesCount]   = useState(0);
-  const [facilityOpenNotesLoading, setFacilityOpenNotesLoading] = useState(false);
-  const [showFacilityNotesView,    setShowFacilityNotesView]    = useState(false);
-
-  // ── misc ─────────────────────────────────────────────────────────────────
-  const [isMobile,      setIsMobile]      = useState(false);
-  const [mobileMenuOpen,setMobileMenuOpen]= useState(false);
-  const [keywordMap,    setKeywordMap]    = useState(FALLBACK_CATEGORY_KEYWORDS);
-
-  // ── policy search ─────────────────────────────────────────────────────────
-  const [policyResults,        setPolicyResults]        = useState([]);
-  const [policySearchLoading,  setPolicySearchLoading]  = useState(false);
-  const [policySearchError,    setPolicySearchError]    = useState("");
-  const [selectedPolicy,       setSelectedPolicy]       = useState(null);
-  const [policySearchCategory, setPolicySearchCategory] = useState("");
-  const [expandedPolicyId,     setExpandedPolicyId]     = useState(null);
-  const [policyFilterCategory, setPolicyFilterCategory] = useState("");
-
-  // ── facility notes (Feature 1 & 2) ───────────────────────────────────────
-  const [facilityNotes,         setFacilityNotes]         = useState([]);
-  const [facilityNotesLoading,  setFacilityNotesLoading]  = useState(false);
-  const [facilityNotesMessage,  setFacilityNotesMessage]  = useState("");
-  const [newNoteType,           setNewNoteType]           = useState(NOTE_TYPES[0]);
-  const [newNotePriority,       setNewNotePriority]       = useState("normal");
-  const [newNoteText,           setNewNoteText]           = useState("");
-  const [newNoteSubmitting,     setNewNoteSubmitting]     = useState(false);
-  const [showNewNoteForm,       setShowNewNoteForm]       = useState(false);
-  const [noteStatusUpdating,    setNoteStatusUpdating]    = useState(null); // id being updated
-  const [resolutionNoteId,      setResolutionNoteId]      = useState(null); // id awaiting resolution
-  const [resolutionText,        setResolutionText]        = useState("");
-
-  // ── GM virtual signature (GM document flow only) ─────────────────────────
-  const [gmSignatureText, setGmSignatureText] = useState("");
-
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+export default function PlaybookDashboard() {
   const router = useRouter();
 
-  // ── derived role flags ────────────────────────────────────────────────────
-  const currentRoleLevel     = useMemo(() => ROLE_LEVELS[profile?.role] || 1, [profile]);
-  const canViewLeadershipTabs = currentRoleLevel >= 2;
-  const canViewFacilities     = profile?.role === "Area Manager" || profile?.role === "Area Coach";
-  const canRequestCoaching    = profile?.role === "Manager";
-  const isAreaManager         = profile?.role === "Area Manager";
-  const isGeneralManager      = profile?.role === "General Manager";
-  const hasDashboard          = isGeneralManager || isAreaManager;
-  const nextRole              = getNextRole(profile?.role);
-  const canViewFacilityNotes  = !!(profile?.facility_number);
-  const canManageFacilityNotes = isGeneralManager || profile?.role === "Area Coach";
+  // Auth
+  const [profile,     setProfile]     = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isMobile,    setIsMobile]    = useState(false);
+  const [activeTab,   setActiveTab]   = useState(TABS.home);
+  const [mobileOpen,  setMobileOpen]  = useState(false);
 
-  const autoDetectedCategory = useMemo(
-    () => detectCategory(decisionSituation, decisionAction, keywordMap),
-    [decisionSituation, decisionAction, keywordMap]
-  );
+  // Search
+  const [situation, setSituation] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [result,    setResult]    = useState(null);
+  const [altResults,setAltResults]= useState([]);
+  const [noResult,  setNoResult]  = useState(false);
 
-  // ── EFFECTS ───────────────────────────────────────────────────────────────
+  // Recent / Saved plays
+  const [recents,    setRecents]    = useState([]);
+  const [savedPlays, setSavedPlays] = useState([]);
+  const [searchId,   setSearchId]   = useState(null);
+  const [isSaved,    setIsSaved]    = useState(false);
 
+  // Feedback modal
+  const [showFeedback,       setShowFeedback]       = useState(false);
+  const [feedbackFlags,      setFeedbackFlags]      = useState([]);
+  const [feedbackNote,       setFeedbackNote]       = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackDone,       setFeedbackDone]       = useState(false);
+
+  // Facility notes
+  const [notes,           setNotes]           = useState([]);
+  const [notesLoading,    setNotesLoading]    = useState(false);
+  const [notesFetched,    setNotesFetched]    = useState(false);
+  const [newNoteType,     setNewNoteType]     = useState(NOTE_TYPES[0]);
+  const [newNotePriority, setNewNotePriority] = useState("normal");
+  const [newNoteText,     setNewNoteText]     = useState("");
+  const [noteSubmitting,  setNoteSubmitting]  = useState(false);
+  const [noteMsg,         setNoteMsg]         = useState("");
+
+  const inputRef = useRef(null);
+
+  // ── Auth init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-
-    const loadDashboard = async () => {
-      try {
-        // ── Step 1: fast local check (reads localStorage, no network) ──────
-        // This prevents the redirect flicker on every page load.
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-        if (!initialSession) {
-          window.location.href = "/";
-          return;
-        }
-
-        // ── Step 2: secure server-side validation ──────────────────────────
-        // getUser() contacts Supabase servers to confirm the JWT is still valid.
-        // This is the correct auth check for anything that touches the DB.
-        const { data: { user: authUser }, error } = await supabase.auth.getUser();
-        if (error || !authUser) {
-          console.error("Auth validation failed:", error?.message);
-          window.location.href = "/";
-          return;
-        }
-
-        if (!mounted) return;
-        setUser(authUser);
-
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("id, full_name, role, company, company_id, facility_number")
-          .eq("id", authUser.id)
-          .maybeSingle();
-
-        if (!mounted) return;
-        setProfile(prof || null);
-
-        // Set Dashboard as default tab for GM and AM, and pre-load metrics
-        if (prof?.role === "General Manager") {
-          setActiveTab(TABS.dashboard);
-          setDashboardLoading(true);
-          try {
-            const metrics = await loadGmDashboardMetrics(prof);
-            if (mounted) setGmMetrics({ pr: metrics.pr, pas: metrics.pas });
-          } catch (e) { console.error("GM metrics load error:", e); }
-          finally { if (mounted) setDashboardLoading(false); }
-        } else if (prof?.role === "Area Manager") {
-          setActiveTab(TABS.dashboard);
-          setDashboardLoading(true);
-          try {
-            const [metrics, territory] = await Promise.all([
-              loadAmDashboardMetrics(prof),
-              loadAmTerritoryData(prof),
-            ]);
-            if (mounted) {
-              setAmMetrics({ pr: metrics.pr, pas: metrics.pas, ppd: metrics.ppd });
-              setAmTerritoryFacilities(territory);
-            }
-          } catch (e) { console.error("AM metrics load error:", e); }
-          finally { if (mounted) setDashboardLoading(false); }
-        }
-      } catch (err) {
-        console.error("Dashboard load error:", err);
-        if (mounted) window.location.href = "/";
-      } finally {
-        if (mounted) setLoading(false);
-      }
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.replace("/"); return; }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.replace("/"); return; }
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("id, full_name, facility_number, company, company_id, role")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!prof) { router.replace("/"); return; }
+      if (mounted) { setProfile(prof); setAuthLoading(false); }
     };
-
-    loadDashboard();
+    init();
     return () => { mounted = false; };
-  }, []);
+  }, [router]);
 
-  // ── Keep React user state in sync with Supabase session ──────────────────
-  // This fires when: token is refreshed, user signs out in another tab, etc.
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" || !session) {
-        // User signed out (this tab or another tab) — redirect to login
-        window.location.href = "/";
-      } else if (session?.user) {
-        // Token was refreshed or user signed back in — keep state current
-        setUser(session.user);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
+  // ── Mobile detection ───────────────────────────────────────────────────────
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
@@ -1052,2271 +155,650 @@ export default function Dashboard() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  useEffect(() => {
-    const loadKeywords = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("decision_category_keywords")
-          .select("category, keyword, weight, is_active")
-          .eq("is_active", true);
-        if (!error && data?.length) setKeywordMap(buildKeywordMapFromRows(data));
-      } catch (err) { console.warn("Keyword fallback active:", err); }
-    };
-    loadKeywords();
-  }, []);
+  // ── Load recents when profile ready ───────────────────────────────────────
+  useEffect(() => { if (profile) loadRecents(); }, [profile]);
 
-  useEffect(() => {
-    if (!categoryManuallySet) setDecisionCategory(autoDetectedCategory.category || "");
-  }, [autoDetectedCategory, categoryManuallySet]);
-
-  // Facility metrics animation (Facilities tab)
-  useEffect(() => {
-    if (!selectedFacility) { setAnimatedFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); return; }
-    return animateMetrics(facilityMetrics, setAnimatedFacilityMetrics);
-  }, [facilityMetrics, selectedFacility]);
-
-  // GM dashboard animation
-  useEffect(() => {
-    if (!Object.values(gmMetrics).some((v) => v > 0)) { setGmAnimatedMetrics({ pr: 0, pas: 0 }); return; }
-    return animateMetrics(gmMetrics, setGmAnimatedMetrics);
-  }, [gmMetrics]);
-
-  // AM dashboard animation
-  useEffect(() => {
-    if (!Object.values(amMetrics).some((v) => v > 0)) { setAmAnimatedMetrics({ pr: 0, pas: 0, ppd: 0 }); return; }
-    return animateMetrics(amMetrics, setAmAnimatedMetrics);
-  }, [amMetrics]);
-
-  // ── HANDLERS ──────────────────────────────────────────────────────────────
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  };
-
-  const searchPolicies = async (searchText, categoryOverride = "") => {
-    setPolicySearchLoading(true);
-    setPolicySearchError("");
-    setPolicyResults([]);
-    setExpandedPolicyId(null);
-    setPolicyFilterCategory("");
-    const term = searchText.trim();
-    if (!term) { setPolicySearchLoading(false); return; }
+  const loadRecents = async () => {
     try {
-      const detected = detectCategory(term, "", keywordMap);
-      const category = categoryOverride || detected.category || "";
-      setPolicySearchCategory(category);
-
-      const runQuery = async (withCategory) => {
-        let q = supabase
-          .from("company_policies")
-          .select("id, title, policy_code, policy_text, category, version, is_active, summary, keywords, action_steps, escalation_guidance, role_guidance, correct_examples, incorrect_examples, severity, updated_at, policy_pdf_url")
-          .eq("is_active", true)
-          .or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,policy_code.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`)
-          .order("title", { ascending: true })
-          .limit(15);
-        q = applyCompanyScope(q, profile);
-        if (withCategory) q = q.eq("category", withCategory);
-        return q;
-      };
-
-      let { data, error } = await runQuery(category);
-      if (error) throw error;
-
-      // Fallback: if category filtered to zero results, retry without category filter
-      if (category && (!data || data.length === 0)) {
-        const fallback = await runQuery("");
-        if (fallback.error) throw fallback.error;
-        data = fallback.data;
-      }
-
-      setPolicyResults(data || []);
-    } catch (err) {
-      console.error("Policy search error:", err);
-      setPolicySearchError(err.message || "Failed to search policies.");
-    } finally {
-      setPolicySearchLoading(false);
-    }
+      const { data } = await supabase
+        .from("playbook_searches")
+        .select("id, situation_text, policy_id, saved, created_at")
+        .eq("user_id", profile.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const all = data || [];
+      setRecents(all.filter(r => !r.saved).slice(0, 8));
+      setSavedPlays(all.filter(r => r.saved));
+    } catch { /* table may not exist yet — graceful no-op */ }
   };
 
-  const handlePullPolicy = async () => {
-    setPolicyMessage("");
-    setSelectedPolicy(null);
-    if (!policyText.trim()) { setPolicyMessage("Please describe the situation first."); return; }
-    await searchPolicies(policyText);
-    // Log to policy_pull_logs non-blocking (do not block or show error to user)
-    try {
-      const detected = detectCategory(policyText, "", keywordMap);
-      await supabase.from("policy_pull_logs").insert([{
-        user_id: user.id,
-        company: profile?.company || null,
-        company_id: safeUuid(profile?.company_id),
-        facility_number: profile?.facility_number || null,
-        user_role: profile?.role || null,
-        situation_text: policyText.trim(),
-        category: detected.category || null,
-        policy_query: policyText.trim(),
-        policy_result_used: false,
-      }]);
-    } catch (logErr) {
-      console.warn("Policy pull log failed (non-critical):", logErr);
-    }
-  };
+  // ── Core search logic ──────────────────────────────────────────────────────
+  const doSearch = async (term) => {
+    if (!term) return;
+    setSearching(true);
+    setNoResult(false);
+    setResult(null);
+    setAltResults([]);
+    setSearchId(null);
+    setIsSaved(false);
 
-  const handleUsePolicy = (policy) => {
-    setSelectedPolicy(policy);
-    setDecisionPolicy(policy.policy_code || policy.title || "");
-    if (!categoryManuallySet && policy.category) {
-      setDecisionCategory(policy.category);
-    }
-    // Auto-redirect to Document Decision (Feature 4)
-    setActiveTab(TABS.decision);
-  };
-
-  const handleDecisionSubmit = async () => {
-    setDecisionMessage("");
-    if (!decisionSituation.trim() || !decisionAction.trim()) {
-      setDecisionMessage("Please enter both the situation and action taken."); return;
-    }
-    const detected = detectCategory(decisionSituation, decisionAction, keywordMap);
-    const finalCategory = categoryManuallySet ? decisionCategory : decisionCategory || detected.category;
-    if (!finalCategory) { setDecisionMessage("Please select a category."); return; }
-    if (!user)          { setDecisionMessage("You must be logged in.");    return; }
-    if (!profile)       { setDecisionMessage("Profile not loaded — please refresh."); return; }
-    setDecisionLoading(true);
-    try {
-      const { error } = await supabase.from("decision_logs").insert([{
-        user_id: user.id,
-        company: profile.company || null,
-        company_id: safeUuid(profile.company_id),
-        facility_number: profile.facility_number || null,
-        user_name: profile?.full_name || "Unknown",
-        user_role: profile?.role || "Manager",
-        submitted_by_role: profile?.role || "Manager",
-        visible_to_role: nextRole,
-        situation: decisionSituation.trim(),
-        action_taken: decisionAction.trim(),
-        category: finalCategory,
-        category_source: categoryManuallySet ? "manual" : "auto",
-        category_confidence: categoryManuallySet ? "high" : detected.confidence,
-        category_score: categoryManuallySet ? null : detected.score,
-        policy_referenced: decisionPolicy.trim() || null,
-        // GM: store virtual signature text. Manager: no signature field.
-        signature_status: isGeneralManager ? (gmSignatureText.trim() || null) : null,
-        is_read: false,
-      }]);
-      if (error) throw error;
-      setDecisionSituation(""); setDecisionAction(""); setDecisionCategory("");
-      setDecisionPolicy(""); setCategoryManuallySet(false); setGmSignatureText("");
-      setDecisionMessage("Decision submitted successfully.");
-    } catch (err) {
-      console.error("Decision submit error:", err);
-      setDecisionMessage(err.message || "Failed to submit decision.");
-    } finally { setDecisionLoading(false); }
-  };
-
-  const handleCoachingSubmit = async () => {
-    setCoachingMessage("");
-    if (!coachingText.trim()) { setCoachingMessage("Please describe the support you need."); return; }
-    if (!user)                { setCoachingMessage("You must be logged in.");               return; }
-    setCoachingLoading(true);
-    try {
-      const { error } = await supabase.from("coaching_requests").insert([{
-        user_id: user.id,
-        company: profile?.company || null,
-        company_id: safeUuid(profile?.company_id),
-        facility_number: profile?.facility_number || null,
-        requester_name: profile?.full_name || "Unknown",
-        requester_role: profile?.role || "Manager",
-        submitted_by_role: profile?.role || "Manager",
-        visible_to_role: nextRole,
-        request_text: coachingText.trim(),
-        status: "open",
-      }]);
-      if (error) throw error;
-      setCoachingText("");
-      setCoachingMessage("Coaching request submitted.");
-    } catch (err) {
-      console.error("Coaching submit error:", err);
-      setCoachingMessage(err.message || "Failed to submit coaching request.");
-    } finally { setCoachingLoading(false); }
-  };
-
-  const fetchTeamDecisions = async () => {
-    if (!profile?.role) return;
-    setTeamDecisionsLoading(true); setTeamDecisionsMessage("");
-    try {
-      let q = supabase.from("decision_logs").select("*")
-        .eq("visible_to_role", profile.role).eq("is_read", false)
-        .neq("user_id", user?.id || "").order("created_at", { ascending: false });
-      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
-      q = applyCompanyScope(q, profile);
-      const { data, error } = await q;
-      if (error) throw error;
-      setTeamDecisions(data || []);
-    } catch (err) {
-      console.error("Fetch team decisions error:", err);
-      setTeamDecisionsMessage(err.message || "Failed to load team decisions.");
-    } finally { setTeamDecisionsLoading(false); }
-  };
-
-  const fetchTeamCoachingRequests = async () => {
-    if (!profile?.role) return;
-    setTeamCoachingLoading(true); setTeamCoachingMessage("");
-    try {
-      let q = supabase.from("coaching_requests").select("*")
-        .eq("visible_to_role", profile.role).neq("user_id", user?.id || "")
-        .or("guidance_given.is.null,guidance_given.eq.false")
-        .order("created_at", { ascending: false });
-      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
-      q = applyCompanyScope(q, profile);
-      const { data, error } = await q;
-      if (error) throw error;
-      setTeamCoachingRequests(data || []);
-    } catch (err) {
-      console.error("Fetch team coaching error:", err);
-      setTeamCoachingMessage(err.message || "Failed to load team coaching.");
-    } finally { setTeamCoachingLoading(false); }
-  };
-
-  const fetchManagers = async () => {
-    if (!profile?.company && !profile?.company_id) return;
-    setManagersLoading(true); setManagersMessage("");
-    try {
-      let q = supabase.from("profiles")
-        .select("id, full_name, role, company, company_id, facility_number")
-        .eq("role", "Manager").order("full_name", { ascending: true });
-      if (profile?.facility_number) q = q.eq("facility_number", profile.facility_number);
-      q = applyCompanyScope(q, profile);
-      const { data, error } = await q;
-      if (error) throw error;
-      setManagers(data || []);
-    } catch (err) {
-      console.error("Fetch managers error:", err);
-      setManagersMessage(err.message || "Failed to load managers.");
-    } finally { setManagersLoading(false); }
-  };
-
-  const openManagerFile = async (manager) => {
-    setSelectedManager(manager); setSelectedManagerLoading(true);
-    setManagersMessage(""); setManagerFileTab(null);
-    try {
-      const facNum = manager.facility_number;
-      const [{ data: decisions, error: de }, { data: coaching, error: ce }] = await Promise.all([
-        supabase.from("decision_logs").select("*").eq("user_id", manager.id)
-          .eq("facility_number", facNum).order("created_at", { ascending: false }),
-        supabase.from("coaching_requests").select("*").eq("user_id", manager.id)
-          .eq("facility_number", facNum).order("created_at", { ascending: false }),
-      ]);
-      if (de) throw de; if (ce) throw ce;
-      setSelectedManagerDecisions(decisions || []);
-      setSelectedManagerCoaching(coaching || []);
-    } catch (err) {
-      console.error("Open manager file error:", err);
-      setManagersMessage(err.message || "Failed to open manager file.");
-    } finally { setSelectedManagerLoading(false); }
-  };
-
-  const markDecisionAsRead = async (decisionId, userId) => {
-    try {
-      const { error } = await supabase.from("decision_logs").update({
-        is_read: true, read_at: new Date().toISOString(), read_by: user.id,
-      }).eq("id", decisionId);
-      if (error) throw error;
-      await fetchTeamDecisions();
-      let mgr = managers.find((m) => m.id === userId);
-      if (!mgr) {
-        const { data } = await supabase.from("profiles")
-          .select("id, full_name, role, company, company_id, facility_number")
-          .eq("id", userId).maybeSingle();
-        mgr = data;
-      }
-      if (mgr) { setActiveTab(TABS.managers); await openManagerFile(mgr); }
-    } catch (err) {
-      console.error("Mark as read error:", err);
-      setTeamDecisionsMessage(err.message || "Failed to mark as read.");
-    }
-  };
-
-  const handleGiveGuidance = async (requestId, userId) => {
-    if (!guidanceText.trim()) return;
-    setGuidanceSubmittingId(requestId);
-    try {
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("coaching_requests").update({
-        leadership_notes: guidanceText.trim(), guidance_response: guidanceText.trim(),
-        guidance_given: true, guidance_given_at: now, guidance_given_by: user.id,
-        sent_to_manager_file: true, sent_to_manager_file_at: now, sent_to_manager_file_by: user.id,
-        status: "resolved", resolution_type: "guidance_given",
-        resolution_summary: guidanceText.trim(), resolved_at: now, resolved_by: user.id,
-      }).eq("id", requestId);
-      if (error) throw error;
-      setGuidanceActiveId(null); setGuidanceText("");
-      await fetchTeamCoachingRequests();
-      let mgr = managers.find((m) => m.id === userId);
-      if (!mgr) {
-        const { data } = await supabase.from("profiles")
-          .select("id, full_name, role, company, company_id, facility_number")
-          .eq("id", userId).maybeSingle();
-        mgr = data;
-      }
-      if (mgr) { setActiveTab(TABS.managers); await openManagerFile(mgr); }
-    } catch (err) {
-      console.error("Give guidance error:", err);
-      setTeamCoachingMessage(err.message || "Failed to save guidance.");
-    } finally { setGuidanceSubmittingId(null); }
-  };
-
-  const fetchMyLogs = async () => {
-    if (!user?.id) return;
-    setMyLogsLoading(true);
-    try {
-      const [{ data: decisions }, { data: coaching }] = await Promise.all([
-        supabase.from("decision_logs").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
-        supabase.from("coaching_requests").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
-      ]);
-      setMyDecisions(decisions || []); setMyCoaching(coaching || []);
-    } catch (err) { console.error("My logs error:", err); }
-    finally { setMyLogsLoading(false); }
-  };
-
-  const fetchFacilities = async () => {
-    if (!user?.id) return;
-    setFacilitiesLoading(true); setFacilitiesMessage("");
-    setSelectedFacility(null); setFacilityPeople([]);
-    setSelectedPerson(null); setPersonDecisions([]); setPersonCoaching([]);
-    try {
-      const { data: assigned, error } = await supabase
-        .from("area_manager_facilities").select("*").eq("area_manager_id", user.id);
-      if (error) throw error;
-      if (assigned?.length) { setFacilities(assigned); return; }
-
-      if (profile?.role === "Area Coach") {
-        let q = supabase.from("facilities").select("*").order("facility_number", { ascending: true });
-        q = applyCompanyScope(q, profile);
-        const { data: fb, error: fe } = await q;
-        if (fe) throw fe;
-        setFacilities(fb || []);
-        if (!fb?.length) setFacilitiesMessage("No facilities found for your account.");
-        return;
-      }
-      setFacilities([]);
-      setFacilitiesMessage("No facilities assigned to your account.");
-    } catch (err) {
-      console.error("Fetch facilities error:", err);
-      setFacilitiesMessage(err.message || "Failed to load facilities.");
-    } finally { setFacilitiesLoading(false); }
-  };
-
-  const fetchFacilityPeople = async (facility) => {
-    setSelectedFacility(facility); setSelectedPerson(null);
-    setPersonDecisions([]); setPersonCoaching([]); setFacilityPeople([]);
-    setShowFacilityNotesView(false);
-    setFacilityOpenNotes([]); setFacilityOpenNotesCount(0);
-    setFacilityPeopleLoading(true); setFacilitiesMessage("");
-    fetchFacilityOpenNotes(facility);
-    const scope = facility?.company_id ? { company_id: facility.company_id } : { company: facility.company };
-    try {
-      let pq = supabase.from("profiles")
-        .select("id, full_name, role, company, company_id, facility_number")
-        .eq("facility_number", facility.facility_number).in("role", ["General Manager", "Manager"]);
-      pq = applyCompanyScope(pq, scope);
-
-      let mq = supabase.from("facility_metrics").select("*")
-        .eq("facility_number", facility.facility_number).maybeSingle();
-      mq = applyCompanyScope(mq, scope);
-
-      let bq = supabase.from("facility_category_breakdown").select("*")
-        .eq("facility_number", facility.facility_number);
-      bq = applyCompanyScope(bq, scope);
-
-      let dq = supabase.from("decision_logs")
-        .select("policy_referenced, category")
-        .eq("facility_number", facility.facility_number);
-      dq = applyCompanyScope(dq, scope);
-
-      let plq = supabase.from("policy_pull_logs")
-        .select("id")
-        .eq("facility_number", facility.facility_number);
-      plq = applyCompanyScope(plq, scope);
-
-      const [
-        { data: people, error: pe },
-        { data: metrics, error: me },
-        { data: breakdown, error: be },
-        { data: decisions },
-        { data: pulls },
-      ] = await Promise.all([pq, mq, bq, dq, plq]);
-      if (pe) throw pe;
-
-      const sorted = (people || []).sort((a, b) => {
-        const rank = { "General Manager": 0, Manager: 1 };
-        const d = (rank[a.role] ?? 9) - (rank[b.role] ?? 9);
-        return d !== 0 ? d : (a.full_name || "").localeCompare(b.full_name || "");
-      });
-      setFacilityPeople(sorted);
-
-      // Compute metrics from real decision_logs; prefer facility_metrics table if populated
-      const KNOWN_CATS  = new Set(["HR", "Operations", "Food Safety"]);
-      const decTotal    = decisions?.length || 0;
-      const withPolicy  = (decisions || []).filter((d) => d.policy_referenced).length;
-      const withCat     = (decisions || []).filter((d) => KNOWN_CATS.has(d.category)).length;
-      const pullCount   = pulls?.length || 0;
-      const computedMetrics = {
-        pr:  decTotal > 0 ? Math.round((withPolicy / decTotal) * 100) : 0,
-        pas: decTotal > 0 ? Math.round((withCat    / decTotal) * 100) : 0,
-        ppd: decTotal > 0 ? Math.round((pullCount  / decTotal) * 100) : 0,
-      };
-      setFacilityMetrics(
-        (!me && metrics)
-          ? { pr: +metrics.pr_percent, pas: +metrics.pas_percent, ppd: +metrics.ppd_percent }
-          : computedMetrics
-      );
-
-      // Compute category breakdown from decision_logs; prefer breakdown table if populated
-      const catCounts = { HR: 0, Operations: 0, "Food Safety": 0 };
-      (decisions || []).forEach((d) => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
-      const computedBreakdown = CATEGORIES.map((c) => ({
-        category: c,
-        category_percent: decTotal > 0 ? +((catCounts[c] / decTotal) * 100).toFixed(2) : 0,
-      }));
-      setFacilityBreakdown(
-        (!be && breakdown?.length)
-          ? normalizeBreakdownRows(breakdown)
-          : computedBreakdown
-      );
-
-      if (!sorted.length) setFacilitiesMessage("No staff found in this facility.");
-    } catch (err) {
-      console.error("Fetch facility people error:", err);
-      setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 });
-      setFacilityBreakdown(CATEGORIES.map((c) => ({ category: c, category_percent: 0 })));
-      setFacilitiesMessage(err.message || "Failed to load facility data.");
-    } finally { setFacilityPeopleLoading(false); }
-  };
-
-  const fetchFacilityOpenNotes = async (facility) => {
-    setFacilityOpenNotesLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("facility_notes")
-        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at, status")
-        .eq("facility_number", facility.facility_number)
-        .neq("status", "closed")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setFacilityOpenNotes(data || []);
-      setFacilityOpenNotesCount((data || []).length);
-    } catch (err) {
-      console.error("Fetch facility open notes error:", err);
-      setFacilityOpenNotes([]);
-      setFacilityOpenNotesCount(0);
-    } finally {
-      setFacilityOpenNotesLoading(false);
-    }
-  };
-
-  const openPersonFile = async (person) => {
-    setSelectedPerson(person); setPersonFileLoading(true);
-    setPersonDecisions([]); setPersonCoaching([]); setPersonFileTab("decisions");
-    try {
-      const facNum = person.facility_number;
-      const [{ data: decisions, error: de }, { data: coaching, error: ce }] = await Promise.all([
-        supabase.from("decision_logs").select("*").eq("user_id", person.id)
-          .eq("facility_number", facNum).order("created_at", { ascending: false }),
-        supabase.from("coaching_requests").select("*").eq("user_id", person.id)
-          .eq("facility_number", facNum).order("created_at", { ascending: false }),
-      ]);
-      if (de) throw de; if (ce) throw ce;
-      setPersonDecisions(decisions || []); setPersonCoaching(coaching || []);
-    } catch (err) { console.error("Open person file error:", err); }
-    finally { setPersonFileLoading(false); }
-  };
-
-  // ── Facility Notes (Features 1 & 2) ──────────────────────────────────────
-
-  const fetchFacilityNotes = async () => {
-    if (!profile?.facility_number) return;
-    setFacilityNotesLoading(true); setFacilityNotesMessage("");
     try {
       let q = supabase
-        .from("facility_notes")
-        .select("*")
-        .eq("facility_number", profile.facility_number)
-        .order("created_at", { ascending: false });
+        .from("company_policies")
+        .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
+        .eq("is_active", true);
       q = applyCompanyScope(q, profile);
-      // Non-managers can only see OPEN notes; GM/AC can see all
-      if (!canManageFacilityNotes) q = q.neq("status", "closed");
-      const { data, error } = await q;
-      if (error) throw error;
-      const sorted = (data || []).slice().sort((a, b) => {
-        const sd = (NOTE_STATUS_ORDER[a.status] ?? 1) - (NOTE_STATUS_ORDER[b.status] ?? 1);
-        if (sd !== 0) return sd;
-        return new Date(b.created_at) - new Date(a.created_at);
-      });
-      setFacilityNotes(sorted);
-    } catch (err) {
-      console.error("Fetch facility notes error:", err);
-      setFacilityNotesMessage(err.message || "Failed to load facility notes.");
-    } finally {
-      setFacilityNotesLoading(false);
-    }
-  };
+      q = q.or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`);
+      const { data: primary } = await q.limit(5);
+      let hits = primary || [];
 
-  const handleNewNoteSubmit = async () => {
-    if (!newNoteText.trim()) { setFacilityNotesMessage("Please describe the issue."); return; }
-    const noteTypeDb = NOTE_TYPE_DB[newNoteType];
-    if (!noteTypeDb) { setFacilityNotesMessage("Invalid note type selected."); return; }
-    setNewNoteSubmitting(true); setFacilityNotesMessage("");
-    try {
-      const { error } = await supabase.from("facility_notes").insert([{
-        facility_number: profile.facility_number,
-        company:         profile?.company           || null,
-        company_id:      safeUuid(profile?.company_id),
-        note_type:       noteTypeDb,
-        priority:        newNotePriority,
-        note_text:       newNoteText.trim(),
-        status:          "open",
-        created_by:      user.id,
-        created_by_name: profile?.full_name || "Unknown",
-        created_by_role: profile?.role      || "Manager",
-      }]);
-      if (error) throw error;
-      setNewNoteText(""); setNewNoteType(NOTE_TYPES[0]); setNewNotePriority("normal");
-      setShowNewNoteForm(false);
-      await fetchFacilityNotes();
-    } catch (err) {
-      console.error("New note submit error:", err);
-      setFacilityNotesMessage(err.message || "Failed to submit note.");
-    } finally {
-      setNewNoteSubmitting(false);
-    }
-  };
-
-  const handleNoteStatusUpdate = async (noteId, newStatus) => {
-    if (newStatus === "closed") {
-      // Open resolution prompt instead of closing immediately
-      setResolutionNoteId(noteId); setResolutionText(""); return;
-    }
-    setNoteStatusUpdating(noteId);
-    try {
-      const { error } = await supabase.from("facility_notes")
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", noteId);
-      if (error) throw error;
-      await fetchFacilityNotes();
-    } catch (err) {
-      console.error("Note status update error:", err);
-      setFacilityNotesMessage(err.message || "Failed to update note status.");
-    } finally {
-      setNoteStatusUpdating(null);
-    }
-  };
-
-  const handleCloseNoteWithResolution = async (noteId) => {
-    if (!resolutionText.trim()) { setFacilityNotesMessage("Please enter a resolution before closing."); return; }
-    setNoteStatusUpdating(noteId);
-    try {
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("facility_notes").update({
-        status:          "closed",
-        resolution_text: resolutionText.trim(),
-        closed_by:       user.id,
-        closed_by_name:  profile?.full_name || "Unknown",
-        closed_at:       now,
-        updated_at:      now,
-      }).eq("id", noteId);
-      if (error) throw error;
-      setResolutionNoteId(null); setResolutionText("");
-      setFacilityNotesMessage("Note closed successfully.");
-      await fetchFacilityNotes();
-    } catch (err) {
-      console.error("Close note error:", err);
-      setFacilityNotesMessage(err.message || "Failed to close note.");
-    } finally {
-      setNoteStatusUpdating(null);
-    }
-  };
-
-  // ── Dashboard loader (called on tab enter) ────────────────────────────────
-  const enterDashboard = async () => {
-    if (!profile) return;
-    setDashboardLoading(true);
-    try {
-      if (isGeneralManager) {
-        const metrics = await loadGmDashboardMetrics(profile);
-        setGmMetrics({ pr: metrics.pr, pas: metrics.pas });
-      } else if (isAreaManager) {
-        const [metrics, territory] = await Promise.all([
-          loadAmDashboardMetrics(profile),
-          loadAmTerritoryData(profile),
-        ]);
-        setAmMetrics({ pr: metrics.pr, pas: metrics.pas, ppd: metrics.ppd });
-        setAmTerritoryFacilities(territory);
+      // Fallback: try individual significant words
+      if (!hits.length) {
+        const words = term.split(/\s+/).filter(w => w.length > 3);
+        for (const word of words.slice(0, 4)) {
+          let wq = supabase
+            .from("company_policies")
+            .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
+            .eq("is_active", true);
+          wq = applyCompanyScope(wq, profile);
+          wq = wq.or(`title.ilike.%${word}%,keywords.ilike.%${word}%,summary.ilike.%${word}%`);
+          const { data: wr } = await wq.limit(3);
+          if (wr?.length) { hits = wr; break; }
+        }
       }
-    } catch (err) { console.error("Dashboard load error:", err); }
-    finally { setDashboardLoading(false); }
+
+      if (!hits.length) {
+        setNoResult(true);
+      } else {
+        setResult(hits[0]);
+        setAltResults(hits.slice(1));
+        // Log to playbook_searches
+        try {
+          const { data: logged } = await supabase
+            .from("playbook_searches")
+            .insert({ user_id: profile.id, facility_number: profile.facility_number || null, company_id: safeUuid(profile.company_id), situation_text: term, policy_id: hits[0].id, saved: false })
+            .select("id").single();
+          if (logged?.id) { setSearchId(logged.id); loadRecents(); }
+        } catch { /* playbook_searches table may not exist yet */ }
+      }
+    } finally {
+      setSearching(false);
+    }
   };
 
-  // ── NAV ITEMS ──────────────────────────────────────────────────────────────
-  const navItems = [
-    { tab: TABS.dashboard,      label: "Dashboard",         show: hasDashboard,                          onEnter: enterDashboard },
-    { tab: TABS.policy,         label: "Request Policy",    show: true },
-    { tab: TABS.decision,       label: "Document Decision", show: !isAreaManager },
-    { tab: TABS.coaching,       label: "Request Coaching",  show: canRequestCoaching },
-    { divider: true,                                        show: canViewLeadershipTabs && !isAreaManager },
-    { tab: TABS.teamDecisions,  label: "Team Decisions",    show: canViewLeadershipTabs && !isAreaManager, onEnter: fetchTeamDecisions },
-    { tab: TABS.teamCoaching,   label: "Team Coaching",     show: canViewLeadershipTabs && !isAreaManager, onEnter: fetchTeamCoachingRequests },
-    { tab: TABS.managers,       label: "Managers",          show: canViewLeadershipTabs && !isAreaManager, onEnter: fetchManagers },
-    { divider: true,                                        show: canViewFacilities },
-    { tab: TABS.facilities,     label: "Facilities",        show: canViewFacilities,                      onEnter: fetchFacilities },
-    { divider: true,                                        show: canViewFacilityNotes },
-    { tab: TABS.facilityNotes,  label: "Facility Notes",    show: canViewFacilityNotes,                   onEnter: fetchFacilityNotes },
-  ];
+  const handleSearch = async (e) => {
+    if (e) e.preventDefault();
+    await doSearch(situation.trim());
+  };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  if (loading) {
+  const reopenRecent = async (recent) => {
+    setSituation(recent.situation_text);
+    if (recent.policy_id) {
+      setSearching(true);
+      setNoResult(false);
+      setResult(null);
+      setAltResults([]);
+      try {
+        const { data } = await supabase
+          .from("company_policies")
+          .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
+          .eq("id", recent.policy_id)
+          .maybeSingle();
+        if (data) { setResult(data); setSearchId(recent.id); setIsSaved(recent.saved || false); }
+        else { await doSearch(recent.situation_text); }
+      } finally { setSearching(false); }
+    } else {
+      await doSearch(recent.situation_text);
+    }
+  };
+
+  const clearSearch = () => { setResult(null); setNoResult(false); setSituation(""); setSearchId(null); setIsSaved(false); setTimeout(() => inputRef.current?.focus(), 50); };
+
+  // ── Save / unsave play ─────────────────────────────────────────────────────
+  const handleSavePlay = async () => {
+    if (!searchId) return;
+    try {
+      await supabase.from("playbook_searches").update({ saved: !isSaved }).eq("id", searchId);
+      setIsSaved(!isSaved);
+      loadRecents();
+    } catch {}
+  };
+
+  // ── Feedback ───────────────────────────────────────────────────────────────
+  const toggleFlag = (flag) => setFeedbackFlags(prev => prev.includes(flag) ? prev.filter(f => f !== flag) : [...prev, flag]);
+
+  const submitFeedback = async () => {
+    if (!feedbackFlags.length) return;
+    setFeedbackSubmitting(true);
+    try {
+      await supabase.from("policy_feedback").insert({ user_id: profile.id, policy_id: result?.id || null, facility_number: profile.facility_number || null, company_id: safeUuid(profile.company_id), flags: feedbackFlags, note: feedbackNote.trim() || null });
+    } catch { /* policy_feedback table may not exist yet */ }
+    setFeedbackDone(true);
+    setFeedbackSubmitting(false);
+  };
+
+  const closeFeedback = () => { setShowFeedback(false); setFeedbackFlags([]); setFeedbackNote(""); setFeedbackDone(false); };
+
+  // ── Facility notes ─────────────────────────────────────────────────────────
+  const loadNotes = async () => {
+    if (!profile?.facility_number) return;
+    setNotesLoading(true);
+    try {
+      const { data } = await supabase
+        .from("facility_notes")
+        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at, status")
+        .eq("facility_number", profile.facility_number)
+        .neq("status", "closed")
+        .order("created_at", { ascending: false });
+      setNotes(data || []);
+    } catch {}
+    setNotesLoading(false);
+    setNotesFetched(true);
+  };
+
+  const submitNote = async (e) => {
+    e.preventDefault();
+    if (!newNoteText.trim()) return;
+    setNoteSubmitting(true);
+    setNoteMsg("");
+    try {
+      await supabase.from("facility_notes").insert({ facility_number: profile.facility_number, company_id: safeUuid(profile.company_id), note_type: NOTE_TYPE_DB[newNoteType] || "other", priority: newNotePriority, note_text: newNoteText.trim(), status: "open", created_by_name: profile.full_name || "", created_by_role: profile.role || "" });
+      setNewNoteText("");
+      setNoteMsg("Note added.");
+      loadNotes();
+    } catch (err) { setNoteMsg(err.message || "Failed to add note."); }
+    setNoteSubmitting(false);
+  };
+
+  useEffect(() => { if (activeTab === TABS.notes && !notesFetched) loadNotes(); }, [activeTab]);
+
+  // ── Loading gate ───────────────────────────────────────────────────────────
+  if (authLoading) {
     return (
-      <div style={styles.page}>
-        <div style={styles.loadingCard}>Loading dashboard...</div>
+      <div style={{ minHeight:"100vh", background:PALETTE.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <p style={{ color:PALETTE.textMuted, fontSize:"11px", letterSpacing:"0.10em", textTransform:"uppercase", fontFamily:SANS }}>Loading…</p>
       </div>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
-  return (
-    <div style={styles.page}>
-      <Head><title>ThinkView</title></Head>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(5px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .fade-up { animation: fadeUp 0.20s ease both; }
-        .nav-tab:hover { color: #E8EDF3 !important; }
-        .person-row:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
-        .metric-card-click:hover { box-shadow: 0 0 0 1px rgba(77,126,168,0.40), 0 4px 20px rgba(77,126,168,0.10) !important; transform: translateY(-1px); }
-        .metric-card-click { transition: box-shadow 0.18s ease, transform 0.18s ease; }
-        textarea:focus, input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus {
-          border-color: rgba(77,126,168,0.60) !important;
-          box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important;
-          outline: none !important;
-        }
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: #0B1118; }
-        ::-webkit-scrollbar-thumb { background: #2A3B4E; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3A5068; }
-        .manager-row-btn:hover { border-left-color: #4D7EA8 !important; background: rgba(77,126,168,0.06) !important; }
-        .log-type-btn:hover { border-top-color: #4D7EA8 !important; }
-        .facility-pill:hover { border-color: #4D7EA8 !important; background: rgba(77,126,168,0.08) !important; }
-        .sort-btn:hover { color: #E7EDF3 !important; border-color: #3D5268 !important; }
-      `}} />
+  const hasFacility = !!profile?.facility_number;
+  const navItems = [
+    { id: TABS.home,  label: "Playbook" },
+    ...(hasFacility ? [{ id: TABS.notes, label: "Facility Notes" }] : []),
+  ];
 
-      {/* ── TOP HEADER ── */}
-      <header style={styles.topNav}>
-        <div style={styles.topNavBrand}>
-          <div style={{ ...styles.topNavName, fontSize: isMobile ? "15px" : "13px" }}>
-            ThinkView
-          </div>
-          <div style={{ ...styles.topNavMeta, fontSize: isMobile ? "12px" : "10px" }}>
-            {profile?.full_name}{profile?.role ? ` · ${profile.role}` : ""}
-          </div>
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={s.page}>
+      <Head><title>Playbook</title></Head>
+      <style dangerouslySetInnerHTML={{ __html: css }} />
+
+      {/* ── TOP NAV ── */}
+      <header style={s.topNav}>
+        <div style={s.topNavBrand}>
+          <div style={s.topNavProduct}>Playbook</div>
+          <div style={s.topNavMeta}>{profile?.full_name}{profile?.role ? ` · ${profile.role}` : ""}</div>
         </div>
 
         {!isMobile && (
-          <nav style={styles.topNavItems}>
-            <button
-              className="nav-tab"
-              style={{ ...styles.topNavBtn, ...(activeTab === TABS.myLogs ? styles.topNavBtnActive : {}) }}
-              onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); }}
-            >
-              My Logs
-            </button>
-            <div style={styles.topNavDivider} />
-            {navItems.map((item, i) => {
-              if (!item.show) return null;
-              if (item.divider) return <div key={i} style={styles.topNavDivider} />;
-              return (
-                <button
-                  key={item.tab}
-                  className="nav-tab"
-                  style={{ ...styles.topNavBtn, ...(activeTab === item.tab ? styles.topNavBtnActive : {}) }}
-                  onClick={() => { setActiveTab(item.tab); item.onEnter?.(); }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
+          <nav style={s.topNavItems}>
+            {navItems.map(item => (
+              <button key={item.id} className="nav-tab"
+                style={{ ...s.topNavBtn, ...(activeTab === item.id ? s.topNavBtnActive : {}) }}
+                onClick={() => setActiveTab(item.id)}>
+                {item.label}
+              </button>
+            ))}
           </nav>
         )}
 
-        <div style={styles.topNavRight}>
-          {!isMobile ? (
-            <button style={styles.topNavLogout} onClick={handleLogout}>Log Out</button>
-          ) : (
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button style={styles.mobileMenuBtn} onClick={() => { setActiveTab(TABS.myLogs); fetchMyLogs(); setMobileMenuOpen(false); }}>
-                My Logs
-              </button>
-              <button style={styles.mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
-                {mobileMenuOpen ? "✕" : "☰"}
-              </button>
-            </div>
+        <div style={s.topNavRight}>
+          {isMobile && (
+            <button style={s.mobileMenuBtn} onClick={() => setMobileOpen(o => !o)}>
+              {mobileOpen ? "✕" : "☰"}
+            </button>
           )}
+          <button style={s.topNavLogout} onClick={async () => { await supabase.auth.signOut(); router.replace("/"); }}>
+            Sign out
+          </button>
         </div>
       </header>
 
-      {/* ── MOBILE DROPDOWN ── */}
-      {isMobile && mobileMenuOpen && (
-        <div style={styles.mobileDropdown}>
-          {navItems.map((item, i) => {
-            if (!item.show) return null;
-            if (item.divider) return <div key={i} style={styles.navDivider} />;
-            return (
-              <button
-                key={item.tab}
-                style={{ ...styles.navButton, ...(activeTab === item.tab ? styles.navButtonActive : {}) }}
-                onClick={() => { setActiveTab(item.tab); item.onEnter?.(); setMobileMenuOpen(false); }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-          <div style={styles.navDivider} />
-          <button style={styles.logoutButton} onClick={handleLogout}>Log Out</button>
+      {isMobile && mobileOpen && (
+        <div style={s.mobileDropdown}>
+          {navItems.map(item => (
+            <button key={item.id}
+              style={{ ...s.navButton, ...(activeTab === item.id ? s.navButtonActive : {}) }}
+              onClick={() => { setActiveTab(item.id); setMobileOpen(false); }}>
+              {item.label}
+            </button>
+          ))}
+          <div style={s.navDivider} />
+          <a href="/support" style={{ ...s.navButton, textDecoration:"none", display:"block" }}>Support</a>
         </div>
       )}
 
-      <main style={styles.main}>
+      {/* ── MAIN CONTENT ── */}
+      <main style={s.main}>
 
-        {/* ════════════════════════════════════════════════════════════════════
-            DASHBOARD TAB — General Manager
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.dashboard && isGeneralManager && (
+        {/* ══════════════════════ PLAYBOOK TAB ══════════════════════ */}
+        {activeTab === TABS.home && (
           <>
-            <div style={styles.headerCard}>
-              <div style={styles.dashHeaderRow}>
-                <div>
-                  <h1 style={styles.title}>Dashboard</h1>
-                  <p style={styles.subtitle}>
-                    Facility performance snapshot · Facility {profile?.facility_number || "—"} · {profile?.company || ""}
-                  </p>
-                </div>
-                <span style={styles.roleBadge}>General Manager</span>
-              </div>
-            </div>
+            {/* ── SEARCH HOME (no result yet) ── */}
+            {!result && !noResult && !searching && (
+              <div className="fade-up">
+                <div style={s.heroLabel}>What's the situation?</div>
+                <form onSubmit={handleSearch} style={s.searchForm}>
+                  <textarea
+                    ref={inputRef}
+                    value={situation}
+                    onChange={e => setSituation(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSearch(e); } }}
+                    placeholder={"e.g.  customer wants refund but no receipt\n       employee no call no show\n       product shortage during dinner rush"}
+                    style={s.searchInput}
+                    rows={3}
+                    autoFocus
+                  />
+                  <button type="submit" style={{ ...s.searchBtn, ...(situation.trim() ? {} : { opacity:0.45, cursor:"not-allowed" }) }} disabled={!situation.trim()}>
+                    Get the Play →
+                  </button>
+                </form>
 
-            {dashboardLoading ? (
-              <div style={styles.panelCard}><p style={styles.message}>Loading metrics...</p></div>
-            ) : (
-              <div style={styles.metricsGrid} className="fade-up">
-                {GM_METRIC_DEFS.map((metric) => {
-                  const drillRoutes = { pr: "/gm-pr-breakdown", pas: "/gm-pas-breakdown" };
-                  const route = drillRoutes[metric.key];
-                  return (
-                    <MetricCard
-                      key={metric.key}
-                      metric={metric}
-                      value={gmAnimatedMetrics[metric.key] || 0}
-                      onClick={route ? () => router.push(route) : undefined}
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            <div style={styles.panelCard} className="fade-up">
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>Performance Reference</div>
-              </div>
-              <div style={styles.thresholdGrid}>
-                {GM_METRIC_DEFS.map((m) => (
-                  <div key={m.key} style={styles.thresholdItem}>
-                    <div style={styles.thresholdLabel}>{m.label}</div>
-                    <div style={styles.thresholdValue}>Target ≥ {m.target}%</div>
-                    <div style={styles.thresholdDesc}>{m.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            DASHBOARD TAB — Area Manager
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.dashboard && isAreaManager && (
-          <>
-            <div style={styles.headerCard}>
-              <div style={styles.dashHeaderRow}>
-                <div>
-                  <h1 style={styles.title}>Dashboard</h1>
-                  <p style={styles.subtitle}>
-                    Area performance overview · All assigned facilities · {profile?.company || ""}
-                  </p>
-                </div>
-                <span style={styles.roleBadge}>Area Manager</span>
-              </div>
-            </div>
-
-            {dashboardLoading ? (
-              <div style={styles.panelCard}><p style={styles.message}>Loading metrics...</p></div>
-            ) : (
-              <div style={styles.metricsGrid} className="fade-up">
-                {AM_METRIC_DEFS.map((metric) => (
-                  <MetricCard key={metric.key} metric={metric} value={amAnimatedMetrics[metric.key] || 0} />
-                ))}
-              </div>
-            )}
-
-            {amTerritoryFacilities.length > 0 && (
-              <div style={styles.panelCard} className="fade-up">
-                <div style={styles.sectionTopRow}>
-                  <div style={styles.sectionHeading}>Facility Breakdown</div>
-                  <div style={styles.sectionHint}>All assigned facilities</div>
-                </div>
-                <TerritoryTable facilities={amTerritoryFacilities} />
-              </div>
-            )}
-
-            <div style={styles.panelCard} className="fade-up">
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>PP/D Scoring Reference</div>
-                <div style={styles.sectionHint}>Policy Pull / Documented Decision threshold</div>
-              </div>
-              <div style={styles.ppdLegendRow}>
-                <div style={styles.ppdLegendItem}>
-                  <span style={{ ...styles.ppdLegendDot, background: PALETTE.green }} />
-                  <span style={styles.ppdLegendText}>Under 38% — On Target</span>
-                </div>
-                <div style={styles.ppdLegendItem}>
-                  <span style={{ ...styles.ppdLegendDot, background: PALETTE.amber }} />
-                  <span style={styles.ppdLegendText}>38–55% — Needs Attention</span>
-                </div>
-                <div style={styles.ppdLegendItem}>
-                  <span style={{ ...styles.ppdLegendDot, background: PALETTE.red }} />
-                  <span style={styles.ppdLegendText}>Over 55% — Alert</span>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            REQUEST POLICY
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.policy && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Request Policy</h1>
-              <p style={styles.subtitle}>Search your company policy library by situation, keyword, or category. Open any result to see step-by-step guidance, escalation notes, and examples.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <label style={styles.label}>Describe the situation</label>
-              <textarea
-                value={policyText}
-                onChange={(e) => {
-                  setPolicyText(e.target.value);
-                  if (policyResults.length || policySearchError) {
-                    setPolicyResults([]); setPolicySearchError("");
-                    setSelectedPolicy(null); setPolicyMessage("");
-                    setExpandedPolicyId(null); setPolicyFilterCategory("");
-                  }
-                }}
-                placeholder="Example: An employee showed up 30 minutes late without calling. What does company policy say I should do?"
-                style={styles.textarea}
-              />
-              <button
-                style={{ ...styles.primaryButton, ...(policySearchLoading ? styles.buttonDisabled : {}) }}
-                onClick={handlePullPolicy}
-                disabled={policySearchLoading}
-              >
-                {policySearchLoading ? "Searching…" : "Search Policy"}
-              </button>
-              {policyMessage && (
-                <p style={{ ...styles.message, color: selectedPolicy ? PALETTE.green : PALETTE.textSoft }}>
-                  {policyMessage}
-                </p>
-              )}
-            </div>
-
-            {/* Search results */}
-            {(policySearchLoading || policySearchError || policyResults.length > 0) && (
-              <div style={styles.panelCard} className="fade-up">
-                <div style={styles.sectionTopRow}>
-                  <div style={styles.sectionHeading}>
-                    {policySearchLoading
-                      ? "Searching policies…"
-                      : policySearchError
-                      ? "Search Error"
-                      : `${policyResults.length} result${policyResults.length !== 1 ? "s" : ""} found`}
-                  </div>
-                  {policySearchCategory && !policySearchLoading && (
-                    <div style={styles.sectionHint}>Matched category: {policySearchCategory}</div>
-                  )}
-                </div>
-
-                {/* Category filter chips */}
-                {!policySearchLoading && !policySearchError && policyResults.length > 0 && (
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "14px" }}>
-                    {["", ...CATEGORIES].map((cat) => {
-                      const active = policyFilterCategory === cat;
-                      return (
-                        <button
-                          key={cat || "all"}
-                          style={{
-                            border: active ? `1px solid rgba(26,128,255,0.40)` : `1px solid ${PALETTE.border}`,
-                            background: active ? PALETTE.blueSoft : "transparent",
-                            color: active ? PALETTE.blue : PALETTE.textSoft,
-                            borderRadius: "3px", padding: "4px 10px",
-                            fontSize: "10px", fontWeight: 700, cursor: "pointer",
-                            letterSpacing: "0.05em", textTransform: "uppercase",
-                          }}
-                          onClick={() => setPolicyFilterCategory(cat)}
-                        >
-                          {cat || "All"}
-                        </button>
-                      );
-                    })}
+                {/* Saved Plays */}
+                {savedPlays.length > 0 && (
+                  <div style={s.recentSection}>
+                    <div style={s.recentLabel}>Saved Plays</div>
+                    {savedPlays.map(r => (
+                      <button key={r.id} className="recent-chip" style={s.recentChip} onClick={() => reopenRecent(r)}>
+                        <span style={s.recentStar}>★</span>{r.situation_text}
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {policySearchError ? (
-                  <p style={{ ...styles.message, color: PALETTE.red }}>{policySearchError}</p>
-                ) : policySearchLoading ? (
-                  <p style={styles.message}>Loading…</p>
-                ) : policyResults.length === 0 ? (
-                  <p style={styles.message}>No matching policies found. Try rephrasing your description.</p>
-                ) : (() => {
-                  const filtered = policyFilterCategory
-                    ? policyResults.filter((p) => p.category === policyFilterCategory)
-                    : policyResults;
-                  return filtered.length === 0 ? (
-                    <p style={styles.message}>No {policyFilterCategory} policies in these results.</p>
-                  ) : (
-                    <div style={styles.cardList}>
-                      {filtered.map((policy) => (
-                        <PolicyResultCard
-                          key={policy.id}
-                          policy={policy}
-                          onUse={handleUsePolicy}
-                          isSelected={selectedPolicy?.id === policy.id}
-                          isExpanded={expandedPolicyId === policy.id}
-                          onToggle={() => setExpandedPolicyId(expandedPolicyId === policy.id ? null : policy.id)}
-                        />
-                      ))}
-                    </div>
-                  );
-                })()}
+                {/* Recent Searches */}
+                {recents.length > 0 && (
+                  <div style={s.recentSection}>
+                    <div style={s.recentLabel}>Recent</div>
+                    {recents.map(r => (
+                      <button key={r.id} className="recent-chip" style={s.recentChip} onClick={() => reopenRecent(r)}>
+                        {r.situation_text}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── SEARCHING ── */}
+            {searching && (
+              <div style={s.searchingState} className="fade-up">
+                <div style={s.searchingDot} />
+                <span style={s.searchingText}>Finding the play…</span>
+              </div>
+            )}
+
+            {/* ── NO RESULT ── */}
+            {noResult && !searching && (
+              <div style={s.noResultWrap} className="fade-up">
+                <div style={s.noResultTitle}>No matching policy found</div>
+                <p style={s.noResultText}>Try different keywords, or check with your GM if this situation isn't covered yet.</p>
+                <button style={s.secondaryBtn} onClick={clearSearch}>← Try again</button>
+              </div>
+            )}
+
+            {/* ── RESULT VIEW ── */}
+            {result && !searching && (
+              <div className="fade-up">
+
+                {/* Top action bar */}
+                <div style={s.resultBar}>
+                  <button style={s.backBtn} onClick={clearSearch}>← New Search</button>
+                  <div style={s.resultBarActions}>
+                    <button
+                      style={{ ...s.saveBtn, ...(isSaved ? s.saveBtnActive : {}) }}
+                      onClick={handleSavePlay}>
+                      {isSaved ? "★ Saved" : "☆ Save Play"}
+                    </button>
+                    <button style={s.flagBtn} onClick={() => { setShowFeedback(true); setFeedbackDone(false); }}>
+                      Flag Policy
+                    </button>
+                  </div>
+                </div>
+
+                {/* Situation echo */}
+                <div style={s.situationEcho}>
+                  <span style={s.situationEchoLabel}>Situation: </span>{situation}
+                </div>
+
+                {/* ── THE PLAY ── */}
+                <div style={s.resultCard}>
+                  <div style={s.cardLabel}>The Play</div>
+                  <div style={s.actionSteps}>
+                    {result.action_steps || result.summary || result.policy_text || "No steps available."}
+                  </div>
+                </div>
+
+                {/* ── POLICY BEHIND IT ── */}
+                <div style={s.resultCard}>
+                  <div style={s.cardLabel}>Policy Behind It</div>
+                  <div style={s.policyTitle}>{result.title}</div>
+                  <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"6px" }}>
+                    {result.policy_code && <span style={s.codeBadge}>{result.policy_code}</span>}
+                    {result.category    && <span style={s.catBadge}>{result.category}</span>}
+                    {result.severity    && <span style={s.sevBadge}>{result.severity}</span>}
+                  </div>
+                  {result.summary && result.action_steps && (
+                    <p style={s.policySummary}>{result.summary}</p>
+                  )}
+                </div>
+
+                {/* ── AVOID THIS ── */}
+                {result.incorrect_examples && (
+                  <div style={{ ...s.resultCard, borderLeft:`3px solid ${PALETTE.amber}` }}>
+                    <div style={{ ...s.cardLabel, color:PALETTE.amber }}>Avoid This</div>
+                    <div style={s.bodyText}>{result.incorrect_examples}</div>
+                  </div>
+                )}
+
+                {/* ── ESCALATE IF ── */}
+                {result.escalation_guidance && (
+                  <div style={{ ...s.resultCard, borderLeft:`3px solid ${PALETTE.red}` }}>
+                    <div style={{ ...s.cardLabel, color:PALETTE.red }}>Escalate If</div>
+                    <div style={s.bodyText}>{result.escalation_guidance}</div>
+                  </div>
+                )}
+
+                {/* ── OTHER RELEVANT POLICIES ── */}
+                {altResults.length > 0 && (
+                  <div style={s.altSection}>
+                    <div style={s.altLabel}>Other Relevant Policies</div>
+                    {altResults.map(alt => (
+                      <button key={alt.id} className="alt-btn" style={s.altBtn}
+                        onClick={() => { setResult(alt); setAltResults([]); setSearchId(null); setIsSaved(false); }}>
+                        <span style={s.altTitle}>{alt.title}</span>
+                        {alt.policy_code && <span style={s.altCode}>{alt.policy_code}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Inline search bar at bottom */}
+                <div style={s.searchBarBottom}>
+                  <form onSubmit={handleSearch} style={s.searchInlineForm}>
+                    <input
+                      value={situation}
+                      onChange={e => setSituation(e.target.value)}
+                      placeholder="Search another situation…"
+                      style={s.searchInlineInput}
+                    />
+                    <button type="submit" style={s.searchInlineBtn} disabled={!situation.trim()}>→</button>
+                  </form>
+                </div>
               </div>
             )}
           </>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════
-            DOCUMENT DECISION
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.decision && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Document Decision</h1>
-              <p style={styles.subtitle}>Record the situation, the action taken, and the category.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <label style={styles.label}>Situation</label>
-              <textarea value={decisionSituation} onChange={(e) => setDecisionSituation(e.target.value)}
-                placeholder="Describe what happened." style={styles.textareaSmall} />
-              <label style={styles.label}>Action Taken</label>
-              <textarea value={decisionAction} onChange={(e) => setDecisionAction(e.target.value)}
-                placeholder="Describe the action you took." style={styles.textareaSmall} />
-              <div style={styles.sectionDivider} />
-              <div style={styles.sectionTitle}>Category</div>
-              <select value={decisionCategory}
-                onChange={(e) => { setDecisionCategory(e.target.value); setCategoryManuallySet(true); }}
-                style={styles.categorySelect}
-              >
-                <option value="">— Select a category —</option>
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              {autoDetectedCategory.category && !categoryManuallySet && (
-                <div style={styles.autoDetectedText}>Auto-detected: {autoDetectedCategory.category}</div>
-              )}
-              <div style={styles.sectionDivider} />
-              <input type="text" value={decisionPolicy} onChange={(e) => setDecisionPolicy(e.target.value)}
-                placeholder="Policy referenced (optional)" style={styles.policyInput} />
-
-              {/* ── GM-only: Virtual Signature Box ── */}
-              {isGeneralManager && (
-                <>
-                  <div style={styles.sectionDivider} />
-                  <div style={styles.sectionTitle}>Employee Signature</div>
-                  <div style={styles.sigBoxWrap}>
-                    <div style={styles.sigBoxLabel}>Type employee's full name as digital signature</div>
-                    <input
-                      type="text"
-                      value={gmSignatureText}
-                      onChange={(e) => setGmSignatureText(e.target.value)}
-                      placeholder="Sign here…"
-                      style={styles.sigBoxInput}
-                      autoComplete="off"
-                    />
-                    {gmSignatureText.trim() && (
-                      <div style={styles.sigBoxPreview}>
-                        <span style={styles.sigBoxPreviewLabel}>Signed as:</span>
-                        <span style={styles.sigBoxPreviewName}>{gmSignatureText.trim()}</span>
-                        <button
-                          type="button"
-                          style={styles.sigBoxClear}
-                          onClick={() => setGmSignatureText("")}
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    )}
-                    {!gmSignatureText.trim() && (
-                      <div style={styles.sigWarning}>
-                        ⚠ HR recommends having EE signatures before submitting documents.
-                      </div>
-                    )}
+        {/* ══════════════════════ FACILITY NOTES TAB ══════════════════════ */}
+        {activeTab === TABS.notes && (
+          <div className="fade-up">
+            {!hasFacility ? (
+              <div style={s.panelCard}>
+                <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>No facility assigned to your account.</p>
+              </div>
+            ) : (
+              <>
+                {/* New note form */}
+                <div style={s.panelCard}>
+                  <div style={s.sectionTopRow}>
+                    <div style={s.sectionHeading}>New Facility Note</div>
                   </div>
-                </>
-              )}
-
-              <button
-                style={{ ...styles.primaryButton, ...(decisionLoading ? styles.buttonDisabled : {}), marginTop: "14px" }}
-                onClick={handleDecisionSubmit} disabled={decisionLoading}
-              >
-                {decisionLoading ? "Submitting..." : "Submit Decision"}
-              </button>
-              {decisionMessage && <p style={styles.message}>{decisionMessage}</p>}
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            REQUEST COACHING  (Manager only)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.coaching && canRequestCoaching && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Request Coaching</h1>
-              <p style={styles.subtitle}>Ask your General Manager for guidance and support.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <label style={styles.label}>Describe what you need support with</label>
-              <textarea value={coachingText} onChange={(e) => setCoachingText(e.target.value)}
-                placeholder="Describe the situation and what kind of support you need..."
-                style={styles.textarea} />
-              <button
-                style={{ ...styles.primaryButton, ...(coachingLoading ? styles.buttonDisabled : {}) }}
-                onClick={handleCoachingSubmit} disabled={coachingLoading}
-              >
-                {coachingLoading ? "Submitting..." : "Request Coaching"}
-              </button>
-              {coachingMessage && <p style={styles.message}>{coachingMessage}</p>}
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            MY LOGS
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.myLogs && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>My Logs</h1>
-              <p style={styles.subtitle}>Your personal decision and coaching history.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>
-                  {myLogType === "decisions" ? "My Decision Logs" : myLogType === "coaching" ? "My Coaching Logs" : "Select Log Type"}
-                </div>
-                {myLogType && <button style={styles.secondaryButton} onClick={() => setMyLogType(null)}>← Back</button>}
-              </div>
-
-              {myLogsLoading ? (
-                <p style={styles.message}>Loading...</p>
-              ) : !myLogType ? (
-                <div style={styles.logTypeSelector}>
-                  <button className="log-type-btn" style={styles.logTypeButton} onClick={() => setMyLogType("decisions")}>
-                    <div style={styles.logTypeTitle}>Decision Logs</div>
-                    <div style={styles.logTypeMeta}>{myDecisions.length} record{myDecisions.length !== 1 ? "s" : ""}</div>
-                  </button>
-                  <button className="log-type-btn" style={styles.logTypeButton} onClick={() => setMyLogType("coaching")}>
-                    <div style={styles.logTypeTitle}>Coaching Logs</div>
-                    <div style={styles.logTypeMeta}>{myCoaching.length} record{myCoaching.length !== 1 ? "s" : ""}</div>
-                  </button>
-                </div>
-              ) : myLogType === "decisions" ? (
-                <div style={styles.cardList}>
-                  {myDecisions.length === 0
-                    ? <p style={styles.message}>No decision logs yet.</p>
-                    : myDecisions.map((item) => (
-                        <DecisionCard key={item.id} item={item} title={formatDate(item.created_at)}
-                          meta={item.is_read ? "Reviewed by leadership" : "Pending review"} formatDateFn={formatDate} />
-                      ))}
-                </div>
-              ) : (
-                <div style={styles.cardList}>
-                  {myCoaching.length === 0
-                    ? <p style={styles.message}>No coaching requests yet.</p>
-                    : myCoaching.map((item) => <CoachingCard key={item.id} item={item} formatDateFn={formatDate} />)}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            TEAM DECISIONS  (GM only)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.teamDecisions && canViewLeadershipTabs && !isAreaManager && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Team Decisions</h1>
-              <p style={styles.subtitle}>Review decisions routed to your clearance level.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>Decision Feed</div>
-                <button style={styles.secondaryButton} onClick={fetchTeamDecisions}>Refresh</button>
-              </div>
-              {teamDecisionsMessage && <p style={styles.message}>{teamDecisionsMessage}</p>}
-              {teamDecisionsLoading ? (
-                <p style={styles.message}>Loading...</p>
-              ) : teamDecisions.length === 0 ? (
-                <p style={styles.message}>No unread team decisions.</p>
-              ) : (
-                <div style={styles.cardList}>
-                  {teamDecisions.map((item) => (
-                    <DecisionCard key={item.id} item={item}
-                      title={item.user_name || "Unknown User"}
-                      meta={`${item.user_role || "Manager"}${item.company ? ` · ${item.company}` : ""}`}
-                      formatDateFn={formatDate}
-                      actions={
-                        <button style={styles.secondaryButton} onClick={() => markDecisionAsRead(item.id, item.user_id)}>
-                          Mark as Read
-                        </button>
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            TEAM COACHING  (GM only)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.teamCoaching && canViewLeadershipTabs && !isAreaManager && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Team Coaching Requests</h1>
-              <p style={styles.subtitle}>Review and respond to coaching requests from your team.</p>
-            </div>
-            <div style={styles.panelCard}>
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>Coaching Queue</div>
-                <button style={styles.secondaryButton} onClick={fetchTeamCoachingRequests}>Refresh</button>
-              </div>
-              {teamCoachingMessage && <p style={styles.message}>{teamCoachingMessage}</p>}
-              {teamCoachingLoading ? (
-                <p style={styles.message}>Loading...</p>
-              ) : teamCoachingRequests.length === 0 ? (
-                <p style={styles.message}>No open coaching requests.</p>
-              ) : (
-                <div style={styles.cardList}>
-                  {teamCoachingRequests.map((item) => (
-                    <div key={item.id} style={styles.feedCard}>
-                      <div style={styles.feedTop}>
-                        <div>
-                          <div style={styles.feedName}>{item.requester_name || "Unknown User"}</div>
-                          <div style={styles.feedMeta}>{item.requester_role || "Manager"}{item.company ? ` · ${item.company}` : ""}</div>
-                        </div>
-                        <div style={styles.feedDate}>{formatDate(item.created_at)}</div>
+                  <form onSubmit={submitNote} style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:"12px" }}>
+                      <div>
+                        <label style={s.label}>Type</label>
+                        <select value={newNoteType} onChange={e => setNewNoteType(e.target.value)} style={s.selectInput}>
+                          {NOTE_TYPES.map(t => <option key={t}>{t}</option>)}
+                        </select>
                       </div>
-                      <div style={styles.feedInlineRow}>
-                        <span style={styles.statusBadge}>{item.status || "open"}</span>
+                      <div>
+                        <label style={s.label}>Priority</label>
+                        <select value={newNotePriority} onChange={e => setNewNotePriority(e.target.value)} style={s.selectInput}>
+                          {NOTE_PRIORITIES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
+                        </select>
                       </div>
-                      <div style={styles.feedBody}>{item.request_text || "—"}</div>
-                      {item.leadership_notes && (
-                        <div style={styles.guidanceBlock}>
-                          <div style={styles.guidanceLabel}>Leadership Notes</div>
-                          <div style={styles.feedBody}>{item.leadership_notes}</div>
-                        </div>
-                      )}
-                      <div style={styles.actionRow}>
-                        {guidanceActiveId === item.id ? (
-                          <div style={styles.guidancePrompt}>
-                            <textarea value={guidanceText} onChange={(e) => setGuidanceText(e.target.value)}
-                              placeholder="What should this manager do? Be specific..."
-                              style={styles.guidanceTextarea} />
-                            <div style={styles.guidanceButtons}>
-                              <button style={styles.primaryButton}
-                                onClick={() => handleGiveGuidance(item.id, item.user_id)}
-                                disabled={guidanceSubmittingId === item.id || !guidanceText.trim()}
-                              >
-                                {guidanceSubmittingId === item.id ? "Sending..." : "Send to Manager File"}
-                              </button>
-                              <button style={styles.secondaryButton}
-                                onClick={() => { setGuidanceActiveId(null); setGuidanceText(""); }}>
-                                Cancel
-                              </button>
-                            </div>
+                    </div>
+                    <div>
+                      <label style={s.label}>Note</label>
+                      <textarea value={newNoteText} onChange={e => setNewNoteText(e.target.value)}
+                        placeholder="Describe the issue…" style={{ ...s.textarea, minHeight:"90px" }} required />
+                    </div>
+                    {noteMsg && <p style={{ fontSize:"12px", color:PALETTE.textSoft, margin:0 }}>{noteMsg}</p>}
+                    <button type="submit" disabled={noteSubmitting || !newNoteText.trim()} style={{ ...s.primaryBtn, alignSelf:"flex-start", ...(noteSubmitting || !newNoteText.trim() ? { opacity:0.45, cursor:"not-allowed" } : {}) }}>
+                      {noteSubmitting ? "Saving…" : "Add Note"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Open notes list */}
+                <div style={s.panelCard}>
+                  <div style={s.sectionTopRow}>
+                    <div style={s.sectionHeading}>Open Notes · Facility {profile?.facility_number}</div>
+                    <button style={s.secondaryBtn} onClick={loadNotes}>Refresh</button>
+                  </div>
+                  {notesLoading && <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>Loading…</p>}
+                  {!notesLoading && notes.length === 0 && (
+                    <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>No open notes.</p>
+                  )}
+                  <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                    {notes.map(n => (
+                      <div key={n.id} style={s.noteCard}>
+                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"6px", flexWrap:"wrap", gap:"6px" }}>
+                          <div style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap" }}>
+                            <span style={{ ...s.noteBadge, ...priorityStyle(n.priority) }}>{n.priority}</span>
+                            <span style={s.noteType}>{NOTE_TYPE_LABEL[n.note_type] || n.note_type}</span>
                           </div>
-                        ) : (
-                          <button style={styles.secondaryButton}
-                            onClick={() => { setGuidanceActiveId(item.id); setGuidanceText(""); }}>
-                            Give Operational Guidance
-                          </button>
+                          <span style={s.noteTimestamp}>{timeAgo(n.created_at)}</span>
+                        </div>
+                        <div style={s.noteText}>{n.note_text}</div>
+                        {n.created_by_name && (
+                          <div style={s.noteBy}>{n.created_by_name} · {n.created_by_role}</div>
                         )}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            MANAGERS  (GM only — decisions only, no coaching logs)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.managers && canViewLeadershipTabs && !isAreaManager && (
-          <>
-            <div style={styles.headerCard}>
-              <h1 style={styles.title}>Managers</h1>
-              <p style={styles.subtitle}>Review managers and open their documentation history.</p>
-            </div>
-            <div style={{ ...styles.managersLayout, gridTemplateColumns: isMobile ? "1fr" : "300px 1fr" }}>
-              <div style={styles.panelCard}>
-                <div style={styles.sectionTopRow}>
-                  <div style={styles.sectionHeading}>Manager Directory</div>
-                  <button style={styles.secondaryButton} onClick={fetchManagers}>Refresh</button>
-                </div>
-                {managersMessage && <p style={styles.message}>{managersMessage}</p>}
-                {managersLoading ? (
-                  <p style={styles.message}>Loading...</p>
-                ) : managers.length === 0 ? (
-                  <p style={styles.message}>No managers found.</p>
-                ) : (
-                  <div style={styles.cardList}>
-                    {managers.map((mgr) => (
-                      <button key={mgr.id}
-                        className="manager-row-btn"
-                        style={{ ...styles.managerRowButton, ...(selectedManager?.id === mgr.id ? styles.managerRowButtonActive : {}) }}
-                        onClick={() => openManagerFile(mgr)}
-                      >
-                        <div style={styles.managerRowName}>{mgr.full_name || "Unnamed"}</div>
-                        <div style={styles.managerRowMeta}>{mgr.role}{mgr.company ? ` · ${mgr.company}` : ""}</div>
-                      </button>
                     ))}
                   </div>
-                )}
-              </div>
-
-              <div style={styles.panelCard}>
-                <div style={styles.sectionTopRow}>
-                  <div style={styles.sectionHeading}>
-                    {selectedManager ? `${selectedManager.full_name} — Decision Logs` : "Manager File"}
-                  </div>
                 </div>
-                {!selectedManager ? (
-                  <p style={styles.message}>Select a manager to view their decision logs.</p>
-                ) : selectedManagerLoading ? (
-                  <p style={styles.message}>Loading...</p>
-                ) : selectedManagerDecisions.length === 0 ? (
-                  <p style={styles.message}>No decision logs found.</p>
-                ) : (
-                  <div style={styles.cardList}>
-                    {selectedManagerDecisions.map((item) => (
-                      <DecisionCard key={item.id} item={item}
-                        title={formatDate(item.created_at)} meta={item.is_read ? "Read" : "Unread"}
-                        formatDateFn={formatDate} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ════════════════════════════════════════════════════════════════════
-            FACILITIES  (Area Manager / Area Coach)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.facilities && canViewFacilities && (
-          <>
-            <div style={styles.headerCard}>
-              <div style={styles.facilitiesHeaderTop}>
-                <div>
-                  <h1 style={styles.title}>Facilities</h1>
-                  <p style={styles.subtitle}>
-                    {selectedPerson
-                      ? `${selectedPerson.full_name} — ${selectedPerson.role}`
-                      : selectedFacility
-                      ? `Facility ${selectedFacility.facility_number} · ${selectedFacility.company || profile?.company || ""}`
-                      : "Select a facility to inspect performance and staff."}
-                  </p>
-                </div>
-                {selectedPerson ? (
-                  <button style={styles.secondaryButton} onClick={() => { setSelectedPerson(null); setPersonDecisions([]); setPersonCoaching([]); }}>
-                    ← Back to People
-                  </button>
-                ) : showFacilityNotesView ? (
-                  <button style={styles.secondaryButton} onClick={() => setShowFacilityNotesView(false)}>
-                    ← Back to Facility
-                  </button>
-                ) : selectedFacility ? (
-                  <button style={styles.secondaryButton} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); setFacilityMetrics({ pr: 0, pas: 0, ppd: 0 }); setFacilityBreakdown(CATEGORIES.map((c) => ({ category: c, category_percent: 0 }))); setFacilityOpenNotes([]); setFacilityOpenNotesCount(0); setShowFacilityNotesView(false); }}>
-                    ← All Facilities
-                  </button>
-                ) : null}
-              </div>
-
-              {(selectedFacility || selectedPerson) && (
-                <div style={styles.breadcrumb}>
-                  <button style={styles.breadcrumbLink} onClick={() => { setSelectedFacility(null); setFacilityPeople([]); setSelectedPerson(null); }}>
-                    Facilities
-                  </button>
-                  {selectedFacility && (
-                    <>
-                      <span style={styles.breadcrumbSep}>›</span>
-                      <button style={styles.breadcrumbLink} onClick={() => { setSelectedPerson(null); setPersonDecisions([]); setPersonCoaching([]); }}>
-                        Facility {selectedFacility.facility_number}
-                      </button>
-                    </>
-                  )}
-                  {selectedPerson && (
-                    <>
-                      <span style={styles.breadcrumbSep}>›</span>
-                      <span style={styles.breadcrumbCurrent}>{selectedPerson.full_name}</span>
-                    </>
-                  )}
-                  {showFacilityNotesView && !selectedPerson && (
-                    <>
-                      <span style={styles.breadcrumbSep}>›</span>
-                      <span style={styles.breadcrumbCurrent}>Open Notes</span>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {!selectedFacility && (
-                <div style={styles.facilitySelectorWrap}>
-                  {facilitiesLoading ? (
-                    <p style={styles.message}>Loading facilities...</p>
-                  ) : facilities.length === 0 ? (
-                    <p style={styles.message}>{facilitiesMessage || "No facilities found."}</p>
-                  ) : (
-                    <div style={styles.facilityPillWrap}>
-                      {facilities.map((f) => (
-                        <button
-                          key={`${f.company || "co"}-${f.facility_number}`}
-                          className="facility-pill"
-                          onClick={() => fetchFacilityPeople(f)}
-                          style={styles.facilityPill}
-                        >
-                          Facility {f.facility_number}
-                          <span style={styles.facilityPillMeta}>{f.company || profile?.company || ""}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {selectedFacility && !selectedPerson && (
-              <>
-                <div style={styles.metricsGrid} className="fade-up">
-                  {AM_METRIC_DEFS.map((metric) => (
-                    <MetricCard key={metric.key} metric={metric} value={animatedFacilityMetrics[metric.key] || 0} />
-                  ))}
-                  <MetricCard
-                    metric={OPEN_NOTES_METRIC_DEF}
-                    value={facilityOpenNotesCount}
-                    barMax={10}
-                    onClick={() => setShowFacilityNotesView(true)}
-                  />
-                </div>
-
-                {showFacilityNotesView && (
-                  <div style={styles.panelCard} className="fade-up">
-                    <div style={styles.sectionTopRow}>
-                      <div style={styles.sectionHeading}>Open Notes · Facility {selectedFacility?.facility_number}</div>
-                      <button style={styles.secondaryButton} onClick={() => fetchFacilityOpenNotes(selectedFacility)}>Refresh</button>
-                    </div>
-                    <div style={styles.sectionDivider} />
-                    {facilityOpenNotesLoading ? (
-                      <p style={styles.message}>Loading notes...</p>
-                    ) : facilityOpenNotes.length === 0 ? (
-                      <div style={styles.emptyStateTight}>No open notes for this facility.</div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {facilityOpenNotes.map((note) => {
-                          const priorityColor = note.priority === "urgent" ? PALETTE.red
-                            : note.priority === "high"   ? PALETTE.amber
-                            : note.priority === "low"    ? PALETTE.textMuted
-                            : PALETTE.textSoft;
-                          return (
-                            <div key={note.id} style={styles.feedCard}>
-                              <div style={styles.feedTop}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={styles.feedName}>
-                                    {NOTE_TYPE_LABEL[note.note_type] || note.note_type}
-                                  </div>
-                                  <div style={styles.feedMeta}>
-                                    {note.created_by_name || "Unknown"}{note.created_by_role ? ` · ${note.created_by_role}` : ""} · {formatDate(note.created_at)}
-                                  </div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "5px", flexShrink: 0 }}>
-                                  <span style={{ ...styles.notePriorityBadge, color: priorityColor, borderColor: priorityColor }}>
-                                    {note.priority}
-                                  </span>
-                                  <span style={{ fontSize: "11px", color: PALETTE.textMuted, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                                    {timeAgo(note.created_at)}
-                                  </span>
-                                </div>
-                              </div>
-                              {note.note_text && (
-                                <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: `1px solid ${PALETTE.border}`, fontSize: "13px", color: PALETTE.textSoft, lineHeight: 1.6 }}>
-                                  {note.note_text}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {!showFacilityNotesView && (<>
-                <div style={styles.panelCard} className="fade-up">
-                  <div style={styles.sectionTopRow}>
-                    <div style={styles.sectionHeading}>Facility Category Mix</div>
-                    <div style={styles.sectionHint}>Facility-level category distribution</div>
-                  </div>
-                  <div style={styles.breakdownList}>
-                    {facilityBreakdown.map((item) => {
-                      const st = getCategoryStyle(item.category);
-                      return (
-                        <div key={item.category} style={styles.breakdownItem}>
-                          <div style={styles.breakdownTop}>
-                            <div style={styles.breakdownLeft}>
-                              <span style={{ ...styles.breakdownBadge, color: st.color, background: st.bg, border: `1px solid ${st.border}` }}>
-                                {item.category === "Operations" ? "Ops" : item.category}
-                              </span>
-                            </div>
-                            <div style={{ ...styles.breakdownPercent, color: st.color }}>{Math.round(item.category_percent)}%</div>
-                          </div>
-                          <div style={styles.breakdownTrack}>
-                            <div style={{ ...styles.breakdownFill, width: `${Math.max(0, Math.min(100, item.category_percent))}%`, background: st.color }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div style={styles.panelCard} className="fade-up">
-                  <div style={styles.sectionTopRow}>
-                    <div style={styles.sectionHeading}>Facility Staff</div>
-                    <button style={styles.secondaryButton} onClick={() => fetchFacilityPeople(selectedFacility)}>Refresh</button>
-                  </div>
-                  {facilitiesMessage && <p style={styles.message}>{facilitiesMessage}</p>}
-                  {facilityPeopleLoading ? (
-                    <p style={styles.message}>Loading staff...</p>
-                  ) : facilityPeople.length === 0 ? (
-                    <div style={styles.emptyState}>
-                      <div style={styles.emptyStateIcon}>👥</div>
-                      <div style={styles.emptyStateTitle}>No staff found</div>
-                      <div style={styles.emptyStateText}>Make sure profiles have the correct facility_number set.</div>
-                    </div>
-                  ) : (
-                    <div style={styles.peopleList}>
-                      {facilityPeople.map((person) => (
-                        <button key={person.id} className="person-row" style={styles.personRow} onClick={() => openPersonFile(person)}>
-                          <div>
-                            <div style={styles.personName}>{person.full_name || "Unnamed"}</div>
-                            <div style={styles.personMeta}>{person.role} · Facility {person.facility_number}</div>
-                          </div>
-                          <div style={styles.personRight}>
-                            <span style={{ ...styles.personRoleBadge, ...(person.role === "General Manager" ? styles.personRoleBadgeGm : styles.personRoleBadgeMgr) }}>
-                              {person.role === "General Manager" ? "GM" : "MGR"}
-                            </span>
-                            <span style={styles.personChevron}>›</span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                </>)}
               </>
             )}
-
-            {/* Person file — AM: decisions only */}
-            {selectedPerson && (
-              <div style={styles.personFileStack} className="fade-up">
-                <div style={styles.panelCard}>
-                  <div style={styles.personFileTitle}>{selectedPerson.full_name}</div>
-                  <div style={styles.personFileMeta}>
-                    {selectedPerson.role} · {selectedPerson.company || profile?.company || ""} · Facility {selectedPerson.facility_number}
-                  </div>
-                  <div style={styles.personStatsRow}>
-                    <div style={styles.personStatBlock}>
-                      <div style={{ ...styles.personStatValue, color: PALETTE.blue }}>{personDecisions.length}</div>
-                      <div style={styles.personStatLabel}>Decisions</div>
-                    </div>
-                  </div>
-                </div>
-
-                {personFileLoading ? (
-                  <div style={styles.panelCard}><p style={styles.message}>Loading logs...</p></div>
-                ) : (
-                  <div style={styles.panelCard}>
-                    <div style={styles.sectionTopRow}>
-                      <div style={styles.sectionHeading}>Decision Logs</div>
-                    </div>
-                    {personDecisions.length === 0 ? (
-                      <div style={styles.emptyStateTight}>No decision logs on record.</div>
-                    ) : (
-                      <div style={styles.cardList}>
-                        {personDecisions.map((item) => (
-                          <DecisionCard key={item.id} item={item}
-                            title={formatDate(item.created_at)} meta={item.user_role || selectedPerson.role}
-                            formatDateFn={formatDate} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-        {/* ════════════════════════════════════════════════════════════════════
-            FACILITY NOTES  (any user with a facility_number)
-        ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === TABS.facilityNotes && canViewFacilityNotes && (
-          <>
-            <div style={styles.headerCard}>
-              <div style={styles.dashHeaderRow}>
-                <div>
-                  <h1 style={styles.title}>Facility Notes</h1>
-                  <p style={styles.subtitle}>
-                    Log facility issues for Facility {profile?.facility_number || "—"}.
-                    {canManageFacilityNotes
-                      ? " As GM / Area Coach you can update status and close notes."
-                      : " GM and Area Coach can update status and close notes."}
-                  </p>
-                </div>
-                <button
-                  style={styles.primaryButton}
-                  onClick={() => { setShowNewNoteForm((v) => !v); setFacilityNotesMessage(""); }}
-                >
-                  {showNewNoteForm ? "Cancel" : "+ New Note"}
-                </button>
-              </div>
-            </div>
-
-            {/* ── New note form ── */}
-            {showNewNoteForm && (
-              <div style={styles.panelCard} className="fade-up">
-                <div style={styles.sectionHeading}>New Facility Note</div>
-                <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" }}>
-                  <div>
-                    <label style={styles.label}>Note Type</label>
-                    <select value={newNoteType} onChange={(e) => setNewNoteType(e.target.value)} style={styles.categorySelect}>
-                      {NOTE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={styles.label}>Priority</label>
-                    <select value={newNotePriority} onChange={(e) => setNewNotePriority(e.target.value)} style={styles.categorySelect}>
-                      {NOTE_PRIORITIES.map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <label style={{ ...styles.label, marginTop: "14px" }}>Describe the issue</label>
-                <textarea
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  placeholder="Describe the issue in detail..."
-                  style={styles.textareaSmall}
-                />
-                <button
-                  style={{ ...styles.primaryButton, ...(newNoteSubmitting ? styles.buttonDisabled : {}) }}
-                  onClick={handleNewNoteSubmit}
-                  disabled={newNoteSubmitting}
-                >
-                  {newNoteSubmitting ? "Submitting…" : "Submit Note"}
-                </button>
-              </div>
-            )}
-
-            <div style={styles.panelCard}>
-              <div style={styles.sectionTopRow}>
-                <div style={styles.sectionHeading}>
-                  {canManageFacilityNotes ? "All Notes" : "Open Notes"}
-                </div>
-                <button style={styles.secondaryButton} onClick={fetchFacilityNotes}>Refresh</button>
-              </div>
-
-              {facilityNotesMessage && (
-                <p style={{ ...styles.message, color: PALETTE.amber }}>{facilityNotesMessage}</p>
-              )}
-
-              {facilityNotesLoading ? (
-                <p style={styles.message}>Loading notes...</p>
-              ) : facilityNotes.length === 0 ? (
-                <p style={styles.message}>No facility notes on record. Use "+ New Note" to log an issue.</p>
-              ) : (
-                <div style={styles.cardList}>
-                  {facilityNotes.map((note) => {
-                    const priorityColor = note.priority === "urgent" ? PALETTE.red
-                      : note.priority === "high"   ? PALETTE.amber
-                      : note.priority === "low"    ? PALETTE.textMuted
-                      : PALETTE.textSoft;
-                    const statusColor = note.status === "closed"  ? PALETTE.green
-                      : note.status === "pending" ? PALETTE.amber
-                      : PALETTE.blue;
-                    return (
-                      <div key={note.id} style={{ ...styles.feedCard, opacity: note.status === "closed" ? 0.75 : 1 }}>
-                        <div style={styles.feedTop}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={styles.feedName}>{NOTE_TYPE_LABEL[note.note_type] || note.note_type}</div>
-                            <div style={styles.feedMeta}>
-                              {note.created_by_name || "Unknown"} · {note.created_by_role || ""} · {formatDate(note.created_at)}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0, flexWrap: "wrap" }}>
-                            <span style={{ ...styles.notePriorityBadge, color: priorityColor, borderColor: priorityColor }}>
-                              {note.priority}
-                            </span>
-                            <span style={{ ...styles.noteStatusBadge, color: statusColor, borderColor: statusColor }}>
-                              {note.status.replace("_", " ")}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ ...styles.feedBody, marginTop: "6px" }}>{note.note_text}</div>
-
-                        {/* Resolution block — visible on closed notes */}
-                        {note.status === "closed" && note.resolution_text && (
-                          <div style={styles.noteResolutionBlock}>
-                            <div style={styles.noteResolutionLabel}>Resolution</div>
-                            <div style={{ ...styles.feedBody, fontSize: "13px" }}>{note.resolution_text}</div>
-                            <div style={{ fontSize: "12px", color: PALETTE.textMuted, marginTop: "4px" }}>
-                              Closed by {note.closed_by_name || "leadership"} · {formatDate(note.closed_at)}
-                            </div>
-                            <div style={{ ...styles.message, color: PALETTE.textMuted, fontSize: "12px", marginTop: "8px", fontStyle: "italic" }}>
-                              If this resolution did not solve the issue, submit a new facility note.
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Resolution input — shown when closing */}
-                        {canManageFacilityNotes && resolutionNoteId === note.id && (
-                          <div style={{ marginTop: "12px" }}>
-                            <label style={styles.label}>Resolution (required to close)</label>
-                            <textarea
-                              value={resolutionText}
-                              onChange={(e) => setResolutionText(e.target.value)}
-                              placeholder="Describe how this issue was resolved..."
-                              style={styles.guidanceTextarea}
-                              autoFocus
-                            />
-                            <div style={styles.guidanceButtons}>
-                              <button
-                                style={{ ...styles.primaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
-                                onClick={() => handleCloseNoteWithResolution(note.id)}
-                                disabled={noteStatusUpdating === note.id || !resolutionText.trim()}
-                              >
-                                {noteStatusUpdating === note.id ? "Closing…" : "Confirm Close"}
-                              </button>
-                              <button style={styles.secondaryButton} onClick={() => { setResolutionNoteId(null); setResolutionText(""); }}>
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Status controls — GM / Area Coach only, on non-closed notes */}
-                        {canManageFacilityNotes && note.status !== "closed" && resolutionNoteId !== note.id && (
-                          <div style={{ ...styles.actionRow, marginTop: "12px" }}>
-                            {note.status === "open" && (
-                              <button
-                                style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
-                                onClick={() => handleNoteStatusUpdate(note.id, "pending")}
-                                disabled={!!noteStatusUpdating}
-                              >
-                                Mark In Progress
-                              </button>
-                            )}
-                            {(note.status === "open" || note.status === "pending") && (
-                              <button
-                                style={{ ...styles.secondaryButton, ...(noteStatusUpdating === note.id ? styles.buttonDisabled : {}) }}
-                                onClick={() => handleNoteStatusUpdate(note.id, "closed")}
-                                disabled={!!noteStatusUpdating}
-                              >
-                                Close Note
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
 
       </main>
 
-      {/* ── APP FOOTER ── */}
-      <footer style={styles.appFooter}>
-        <a href="/support" style={styles.appFooterLink}>Contact Support</a>
-        <div style={styles.appFooterBrand}>Operator Support Systems</div>
+      {/* ── FEEDBACK MODAL ── */}
+      {showFeedback && (
+        <div style={s.overlay} onClick={closeFeedback}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            {feedbackDone ? (
+              <>
+                <div style={s.modalTitle}>Thanks for the signal</div>
+                <p style={s.modalText}>Your feedback helps improve policies for the whole team.</p>
+                <button style={s.primaryBtn} onClick={closeFeedback}>Done</button>
+              </>
+            ) : (
+              <>
+                <div style={s.modalTitle}>Flag Policy</div>
+                <p style={s.modalSub}>{result?.title}</p>
+                <div style={s.flagList}>
+                  {FEEDBACK_FLAGS.map(flag => (
+                    <button key={flag}
+                      style={{ ...s.flagChip, ...(feedbackFlags.includes(flag) ? s.flagChipOn : {}) }}
+                      onClick={() => toggleFlag(flag)}>
+                      {feedbackFlags.includes(flag) ? "✓  " : ""}{flag}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ marginBottom:"16px" }}>
+                  <label style={s.label}>
+                    Optional note <span style={{ color:PALETTE.textMuted, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(max 280 chars)</span>
+                  </label>
+                  <textarea value={feedbackNote} onChange={e => setFeedbackNote(e.target.value.slice(0,280))}
+                    placeholder="Any additional context…" style={{ ...s.textarea, minHeight:"64px" }} />
+                  <div style={{ fontSize:"10px", color:PALETTE.textMuted, textAlign:"right", marginTop:"-10px" }}>{feedbackNote.length}/280</div>
+                </div>
+                <div style={{ display:"flex", gap:"8px" }}>
+                  <button style={{ ...s.primaryBtn, flex:1, ...(!feedbackFlags.length || feedbackSubmitting ? { opacity:0.45, cursor:"not-allowed" } : {}) }}
+                    onClick={submitFeedback} disabled={!feedbackFlags.length || feedbackSubmitting}>
+                    {feedbackSubmitting ? "Submitting…" : "Submit Feedback"}
+                  </button>
+                  <button style={s.secondaryBtn} onClick={closeFeedback}>Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── FOOTER ── */}
+      <footer style={s.footer}>
+        <a href="/support" style={s.footerLink}>Contact Support</a>
+        <div style={s.footerBrand}>Operator Support Systems</div>
       </footer>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STYLES  — trading terminal / financial dark
-// ─────────────────────────────────────────────────────────────────────────────
-const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
-const SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif';
+// ─── CSS ──────────────────────────────────────────────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+  @keyframes fadeUp { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes pulse  { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
+  .fade-up { animation: fadeUp 0.20s ease both; }
+  .nav-tab:hover { color: #E8EDF3 !important; }
+  textarea:focus, input:focus, select:focus {
+    border-color: rgba(77,126,168,0.60) !important;
+    box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important;
+    outline: none !important;
+  }
+  ::-webkit-scrollbar { width:5px; height:5px; }
+  ::-webkit-scrollbar-track { background:#0B1118; }
+  ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
+  ::-webkit-scrollbar-thumb:hover { background:#3A5068; }
+  .recent-chip:hover { border-color:#4A6680 !important; color:#E8EDF3 !important; }
+  .alt-btn:hover { border-color:#4D7EA8 !important; background:rgba(77,126,168,0.07) !important; }
+`;
 
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: PALETTE.bg,
-    color: PALETTE.text,
-    padding: "0",
-    boxSizing: "border-box",
-    fontFamily: SANS,
-  },
-  loadingCard: {
-    maxWidth: "480px", margin: "0 auto", paddingTop: "120px",
-    textAlign: "center", color: PALETTE.textSoft, fontSize: "13px",
-    letterSpacing: "0.06em", textTransform: "uppercase",
-  },
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const s = {
+  page: { minHeight:"100vh", background:PALETTE.bg, color:PALETTE.text, fontFamily:SANS, padding:0, boxSizing:"border-box" },
 
-  // ── TOP NAV — full-width sticky terminal toolbar
-  topNav: {
-    background: PALETTE.panel,
-    borderBottom: `1px solid ${PALETTE.borderStrong}`,
-    display: "flex", alignItems: "center",
-    justifyContent: "space-between",
-    position: "sticky", top: 0, zIndex: 100,
-    height: "52px",
-    paddingLeft: "20px",
-    paddingRight: "16px",
-    boxSizing: "border-box",
-    gap: "0",
-    boxShadow: "0 1px 0 rgba(0,0,0,0.30)",
-  },
-  topNavBrand: { minWidth: "200px", flexShrink: 0 },
-  topNavName:  { fontWeight: 700, color: PALETTE.text, lineHeight: 1.1, fontSize: "13px", letterSpacing: "0.01em" },
-  topNavMeta:  { color: PALETTE.textSoft, marginTop: "2px", fontSize: "10px", letterSpacing: "0.04em", textTransform: "uppercase" },
-  topNavItems: { display: "flex", alignItems: "stretch", gap: "0", flex: 1, overflowX: "auto", height: "52px" },
-  topNavBtn: {
-    border: "none",
-    borderBottom: "2px solid transparent",
-    borderTop: "2px solid transparent",
-    background: "transparent",
-    color: PALETTE.textSoft,
-    padding: "0 13px",
-    fontSize: "11px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
-    letterSpacing: "0.05em", textTransform: "uppercase",
-    display: "flex", alignItems: "center",
-    transition: "color 0.15s ease",
-  },
-  topNavBtnActive: {
-    borderBottom: `2px solid ${PALETTE.blue}`,
-    color: PALETTE.text,
-  },
-  topNavDivider: { width: "1px", height: "20px", background: PALETTE.border, flexShrink: 0, alignSelf: "center", margin: "0 2px" },
-  topNavRight:   { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
-  topNavLogout: {
-    border: `1px solid ${PALETTE.border}`,
-    background: "transparent",
-    color: PALETTE.textSoft, borderRadius: "3px", padding: "5px 11px",
-    fontSize: "10px", fontWeight: 700, cursor: "pointer",
-    letterSpacing: "0.07em", textTransform: "uppercase",
-  },
-  mobileMenuBtn: {
-    border: `1px solid ${PALETTE.border}`, background: "transparent",
-    color: PALETTE.text, borderRadius: "3px", padding: "6px 10px",
-    fontSize: "12px", fontWeight: 700, cursor: "pointer",
-  },
-  mobileDropdown: {
-    background: PALETTE.panel,
-    borderBottom: `1px solid ${PALETTE.border}`,
-    padding: "10px 16px", display: "flex", flexDirection: "column", gap: "2px",
-  },
-  navDivider: { height: "1px", background: PALETTE.border, margin: "4px 0" },
-  navButton: {
-    width: "100%", textAlign: "left",
-    border: "none", borderLeft: "2px solid transparent",
-    background: "transparent", color: PALETTE.textSoft,
-    padding: "10px 14px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-    letterSpacing: "0.04em", textTransform: "uppercase",
-  },
-  navButtonActive: {
-    borderLeft: `2px solid ${PALETTE.blue}`,
-    color: PALETTE.text,
-    background: PALETTE.blueGlow,
-  },
-  logoutButton: {
-    width: "100%", textAlign: "left",
-    border: "none", borderLeft: "2px solid transparent",
-    background: "transparent", color: PALETTE.textSoft,
-    padding: "10px 14px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-    letterSpacing: "0.04em",
-  },
+  // nav
+  topNav: { background:PALETTE.panel, borderBottom:`1px solid ${PALETTE.borderStrong}`, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, height:"52px", paddingLeft:"20px", paddingRight:"16px", boxSizing:"border-box", boxShadow:"0 1px 0 rgba(0,0,0,0.30)" },
+  topNavBrand:   { minWidth:"160px", flexShrink:0 },
+  topNavProduct: { fontWeight:700, color:PALETTE.text, fontSize:"14px", letterSpacing:"-0.01em" },
+  topNavMeta:    { color:PALETTE.textMuted, marginTop:"2px", fontSize:"10px", letterSpacing:"0.03em" },
+  topNavItems:   { display:"flex", alignItems:"stretch", gap:0, flex:1, overflowX:"auto", height:"52px" },
+  topNavBtn: { border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:PALETTE.textSoft, padding:"0 14px", fontSize:"11px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.05em", textTransform:"uppercase", display:"flex", alignItems:"center", transition:"color 0.15s ease" },
+  topNavBtnActive: { borderBottom:`2px solid ${PALETTE.blue}`, color:PALETTE.text },
+  topNavRight:  { display:"flex", alignItems:"center", gap:"8px", flexShrink:0 },
+  topNavLogout: { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"5px 11px", fontSize:"10px", fontWeight:700, cursor:"pointer", letterSpacing:"0.07em", textTransform:"uppercase" },
+  mobileMenuBtn:  { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.text, borderRadius:"3px", padding:"6px 10px", fontSize:"12px", fontWeight:700, cursor:"pointer" },
+  mobileDropdown: { background:PALETTE.panel, borderBottom:`1px solid ${PALETTE.border}`, padding:"10px 16px", display:"flex", flexDirection:"column", gap:"2px" },
+  navDivider:     { height:"1px", background:PALETTE.border, margin:"4px 0" },
+  navButton:      { width:"100%", textAlign:"left", border:"none", borderLeft:"2px solid transparent", background:"transparent", color:PALETTE.textSoft, padding:"10px 14px", fontSize:"12px", fontWeight:600, cursor:"pointer", letterSpacing:"0.04em", textTransform:"uppercase" },
+  navButtonActive:{ borderLeft:`2px solid ${PALETTE.blue}`, color:PALETTE.text, background:PALETTE.blueGlow },
 
-  // ── LAYOUT
-  main: {
-    maxWidth: "1420px", margin: "0 auto",
-    display: "flex", flexDirection: "column", gap: "14px",
-    padding: "20px 16px",
-    boxSizing: "border-box",
-  },
-  headerCard: {
-    background: PALETTE.panel,
-    border: `1px solid ${PALETTE.border}`,
-    borderTop: `1px solid ${PALETTE.borderStrong}`,
-    borderLeft: `3px solid ${PALETTE.blue}`,
-    borderRadius: "4px", padding: "20px 22px",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
-  },
-  panelCard: {
-    background: PALETTE.panel,
-    border: `1px solid ${PALETTE.border}`,
-    borderTop: `1px solid ${PALETTE.borderStrong}`,
-    borderRadius: "4px", padding: "20px 22px",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
-  },
+  // layout
+  main: { maxWidth:"820px", margin:"0 auto", display:"flex", flexDirection:"column", gap:"14px", padding:"28px 16px", boxSizing:"border-box" },
 
-  // ── TYPOGRAPHY
-  title: { margin: 0, fontSize: "22px", lineHeight: 1.1, fontWeight: 700, color: PALETTE.text, letterSpacing: "-0.01em" },
-  subtitle: { margin: "8px 0 0", fontSize: "12px", lineHeight: 1.65, color: PALETTE.textSoft, maxWidth: "820px", letterSpacing: "0.01em" },
-  label: { display: "block", marginBottom: "8px", fontSize: "10px", fontWeight: 700, color: PALETTE.textSoft, textTransform: "uppercase", letterSpacing: "0.09em" },
-  message: { marginTop: "12px", fontSize: "13px", lineHeight: 1.6, color: PALETTE.textSoft },
-  sectionTopRow: {
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    gap: "12px", flexWrap: "wrap", marginBottom: "16px",
-  },
-  sectionHeading: {
-    fontSize: "11px", fontWeight: 800, color: PALETTE.text,
-    textTransform: "uppercase", letterSpacing: "0.11em",
-    paddingLeft: "8px", borderLeft: `2px solid ${PALETTE.borderBright}`,
-    lineHeight: "14px",
-  },
-  sectionHint:    { fontSize: "11px", color: PALETTE.textMuted, letterSpacing: "0.04em" },
-  sectionDivider: { height: "1px", background: PALETTE.borderStrong, margin: "4px 0 16px" },
-  sectionTitle: {
-    marginBottom: "10px", fontSize: "10px", letterSpacing: "0.11em",
-    textTransform: "uppercase", color: PALETTE.textMuted, fontWeight: 800,
-  },
-  autoDetectedText: { marginTop: "8px", marginBottom: "4px", fontSize: "11px", color: PALETTE.textMuted, letterSpacing: "0.03em" },
+  // search home
+  heroLabel: { fontSize:"22px", fontWeight:700, color:PALETTE.text, letterSpacing:"-0.01em", marginBottom:"16px" },
+  searchForm: { display:"flex", flexDirection:"column", gap:"10px", marginBottom:"24px" },
+  searchInput: { width:"100%", borderRadius:"4px", border:`1px solid ${PALETTE.borderStrong}`, borderTop:`1px solid ${PALETTE.borderBright}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"16px 18px", fontSize:"15px", lineHeight:1.6, resize:"vertical", outline:"none", boxSizing:"border-box", fontFamily:SANS, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.025)" },
+  searchBtn: { alignSelf:"flex-end", border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.15)", color:PALETTE.blue, borderRadius:"3px", padding:"10px 22px", fontSize:"12px", fontWeight:700, cursor:"pointer", letterSpacing:"0.06em", textTransform:"uppercase", fontFamily:SANS },
 
-  // ── FORMS
-  textarea: {
-    width: "100%", minHeight: "200px", borderRadius: "3px",
-    border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "14px 16px", fontSize: "14px", lineHeight: 1.7,
-    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "14px",
-    fontFamily: SANS,
-  },
-  textareaSmall: {
-    width: "100%", minHeight: "110px", borderRadius: "3px",
-    border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "14px 16px", fontSize: "14px", lineHeight: 1.7,
-    resize: "vertical", outline: "none", boxSizing: "border-box", marginBottom: "14px",
-    fontFamily: SANS,
-  },
-  categorySelect: {
-    width: "100%", borderRadius: "3px", border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt, color: PALETTE.text, padding: "11px 13px",
-    fontSize: "14px", outline: "none", boxSizing: "border-box",
-  },
-  policyInput: {
-    width: "100%", borderRadius: "3px", border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt, color: PALETTE.text, padding: "11px 13px",
-    fontSize: "14px", outline: "none", boxSizing: "border-box",
-  },
+  // recents
+  recentSection: { marginBottom:"20px" },
+  recentLabel:   { fontSize:"10px", fontWeight:800, color:PALETTE.textMuted, textTransform:"uppercase", letterSpacing:"0.10em", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}`, marginBottom:"8px" },
+  recentChip:    { display:"flex", alignItems:"center", gap:"8px", width:"100%", textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"9px 14px", fontSize:"13px", cursor:"pointer", marginBottom:"4px", transition:"border-color 0.12s ease, color 0.12s ease" },
+  recentStar:    { color:PALETTE.amber, fontSize:"12px", flexShrink:0 },
 
-  // ── BUTTONS
-  primaryButton: {
-    border: `1px solid ${PALETTE.blue}`,
-    background: "rgba(77,126,168,0.14)",
-    color: PALETTE.blue, borderRadius: "3px", padding: "8px 16px",
-    fontSize: "11px", fontWeight: 700, cursor: "pointer",
-    letterSpacing: "0.07em", textTransform: "uppercase",
-  },
-  secondaryButton: {
-    border: `1px solid ${PALETTE.border}`, background: "transparent",
-    color: PALETTE.textSoft, borderRadius: "3px", padding: "7px 13px",
-    fontSize: "11px", fontWeight: 700, cursor: "pointer",
-    letterSpacing: "0.05em",
-  },
-  buttonDisabled: { opacity: 0.45, cursor: "not-allowed" },
+  // searching state
+  searchingState: { display:"flex", alignItems:"center", gap:"12px", padding:"40px 0" },
+  searchingDot:   { width:"8px", height:"8px", borderRadius:"50%", background:PALETTE.blue, animation:"pulse 1.2s ease infinite", flexShrink:0 },
+  searchingText:  { fontSize:"14px", color:PALETTE.textSoft, fontWeight:600 },
 
-  // ── METRIC CARDS
-  metricsGrid: {
-    display: "grid", gap: "12px",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  },
-  metricCard: {
-    background: PALETTE.panel,
-    border: `1px solid ${PALETTE.border}`,
-    borderTop: "2px solid transparent",
-    borderRadius: "4px", padding: "20px 18px",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.22)",
-  },
-  metricLabel: {
-    fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase",
-    color: PALETTE.textSoft, marginBottom: "14px", fontWeight: 800,
-  },
-  metricValue: {
-    fontSize: "44px", lineHeight: 1, fontWeight: 700,
-    fontFamily: MONO,
-    fontVariantNumeric: "tabular-nums", marginBottom: "16px",
-    transition: "color 0.3s ease", letterSpacing: "-0.02em",
-  },
-  metricBarTrack: {
-    background: PALETTE.panelAlt, borderRadius: "0", height: "3px",
-    overflow: "hidden", marginBottom: "14px",
-  },
-  metricBarFill: {
-    height: "100%", borderRadius: "0",
-    transition: "width 0.12s ease, background 0.3s ease",
-  },
-  metricDesc:   { fontSize: "11px", color: PALETTE.textSoft, lineHeight: 1.5, letterSpacing: "0.01em" },
-  metricTarget: { marginTop: "6px", fontSize: "10px", color: PALETTE.textMuted, letterSpacing: "0.04em" },
+  // no result
+  noResultWrap:  { padding:"40px 0", display:"flex", flexDirection:"column", gap:"10px" },
+  noResultTitle: { fontSize:"16px", fontWeight:700, color:PALETTE.text },
+  noResultText:  { fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.6, margin:0 },
 
-  // ── DASHBOARD HEADER
-  dashHeaderRow: {
-    display: "flex", alignItems: "flex-start",
-    justifyContent: "space-between", gap: "16px", flexWrap: "wrap",
-  },
-  roleBadge: {
-    padding: "4px 10px", borderRadius: "2px", fontSize: "10px",
-    fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase",
-    background: "rgba(77,126,168,0.12)", border: `1px solid rgba(77,126,168,0.32)`,
-    color: PALETTE.blue, flexShrink: 0, alignSelf: "flex-start", marginTop: "4px",
-  },
+  // result view
+  resultBar:     { display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", marginBottom:"14px", flexWrap:"wrap" },
+  backBtn:       { border:"none", background:"transparent", color:PALETTE.blue, fontSize:"12px", fontWeight:700, cursor:"pointer", letterSpacing:"0.04em", padding:0 },
+  resultBarActions: { display:"flex", gap:"8px", alignItems:"center" },
+  saveBtn:       { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"6px 12px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
+  saveBtnActive: { border:`1px solid rgba(183,146,90,0.45)`, color:PALETTE.amber, background:"rgba(183,146,90,0.10)" },
+  flagBtn:       { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"6px 12px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
 
-  // ── PERFORMANCE REFERENCE (GM)
-  thresholdGrid: {
-    display: "grid", gap: "12px",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  },
-  thresholdItem: {
-    background: PALETTE.panelAlt, border: `1px solid ${PALETTE.borderStrong}`,
-    borderRadius: "4px", padding: "16px",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
-  },
-  thresholdLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted, marginBottom: "8px" },
-  thresholdValue: { fontSize: "18px", fontWeight: 700, color: PALETTE.text, marginBottom: "4px", fontVariantNumeric: "tabular-nums", fontFamily: MONO },
-  thresholdDesc:  { fontSize: "11px", color: PALETTE.textSoft },
+  situationEcho:      { fontSize:"13px", color:PALETTE.textSoft, marginBottom:"12px", padding:"10px 14px", background:PALETTE.panelAlt, border:`1px solid ${PALETTE.border}`, borderRadius:"3px", lineHeight:1.5 },
+  situationEchoLabel: { fontWeight:700, color:PALETTE.textMuted, marginRight:"4px" },
 
-  // ── TERRITORY TABLE (AM)
-  territoryTableWrap: { display: "flex", flexDirection: "column", gap: "1px", overflowX: "auto" },
-  territoryHeaderRow: {
-    display: "flex", alignItems: "center",
-    padding: "8px 12px", borderBottom: `1px solid ${PALETTE.border}`, marginBottom: "2px",
-  },
-  territoryCellLabel: { fontSize: "10px", fontWeight: 800, letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted },
-  territoryDataRow: {
-    display: "flex", alignItems: "center", padding: "10px 12px",
-    borderBottom: `1px solid ${PALETTE.border}`,
-  },
-  territoryCell: { flex: 1, minWidth: "60px", fontSize: "13px", fontVariantNumeric: "tabular-nums", paddingRight: "8px", fontFamily: MONO, fontWeight: 600 },
+  resultCard:  { background:PALETTE.panel, border:`1px solid ${PALETTE.border}`, borderTop:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"18px 20px", marginBottom:"10px", boxShadow:"0 2px 8px rgba(0,0,0,0.22)" },
+  cardLabel:   { fontSize:"10px", fontWeight:800, letterSpacing:"0.12em", textTransform:"uppercase", color:PALETTE.textMuted, marginBottom:"12px", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}` },
+  actionSteps: { fontSize:"14px", lineHeight:1.8, color:PALETTE.text, whiteSpace:"pre-wrap" },
+  policyTitle: { fontSize:"15px", fontWeight:700, color:PALETTE.text, marginBottom:"6px" },
+  policySummary:{ fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.65, margin:"10px 0 0" },
+  bodyText:    { fontSize:"13px", lineHeight:1.7, color:PALETTE.text, whiteSpace:"pre-wrap" },
 
-  // ── PP/D LEGEND
-  ppdLegendRow:  { display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "center" },
-  ppdLegendItem: { display: "flex", alignItems: "center", gap: "8px" },
-  ppdLegendDot:  { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
-  ppdLegendText: { fontSize: "12px", color: PALETTE.textSoft, fontWeight: 600 },
+  codeBadge: { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:700, background:"rgba(77,126,168,0.15)", border:`1px solid rgba(77,126,168,0.42)`, color:PALETTE.blue, letterSpacing:"0.06em", textTransform:"uppercase" },
+  catBadge:  { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:700, background:PALETTE.blueSoft, border:`1px solid ${PALETTE.border}`, color:PALETTE.textSoft, letterSpacing:"0.05em" },
+  sevBadge:  { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:600, background:"transparent", border:`1px solid ${PALETTE.border}`, color:PALETTE.textMuted, letterSpacing:"0.04em" },
 
-  // ── FEED / DECISION CARDS
-  cardList: { display: "flex", flexDirection: "column", gap: "8px" },
-  feedCard: {
-    background: PALETTE.panelAlt,
-    border: `1px solid ${PALETTE.borderStrong}`,
-    borderRadius: "4px", padding: "14px 16px",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.028), 0 1px 4px rgba(0,0,0,0.18)",
-  },
-  feedTop: {
-    display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-    gap: "16px", marginBottom: "10px", flexWrap: "wrap",
-  },
-  feedName:   { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "3px" },
-  feedMeta:   { fontSize: "12px", color: PALETTE.textSoft },
-  feedDate:   { fontSize: "11px", color: "#8F9EAD", fontFamily: MONO, fontVariantNumeric: "tabular-nums" },
-  feedInlineRow: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" },
-  feedSection:   { marginTop: "10px" },
-  feedLabel: {
-    marginBottom: "5px", fontSize: "10px", fontWeight: 800,
-    letterSpacing: "0.10em", textTransform: "uppercase", color: PALETTE.textMuted,
-  },
-  feedBody: { fontSize: "13px", lineHeight: 1.65, color: PALETTE.text, whiteSpace: "pre-wrap" },
-  policyTag: {
-    display: "inline-flex", alignItems: "center", padding: "3px 8px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: "rgba(77,126,168,0.15)", border: `1px solid rgba(77,126,168,0.42)`, color: PALETTE.blue,
-    letterSpacing: "0.04em",
-  },
-  unreadBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 8px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: "rgba(183,146,90,0.16)", border: `1px solid rgba(183,146,90,0.50)`, color: PALETTE.amber,
-    letterSpacing: "0.04em",
-  },
-  categoryBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 8px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.06em", textTransform: "uppercase",
-  },
-  statusBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 8px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.06em", textTransform: "uppercase",
-    background: "rgba(77,106,132,0.10)", border: `1px solid ${PALETTE.border}`, color: PALETTE.textSoft,
-  },
-  actionRow: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" },
-  guidanceBlock: { marginTop: "12px", borderLeft: `2px solid ${PALETTE.blue}`, paddingLeft: "12px" },
-  guidanceLabel: {
-    fontSize: "10px", fontWeight: 800, color: PALETTE.blue,
-    letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "5px",
-  },
-  guidancePrompt:  { width: "100%" },
-  guidanceTextarea: {
-    width: "100%", minHeight: "110px", borderRadius: "3px",
-    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "12px 14px", fontSize: "13px", lineHeight: 1.65,
-    resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: SANS,
-  },
-  guidanceButtons: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" },
+  // alt results
+  altSection: { marginTop:"4px", marginBottom:"10px" },
+  altLabel:   { fontSize:"10px", fontWeight:800, color:PALETTE.textMuted, letterSpacing:"0.10em", textTransform:"uppercase", marginBottom:"8px", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}` },
+  altBtn:     { width:"100%", textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", borderRadius:"3px", padding:"10px 14px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", marginBottom:"4px", transition:"border-color 0.12s ease, background 0.12s ease" },
+  altTitle:   { fontSize:"13px", fontWeight:600, color:PALETTE.textSoft },
+  altCode:    { fontSize:"11px", color:PALETTE.textMuted, fontFamily:MONO, flexShrink:0 },
 
-  // ── MANAGERS
-  managersLayout: { display: "grid", gap: "14px" },
-  managerRowButton: {
-    width: "100%", textAlign: "left", borderRadius: "3px",
-    border: `1px solid ${PALETTE.border}`,
-    borderLeft: "2px solid transparent",
-    background: "transparent",
-    padding: "12px 14px", cursor: "pointer",
-  },
-  managerRowButtonActive: {
-    border: `1px solid ${PALETTE.border}`,
-    borderLeft: `2px solid ${PALETTE.blue}`,
-    background: PALETTE.blueGlow,
-  },
-  managerRowName: { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "3px" },
-  managerRowMeta: { fontSize: "12px", color: PALETTE.textSoft },
+  // inline search bar (bottom)
+  searchBarBottom:   { marginTop:"8px", paddingTop:"16px", borderTop:`1px solid ${PALETTE.border}` },
+  searchInlineForm:  { display:"flex", gap:"8px" },
+  searchInlineInput: { flex:1, borderRadius:"3px", border:`1px solid ${PALETTE.borderStrong}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"10px 14px", fontSize:"13px", outline:"none", fontFamily:SANS },
+  searchInlineBtn:   { border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.13)", color:PALETTE.blue, borderRadius:"3px", padding:"10px 16px", fontSize:"14px", fontWeight:700, cursor:"pointer" },
 
-  // ── LOG TYPE SELECTOR
-  logTypeSelector: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" },
-  logTypeButton: {
-    textAlign: "left", borderRadius: "4px",
-    border: `1px solid ${PALETTE.border}`,
-    borderTop: `2px solid ${PALETTE.border}`,
-    background: "transparent",
-    padding: "16px 18px", cursor: "pointer",
-    transition: "border-top-color 0.15s ease",
-  },
-  logTypeTitle: { fontSize: "14px", fontWeight: 700, color: PALETTE.text, marginBottom: "6px" },
-  logTypeMeta:  { fontSize: "12px", color: PALETTE.textSoft, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
+  // panels
+  panelCard:     { background:PALETTE.panel, border:`1px solid ${PALETTE.border}`, borderTop:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"20px 22px", boxShadow:"0 2px 10px rgba(0,0,0,0.25)", marginBottom:"0" },
+  sectionTopRow: { display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", flexWrap:"wrap", marginBottom:"16px" },
+  sectionHeading:{ fontSize:"11px", fontWeight:800, color:PALETTE.text, textTransform:"uppercase", letterSpacing:"0.11em", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}`, lineHeight:"14px" },
+  label:         { display:"block", marginBottom:"8px", fontSize:"10px", fontWeight:700, color:PALETTE.textSoft, textTransform:"uppercase", letterSpacing:"0.09em" },
+  selectInput:   { width:"100%", borderRadius:"3px", border:`1px solid ${PALETTE.border}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"10px 12px", fontSize:"13px", outline:"none", boxSizing:"border-box" },
+  textarea:      { width:"100%", minHeight:"110px", borderRadius:"3px", border:`1px solid ${PALETTE.border}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"12px 14px", fontSize:"14px", lineHeight:1.65, resize:"vertical", outline:"none", boxSizing:"border-box", fontFamily:SANS },
+  primaryBtn:    { border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.14)", color:PALETTE.blue, borderRadius:"3px", padding:"9px 18px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.07em", textTransform:"uppercase", fontFamily:SANS },
+  secondaryBtn:  { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"7px 13px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
 
-  // ── FACILITIES
-  facilitiesHeaderTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" },
-  facilitySelectorWrap: { marginTop: "16px" },
-  facilityPillWrap: { display: "flex", gap: "8px", flexWrap: "wrap" },
-  facilityPill: {
-    border: `1px solid ${PALETTE.border}`,
-    borderLeft: `2px solid ${PALETTE.blue}`,
-    background: "transparent", color: PALETTE.text,
-    borderRadius: "3px", padding: "8px 14px", fontSize: "12px", fontWeight: 700, cursor: "pointer",
-    display: "inline-flex", alignItems: "center", gap: "8px",
-    letterSpacing: "0.02em",
-  },
-  facilityPillMeta: { fontSize: "11px", color: PALETTE.textMuted, fontWeight: 600 },
-  breadcrumb: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "12px" },
-  breadcrumbLink: { border: "none", padding: 0, background: "transparent", color: PALETTE.blue, fontSize: "12px", fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em" },
-  breadcrumbSep:  { color: PALETTE.textMuted, fontSize: "13px" },
-  breadcrumbCurrent: { color: PALETTE.textSoft, fontSize: "12px", fontWeight: 700 },
+  // notes
+  noteCard:      { background:PALETTE.panelAlt, border:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"14px 16px", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.025), 0 1px 4px rgba(0,0,0,0.18)" },
+  noteBadge:     { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:800, letterSpacing:"0.07em", textTransform:"uppercase" },
+  noteType:      { fontSize:"12px", color:PALETTE.textSoft, fontWeight:600 },
+  noteTimestamp: { fontSize:"11px", color:"#8F9EAD", fontFamily:MONO },
+  noteText:      { fontSize:"13px", color:PALETTE.text, lineHeight:1.65 },
+  noteBy:        { marginTop:"8px", fontSize:"11px", color:PALETTE.textMuted },
 
-  // ── CATEGORY BREAKDOWN
-  breakdownList:   { display: "flex", flexDirection: "column", gap: "14px" },
-  breakdownItem:   { display: "flex", flexDirection: "column", gap: "7px" },
-  breakdownTop:    { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" },
-  breakdownLeft:   { display: "flex", alignItems: "center", gap: "10px" },
-  breakdownBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 8px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.06em", textTransform: "uppercase",
-  },
-  breakdownPercent: { fontSize: "18px", fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
-  breakdownTrack:   { background: PALETTE.panelAlt, borderRadius: "0", height: "3px", overflow: "hidden" },
-  breakdownFill:    { height: "100%", borderRadius: "0", transition: "width 0.12s ease" },
+  // feedback modal
+  overlay: { position:"fixed", inset:0, zIndex:200, background:"rgba(11,17,24,0.82)", display:"flex", alignItems:"center", justifyContent:"center", padding:"16px", boxSizing:"border-box" },
+  modal:   { background:PALETTE.panel, border:`1px solid ${PALETTE.borderStrong}`, borderTop:`1px solid ${PALETTE.borderBright}`, borderRadius:"4px", padding:"24px 26px", width:"100%", maxWidth:"440px", boxShadow:"0 8px 40px rgba(0,0,0,0.55)" },
+  modalTitle: { fontSize:"16px", fontWeight:700, color:PALETTE.text, marginBottom:"4px" },
+  modalSub:   { fontSize:"12px", color:PALETTE.textSoft, margin:"4px 0 16px" },
+  modalText:  { fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.6, marginBottom:"16px" },
+  flagList:   { display:"flex", flexDirection:"column", gap:"6px", marginBottom:"16px" },
+  flagChip:   { textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"10px 14px", fontSize:"13px", cursor:"pointer", transition:"border-color 0.12s ease" },
+  flagChipOn: { border:`1px solid rgba(77,126,168,0.50)`, background:"rgba(77,126,168,0.10)", color:PALETTE.text },
 
-  // ── PEOPLE / PERSON FILE
-  peopleList:  { display: "flex", flexDirection: "column", gap: "4px" },
-  personRow: {
-    width: "100%", textAlign: "left",
-    border: `1px solid ${PALETTE.border}`,
-    borderLeft: "2px solid transparent",
-    background: "transparent", borderRadius: "3px", padding: "12px 16px",
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    gap: "12px", cursor: "pointer",
-  },
-  personName:  { fontSize: "13px", fontWeight: 700, color: PALETTE.text, marginBottom: "2px" },
-  personMeta:  { fontSize: "11px", color: PALETTE.textSoft },
-  personRight: { display: "flex", alignItems: "center", gap: "10px" },
-  personRoleBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 7px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.06em", textTransform: "uppercase",
-  },
-  personRoleBadgeGm:  { background: "rgba(77,126,168,0.12)", color: PALETTE.blue, border: `1px solid rgba(77,126,168,0.30)` },
-  personRoleBadgeMgr: { background: PALETTE.indigoSoft, color: PALETTE.indigo, border: `1px solid rgba(107,127,149,0.28)` },
-  personChevron: { color: PALETTE.textMuted, fontSize: "16px", lineHeight: 1 },
-
-  personFileStack:  { display: "flex", flexDirection: "column", gap: "12px" },
-  personFileTitle:  { fontSize: "18px", fontWeight: 700, color: PALETTE.text },
-  personFileMeta:   { fontSize: "12px", color: PALETTE.textSoft, marginTop: "3px" },
-  personStatsRow:   { display: "flex", gap: "14px", alignItems: "center", marginTop: "14px", flexWrap: "wrap" },
-  personStatBlock:  { textAlign: "center" },
-  personStatValue:  { fontSize: "22px", fontWeight: 700, lineHeight: 1, fontVariantNumeric: "tabular-nums", fontFamily: MONO },
-  personStatLabel:  { marginTop: "4px", fontSize: "10px", color: PALETTE.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 800 },
-  personStatDivider:{ width: "1px", height: "30px", background: PALETTE.border },
-
-  // ── POLICY RESULT CARDS
-  policyDetailLabel: {
-    fontSize: "10px", fontWeight: 700, color: PALETTE.textSoft,
-    textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "8px",
-  },
-  policyDetailText: {
-    fontSize: "13px", color: PALETTE.text, lineHeight: 1.65, margin: 0,
-  },
-  policyCodeBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 7px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.06em", textTransform: "uppercase",
-    background: "rgba(77,126,168,0.15)", border: `1px solid rgba(77,126,168,0.42)`, color: PALETTE.blue,
-  },
-  versionTag: {
-    display: "inline-flex", alignItems: "center", padding: "3px 7px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 700,
-    background: "rgba(77,106,132,0.08)", border: `1px solid ${PALETTE.border}`, color: PALETTE.textMuted,
-  },
-
-  emptyState:      { textAlign: "center", padding: "32px 0" },
-  emptyStateIcon:  { fontSize: "22px", marginBottom: "10px" },
-  emptyStateTitle: { fontSize: "12px", fontWeight: 700, color: PALETTE.textSoft, marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.07em" },
-  emptyStateText:  { fontSize: "11px", color: PALETTE.textMuted },
-  emptyStateTight: { textAlign: "center", padding: "24px 0", fontSize: "12px", color: PALETTE.textSoft },
-
-  // ── CLICKABLE METRIC CARDS (GM drill-through)
-  metricCardClickable: {
-    cursor: "pointer",
-    border: `1px solid rgba(77,126,168,0.28)`,
-  },
-  metricCardDrillHint: {
-    fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em",
-    color: PALETTE.blue, textTransform: "uppercase", marginBottom: "12px",
-    textAlign: "right",
-  },
-
-  // ── GM VIRTUAL SIGNATURE BOX
-  sigBoxWrap: { marginTop: "4px" },
-  sigBoxLabel: { fontSize: "12px", color: PALETTE.textSoft, marginBottom: "10px", fontWeight: 600 },
-  sigBoxInput: {
-    width: "100%", borderRadius: "3px",
-    border: `1px solid ${PALETTE.border}`, background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: "14px 18px", fontSize: "20px",
-    fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic",
-    outline: "none", boxSizing: "border-box", letterSpacing: "0.03em",
-  },
-  sigBoxPreview: {
-    display: "flex", alignItems: "center", gap: "10px", marginTop: "10px", flexWrap: "wrap",
-  },
-  sigBoxPreviewLabel: { fontSize: "10px", color: PALETTE.textMuted, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" },
-  sigBoxPreviewName: {
-    fontSize: "18px", fontFamily: "Georgia, 'Times New Roman', serif",
-    fontStyle: "italic", color: PALETTE.green, letterSpacing: "0.02em",
-  },
-  sigBoxClear: {
-    background: "transparent", border: `1px solid ${PALETTE.border}`,
-    color: PALETTE.textMuted, borderRadius: "3px", padding: "4px 10px",
-    fontSize: "11px", fontWeight: 700, cursor: "pointer",
-  },
-  sigWarning: {
-    background: PALETTE.amberSoft,
-    border: `1px solid rgba(183,146,90,0.32)`,
-    borderRadius: "3px",
-    padding: "10px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    color: PALETTE.amber,
-    marginBottom: "4px",
-  },
-
-  // ── FACILITY NOTES
-  notePriorityBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 7px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 800,
-    letterSpacing: "0.08em", textTransform: "uppercase",
-    border: "1px solid", background: "transparent",
-  },
-  noteStatusBadge: {
-    display: "inline-flex", alignItems: "center", padding: "3px 7px",
-    borderRadius: "2px", fontSize: "10px", fontWeight: 800,
-    letterSpacing: "0.08em", textTransform: "uppercase",
-    border: "1px solid", background: "transparent",
-  },
-  noteResolutionBlock: {
-    marginTop: "12px",
-    background: "rgba(110,148,119,0.08)",
-    border: `1px solid rgba(110,148,119,0.22)`,
-    borderLeft: `2px solid ${PALETTE.green}`,
-    borderRadius: "3px",
-    padding: "12px 14px",
-  },
-  noteResolutionLabel: {
-    fontSize: "10px", fontWeight: 800, color: PALETTE.green,
-    letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "5px",
-  },
-
-  // ── APP FOOTER
-  appFooter: {
-    borderTop: `1px solid ${PALETTE.border}`,
-    padding: "14px 20px",
-    textAlign: "center",
-    marginTop: "8px",
-  },
-  appFooterLink: {
-    fontSize: "11px", fontWeight: 600, color: PALETTE.textSoft,
-    textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase",
-  },
-  appFooterBrand: {
-    marginTop: "6px", fontSize: "10px", color: PALETTE.textMuted,
-    letterSpacing: "0.04em",
-  },
+  // footer
+  footer:      { borderTop:`1px solid ${PALETTE.border}`, padding:"14px 20px", textAlign:"center", marginTop:"8px" },
+  footerLink:  { fontSize:"11px", fontWeight:600, color:PALETTE.textSoft, textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase" },
+  footerBrand: { marginTop:"6px", fontSize:"10px", color:PALETTE.textMuted, letterSpacing:"0.04em" },
 };
