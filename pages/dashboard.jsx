@@ -3,37 +3,53 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 
-// ─── PALETTE ─────────────────────────────────────────────────────────────────
-const PALETTE = {
-  bg:           "#0B1118",
-  panel:        "#141D26",
-  panelAlt:     "#1B2839",
-  panelDeep:    "#0C1219",
-  border:       "#2A3B4E",
-  borderStrong: "#3A5068",
-  borderBright: "#4A6680",
-  text:         "#E8EDF3",
-  textSoft:     "#A6B4C2",
-  textMuted:    "#7E8F9E",
-  blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.13)",
-  blueGlow:     "rgba(77, 126, 168, 0.07)",
-  green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.13)",
-  amber:        "#B7925A",
-  amberSoft:    "rgba(183, 146, 90, 0.13)",
-  red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.13)",
+// ─── TOKENS ───────────────────────────────────────────────────────────────────
+const P = {
+  bg:          "#090E14",
+  surface:     "#10171F",
+  raise:       "#172030",
+  high:        "#1E2C3D",
+  border:      "#22303F",
+  borderMid:   "#2C3E52",
+  borderHigh:  "#3A5168",
+  text:        "#EDF1F5",
+  soft:        "#95A8B8",
+  muted:       "#60778A",
+  blue:        "#4A82B0",
+  blueDim:     "rgba(74,130,176,0.16)",
+  blueGlow:    "rgba(74,130,176,0.07)",
+  green:       "#5E9E72",
+  greenDim:    "rgba(94,158,114,0.14)",
+  amber:       "#B5904E",
+  amberDim:    "rgba(181,144,78,0.14)",
+  red:         "#A85858",
+  redDim:      "rgba(168,88,88,0.14)",
+  purple:      "#7A6BA8",
+  purpleDim:   "rgba(122,107,168,0.14)",
+};
+const MONO = '"JetBrains Mono","SF Mono",ui-monospace,monospace';
+const SANS = 'Inter,ui-sans-serif,system-ui,-apple-system,sans-serif';
+
+// ─── ROLES ────────────────────────────────────────────────────────────────────
+const RANK = { employee:0, shift_lead:1, manager:2, gm:3, area_coach:4, executive:5, admin:99 };
+const atLeast = (role, min) => (RANK[role]??0) >= (RANK[min]??0);
+const ROLE_LABELS = {
+  employee:"Employee", shift_lead:"Shift Lead", manager:"Manager",
+  gm:"General Manager", area_coach:"Area Coach", executive:"Executive", admin:"Admin",
 };
 
-const MONO = '"JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace';
-const SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif';
+// ─── FEEDBACK TYPES ───────────────────────────────────────────────────────────
+const FB_TYPES = [
+  { id:"policy_unclear",       label:"Policy unclear",         color: P.amber  },
+  { id:"process_unrealistic",  label:"Process unrealistic",    color: P.red    },
+  { id:"hard_to_follow",       label:"Hard to follow",         color: P.purple },
+  { id:"training_gap",         label:"Training gap",           color: P.blue   },
+  { id:"missing_guidance",     label:"Missing guidance",       color: P.soft   },
+  { id:"other",                label:"Other",                  color: P.muted  },
+];
 
-// ─── TABS ─────────────────────────────────────────────────────────────────────
-const TABS = { home: "home", notes: "notes", analytics: "analytics" };
-
-// ─── FEEDBACK FLAGS ───────────────────────────────────────────────────────────
-const FEEDBACK_FLAGS = [
+// ─── FEEDBACK FLAG CHIPS (for policy feedback modal) ─────────────────────────
+const POLICY_FLAGS = [
   "Hard to understand",
   "Not specific enough",
   "Did not match situation",
@@ -41,118 +57,134 @@ const FEEDBACK_FLAGS = [
   "Could not find answer fast enough",
 ];
 
-// ─── FACILITY NOTES ───────────────────────────────────────────────────────────
-const NOTE_TYPES      = ["Equipment / Repair","Safety Concern","Maintenance","Operational Issue","Staffing Issue","Other"];
-const NOTE_TYPE_DB    = { "Equipment / Repair":"equipment_repair","Safety Concern":"safety_concern","Maintenance":"maintenance","Operational Issue":"operational_issue","Staffing Issue":"staffing_issue","Other":"other" };
-const NOTE_TYPE_LABEL = Object.fromEntries(Object.entries(NOTE_TYPE_DB).map(([l,v])=>[v,l]));
-const NOTE_PRIORITIES = ["low","normal","high","urgent"];
-
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-function applyCompanyScope(query, scope) {
-  const cid = scope?.company_id;
-  if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid))
-    return query.eq("company_id", cid);
-  if (scope?.company) return query.eq("company", scope.company);
-  return query;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const safeUuid = v => UUID_RE.test(v) ? v : null;
+
+function applyScope(q, profile) {
+  const cid = safeUuid(profile?.company_id);
+  if (cid) return q.eq("company_id", cid);
+  if (profile?.company) return q.eq("company", profile.company);
+  return q;
 }
 
 function timeAgo(d) {
-  if (!d) return "—";
-  const diff = Date.now() - new Date(d).getTime();
-  const mins = Math.floor(diff / 60000), hrs = Math.floor(diff / 3600000), days = Math.floor(diff / 86400000);
-  if (mins < 1)  return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hrs  < 24) return `${hrs}h ago`;
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
+  if (!d) return "";
+  const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60)   return "just now";
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 86400)return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
 }
 
 function fmtDate(d) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function safeUuid(v) { return UUID_RE.test(v) ? v : null; }
-
-function priorityStyle(p) {
-  if (p === "urgent") return { color: PALETTE.red,      background: PALETTE.redSoft,   border: "1px solid rgba(168,97,97,0.32)"  };
-  if (p === "high")   return { color: PALETTE.amber,    background: PALETTE.amberSoft, border: "1px solid rgba(183,146,90,0.32)" };
-  return                     { color: PALETTE.textSoft, background: "transparent",     border: `1px solid ${PALETTE.border}`     };
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+function buildTabs(role) {
+  const t = [
+    { id:"home",       label:"Home",     icon:"home"     },
+    { id:"ask",        label:"Ask",      icon:"ask"      },
+  ];
+  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides", icon:"guides" });
+  t.push({ id:"feedback", label:"Feedback", icon:"feedback" });
+  if (atLeast(role,"gm"))    t.push({ id:"signals",   label:"Signals",   icon:"signals"   });
+  if (role === "admin")      t.push({ id:"analytics", label:"Analytics", icon:"analytics" });
+  return t;
 }
 
-// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function PlaybookDashboard() {
+// ─── NAV ICON SVGs ────────────────────────────────────────────────────────────
+function NavIcon({ name, active }) {
+  const c = active ? P.blue : P.muted;
+  const icons = {
+    home:      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>,
+    ask:       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    guides:    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
+    feedback:  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
+    signals:   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+    analytics: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>,
+  };
+  return icons[name] || null;
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+export default function PlaybookApp() {
   const router = useRouter();
 
   // Auth
   const [profile,     setProfile]     = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [isMobile,    setIsMobile]    = useState(false);
-  const [activeTab,   setActiveTab]   = useState(TABS.home);
-  const [mobileOpen,  setMobileOpen]  = useState(false);
 
-  // Search
-  const [situation,  setSituation]  = useState("");
+  // UI
+  const [activeTab,  setActiveTab]  = useState("home");
+  const [isMobile,   setIsMobile]   = useState(false);
+  const [menuOpen,   setMenuOpen]   = useState(false);
+
+  // Ask/Search
+  const [query,      setQuery]      = useState("");
   const [searching,  setSearching]  = useState(false);
   const [result,     setResult]     = useState(null);
   const [altResults, setAltResults] = useState([]);
   const [noResult,   setNoResult]   = useState(false);
-
-  // Recent / Saved plays
-  const [recents,    setRecents]    = useState([]);
-  const [savedPlays, setSavedPlays] = useState([]);
   const [searchId,   setSearchId]   = useState(null);
   const [isSaved,    setIsSaved]    = useState(false);
+  const [recents,    setRecents]    = useState([]);
+  const [savedPlays, setSavedPlays] = useState([]);
 
-  // Feedback modal
-  const [showFeedback,       setShowFeedback]       = useState(false);
-  const [feedbackFlags,      setFeedbackFlags]      = useState([]);
-  const [feedbackNote,       setFeedbackNote]       = useState("");
-  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [feedbackDone,       setFeedbackDone]       = useState(false);
+  // Policy feedback modal
+  const [showPolicyFeedback, setShowPolicyFeedback] = useState(false);
+  const [policyFlags,        setPolicyFlags]        = useState([]);
+  const [policyFeedbackNote, setPolicyFeedbackNote] = useState("");
+  const [policyFbSubmitting, setPolicyFbSubmitting] = useState(false);
+  const [policyFbDone,       setPolicyFbDone]       = useState(false);
 
-  // Facility notes (user only)
-  const [notes,           setNotes]           = useState([]);
-  const [notesLoading,    setNotesLoading]    = useState(false);
-  const [notesFetched,    setNotesFetched]    = useState(false);
-  const [newNoteType,     setNewNoteType]     = useState(NOTE_TYPES[0]);
-  const [newNotePriority, setNewNotePriority] = useState("normal");
-  const [newNoteText,     setNewNoteText]     = useState("");
-  const [noteSubmitting,  setNoteSubmitting]  = useState(false);
-  const [noteMsg,         setNoteMsg]         = useState("");
+  // Procedures
+  const [procedures,     setProcedures]     = useState([]);
+  const [procsLoading,   setProcsLoading]   = useState(false);
+  const [procsFetched,   setProcsFetched]   = useState(false);
+  const [expandedProc,   setExpandedProc]   = useState(null);
+  const [procSearch,     setProcSearch]     = useState("");
 
-  // Admin analytics
-  const [adminLoading,       setAdminLoading]       = useState(false);
-  const [adminFetched,       setAdminFetched]        = useState(false);
-  const [totalSearchCount,   setTotalSearchCount]   = useState(0);
-  const [categoryBreakdown,  setCategoryBreakdown]  = useState([]);
-  const [recentSearchList,   setRecentSearchList]   = useState([]);
-  const [adminFeedbackList,  setAdminFeedbackList]  = useState([]);
+  // Anonymous feedback
+  const [fbType,         setFbType]         = useState("");
+  const [fbCategory,     setFbCategory]     = useState("");
+  const [fbDescription,  setFbDescription]  = useState("");
+  const [fbSubmitting,   setFbSubmitting]   = useState(false);
+  const [fbDone,         setFbDone]         = useState(false);
+  const [fbError,        setFbError]        = useState("");
 
-  const inputRef = useRef(null);
+  // Signals / analytics
+  const [sigLoading,     setSigLoading]     = useState(false);
+  const [sigFetched,     setSigFetched]     = useState(false);
+  const [totalSearches,  setTotalSearches]  = useState(0);
+  const [catBreakdown,   setCatBreakdown]   = useState([]);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [feedbackList,   setFeedbackList]   = useState([]);
+  const [anonFeedback,   setAnonFeedback]   = useState([]);
 
-  // ── Auth init ──────────────────────────────────────────────────────────────
+  const queryRef = useRef(null);
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    let mounted = true;
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+    let live = true;
+    (async () => {
+      const { data:{ session } } = await supabase.auth.getSession();
       if (!session) { router.replace("/"); return; }
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace("/"); return; }
+      const { data:{ user } } = await supabase.auth.getUser();
+      if (!user)    { router.replace("/"); return; }
       const { data: prof } = await supabase
         .from("profiles")
-        .select("id, full_name, facility_number, company, company_id, role")
-        .eq("id", user.id)
-        .maybeSingle();
-      if (!prof) { router.replace("/"); return; }
-      if (mounted) { setProfile(prof); setAuthLoading(false); }
-    };
-    init();
-    return () => { mounted = false; };
+        .select("id,full_name,facility_number,company,company_id,role,plan")
+        .eq("id", user.id).maybeSingle();
+      if (!prof)    { router.replace("/"); return; }
+      if (live) { setProfile(prof); setAuthLoading(false); }
+    })();
+    return () => { live = false; };
   }, [router]);
 
-  // ── Mobile detection ───────────────────────────────────────────────────────
+  // ── Mobile ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
@@ -160,567 +192,797 @@ export default function PlaybookDashboard() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // ── Load recents when profile ready ───────────────────────────────────────
+  // ── Load recents on profile ready ───────────────────────────────────────────
   useEffect(() => { if (profile) loadRecents(); }, [profile]);
 
-  const isAdmin = profile?.role === "admin";
+  // ── Tab data triggers ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!profile) return;
+    if (activeTab === "procedures" && !procsFetched) loadProcedures();
+    if ((activeTab === "signals" || activeTab === "analytics") && !sigFetched) loadSignals();
+  }, [activeTab, profile]);
 
+  // ─── Derived ─────────────────────────────────────────────────────────────────
+  const role      = profile?.role || "employee";
+  const isPro     = profile?.plan === "pro" || atLeast(role, "manager");
+  const isLeader  = atLeast(role, "gm");
+  const isManager = atLeast(role, "manager");
+  const isAdmin   = role === "admin";
+  const tabs      = profile ? buildTabs(role) : [];
+
+  // ── Recents ─────────────────────────────────────────────────────────────────
   const loadRecents = async () => {
     try {
-      const { data } = await supabase
-        .from("playbook_searches")
-        .select("id, situation_text, policy_id, saved, created_at")
+      const { data } = await supabase.from("playbook_searches")
+        .select("id,situation_text,policy_id,saved,created_at")
         .eq("user_id", profile.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
+        .order("created_at",{ascending:false}).limit(20);
       const all = data || [];
-      setRecents(all.filter(r => !r.saved).slice(0, 8));
-      setSavedPlays(all.filter(r => r.saved));
-    } catch { /* graceful */ }
+      setRecents(all.filter(r=>!r.saved).slice(0,6));
+      setSavedPlays(all.filter(r=>r.saved));
+    } catch {}
   };
 
-  // ── Admin analytics loader ─────────────────────────────────────────────────
-  const loadAdminData = async () => {
-    setAdminLoading(true);
-    try {
-      // All searches with joined policy category
-      let sq = supabase
-        .from("playbook_searches")
-        .select("id, situation_text, created_at, policy_id, company_policies(title, category)")
-        .order("created_at", { ascending: false })
-        .limit(500);
-      sq = applyCompanyScope(sq, profile);
-      const { data: searches } = await sq;
-      const allSearches = searches || [];
-
-      setTotalSearchCount(allSearches.length);
-      setRecentSearchList(allSearches.slice(0, 30));
-
-      // Category breakdown
-      const catMap = {};
-      allSearches.forEach(s => {
-        const cat = s.company_policies?.category || "Uncategorized";
-        catMap[cat] = (catMap[cat] || 0) + 1;
-      });
-      setCategoryBreakdown(Object.entries(catMap).sort((a, b) => b[1] - a[1]));
-
-      // Feedback list with policy title
-      let fq = supabase
-        .from("policy_feedback")
-        .select("id, flags, note, created_at, facility_number, policy_id, company_policies(title)")
-        .order("created_at", { ascending: false })
-        .limit(100);
-      fq = applyCompanyScope(fq, profile);
-      const { data: feedback } = await fq;
-      setAdminFeedbackList(feedback || []);
-
-    } catch (err) {
-      console.warn("Admin analytics load error:", err.message);
-    }
-    setAdminLoading(false);
-    setAdminFetched(true);
-  };
-
-  useEffect(() => {
-    if (activeTab === TABS.analytics && isAdmin && !adminFetched) {
-      loadAdminData();
-    }
-  }, [activeTab, isAdmin]);
-
-  // ── Core search logic ──────────────────────────────────────────────────────
+  // ── Search ──────────────────────────────────────────────────────────────────
   const doSearch = async (term) => {
-    if (!term) return;
-    setSearching(true);
-    setNoResult(false);
-    setResult(null);
-    setAltResults([]);
-    setSearchId(null);
-    setIsSaved(false);
-
+    if (!term.trim()) return;
+    setSearching(true); setNoResult(false); setResult(null);
+    setAltResults([]); setSearchId(null); setIsSaved(false);
     try {
-      let q = supabase
-        .from("company_policies")
-        .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
+      let q = supabase.from("company_policies")
+        .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
         .eq("is_active", true);
-      q = applyCompanyScope(q, profile);
+      q = applyScope(q, profile);
       q = q.or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`);
       const { data: primary } = await q.limit(5);
       let hits = primary || [];
 
       if (!hits.length) {
-        const words = term.split(/\s+/).filter(w => w.length > 3);
-        for (const word of words.slice(0, 4)) {
-          let wq = supabase
-            .from("company_policies")
-            .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
-            .eq("is_active", true);
-          wq = applyCompanyScope(wq, profile);
-          wq = wq.or(`title.ilike.%${word}%,keywords.ilike.%${word}%,summary.ilike.%${word}%`);
+        for (const w of term.split(/\s+/).filter(w=>w.length>3).slice(0,4)) {
+          let wq = supabase.from("company_policies")
+            .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
+            .eq("is_active",true);
+          wq = applyScope(wq, profile);
+          wq = wq.or(`title.ilike.%${w}%,keywords.ilike.%${w}%,summary.ilike.%${w}%`);
           const { data: wr } = await wq.limit(3);
           if (wr?.length) { hits = wr; break; }
         }
       }
 
-      if (!hits.length) {
-        setNoResult(true);
-      } else {
+      if (!hits.length) { setNoResult(true); }
+      else {
         setResult(hits[0]);
         setAltResults(hits.slice(1));
         try {
-          const { data: logged } = await supabase
-            .from("playbook_searches")
-            .insert({ user_id: profile.id, facility_number: profile.facility_number || null, company_id: safeUuid(profile.company_id), situation_text: term, policy_id: hits[0].id, saved: false })
+          const { data: logged } = await supabase.from("playbook_searches")
+            .insert({ user_id:profile.id, facility_number:profile.facility_number||null,
+              company_id:safeUuid(profile.company_id), situation_text:term,
+              policy_id:hits[0].id, saved:false })
             .select("id").single();
           if (logged?.id) { setSearchId(logged.id); loadRecents(); }
-        } catch { /* graceful */ }
+        } catch {}
       }
-    } finally {
-      setSearching(false);
-    }
+    } finally { setSearching(false); }
   };
 
-  const handleSearch = async (e) => { if (e) e.preventDefault(); await doSearch(situation.trim()); };
-
-  const reopenRecent = async (recent) => {
-    setSituation(recent.situation_text);
-    if (recent.policy_id) {
-      setSearching(true); setNoResult(false); setResult(null); setAltResults([]);
+  const handleSearch = e => { e?.preventDefault(); doSearch(query.trim()); };
+  const clearSearch  = () => {
+    setResult(null); setNoResult(false); setQuery(""); setSearchId(null); setIsSaved(false);
+    setTimeout(()=>queryRef.current?.focus(), 50);
+  };
+  const reopenRecent = async (r) => {
+    setQuery(r.situation_text);
+    if (r.policy_id) {
+      setSearching(true); setResult(null); setAltResults([]);
       try {
-        const { data } = await supabase
-          .from("company_policies")
-          .select("id, title, policy_code, category, severity, summary, policy_text, action_steps, escalation_guidance, incorrect_examples, correct_examples, role_guidance, keywords")
-          .eq("id", recent.policy_id).maybeSingle();
-        if (data) { setResult(data); setSearchId(recent.id); setIsSaved(recent.saved || false); }
-        else { await doSearch(recent.situation_text); }
+        const { data } = await supabase.from("company_policies")
+          .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
+          .eq("id",r.policy_id).maybeSingle();
+        if (data) { setResult(data); setSearchId(r.id); setIsSaved(r.saved||false); }
+        else await doSearch(r.situation_text);
       } finally { setSearching(false); }
-    } else {
-      await doSearch(recent.situation_text);
-    }
+    } else await doSearch(r.situation_text);
   };
 
-  const clearSearch = () => {
-    setResult(null); setNoResult(false); setSituation(""); setSearchId(null); setIsSaved(false);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  };
-
-  // ── Save / unsave play ─────────────────────────────────────────────────────
-  const handleSavePlay = async () => {
+  const handleSave = async () => {
     if (!searchId) return;
     try {
-      await supabase.from("playbook_searches").update({ saved: !isSaved }).eq("id", searchId);
+      await supabase.from("playbook_searches").update({saved:!isSaved}).eq("id",searchId);
       setIsSaved(!isSaved); loadRecents();
     } catch {}
   };
 
-  // ── Feedback ───────────────────────────────────────────────────────────────
-  const toggleFlag = (flag) => setFeedbackFlags(prev =>
-    prev.includes(flag) ? prev.filter(f => f !== flag) : [...prev, flag]
-  );
-
-  const submitFeedback = async () => {
-    if (!feedbackFlags.length) return;
-    setFeedbackSubmitting(true);
+  // ── Policy feedback modal ─────────────────────────────────────────────────
+  const togglePolicyFlag = f => setPolicyFlags(p => p.includes(f)?p.filter(x=>x!==f):[...p,f]);
+  const submitPolicyFeedback = async () => {
+    if (!policyFlags.length) return;
+    setPolicyFbSubmitting(true);
     try {
       await supabase.from("policy_feedback").insert({
-        user_id: profile.id,
-        policy_id: result?.id || null,
-        facility_number: profile.facility_number || null,
-        company_id: safeUuid(profile.company_id),
-        flags: feedbackFlags,
-        note: feedbackNote.trim() || null,
+        user_id:profile.id, policy_id:result?.id||null,
+        facility_number:profile.facility_number||null,
+        company_id:safeUuid(profile.company_id),
+        flags:policyFlags, note:policyFeedbackNote.trim()||null,
       });
-    } catch { /* graceful */ }
-    setFeedbackDone(true);
-    setFeedbackSubmitting(false);
-  };
-
-  const closeFeedback = () => {
-    setShowFeedback(false); setFeedbackFlags([]); setFeedbackNote(""); setFeedbackDone(false);
-  };
-
-  // ── Facility notes (user only) ─────────────────────────────────────────────
-  const loadNotes = async () => {
-    if (!profile?.facility_number) return;
-    setNotesLoading(true);
-    try {
-      const { data } = await supabase
-        .from("facility_notes")
-        .select("id, note_type, note_text, priority, created_by_name, created_by_role, created_at, status")
-        .eq("facility_number", profile.facility_number)
-        .neq("status", "closed")
-        .order("created_at", { ascending: false });
-      setNotes(data || []);
     } catch {}
-    setNotesLoading(false);
-    setNotesFetched(true);
+    setPolicyFbDone(true); setPolicyFbSubmitting(false);
+  };
+  const closePolicyFeedback = () => {
+    setShowPolicyFeedback(false); setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false);
   };
 
-  const submitNote = async (e) => {
-    e.preventDefault();
-    if (!newNoteText.trim()) return;
-    setNoteSubmitting(true); setNoteMsg("");
+  // ── Procedures ───────────────────────────────────────────────────────────────
+  const loadProcedures = async () => {
+    setProcsLoading(true);
     try {
-      await supabase.from("facility_notes").insert({
-        facility_number: profile.facility_number,
-        company_id: safeUuid(profile.company_id),
-        note_type: NOTE_TYPE_DB[newNoteType] || "other",
-        priority: newNotePriority,
-        note_text: newNoteText.trim(),
-        status: "open",
-        created_by_name: profile.full_name || "",
-        created_by_role: profile.role || "",
-      });
-      setNewNoteText(""); setNoteMsg("Note added."); loadNotes();
-    } catch (err) { setNoteMsg(err.message || "Failed to add note."); }
-    setNoteSubmitting(false);
+      let q = supabase.from("company_policies")
+        .select("id,title,policy_code,category,summary,action_steps,policy_text,is_active")
+        .eq("is_active",true).order("category").order("title");
+      q = applyScope(q, profile);
+      const { data } = await q.limit(100);
+      setProcedures(data||[]);
+    } catch {}
+    setProcsLoading(false); setProcsFetched(true);
   };
 
-  useEffect(() => { if (activeTab === TABS.notes && !notesFetched) loadNotes(); }, [activeTab]);
+  const filteredProcs = procedures.filter(p => {
+    if (!procSearch.trim()) return true;
+    const s = procSearch.toLowerCase();
+    return (p.title||"").toLowerCase().includes(s) || (p.category||"").toLowerCase().includes(s) || (p.summary||"").toLowerCase().includes(s);
+  });
 
-  // ── Loading gate ───────────────────────────────────────────────────────────
-  if (authLoading) {
-    return (
-      <div style={{ minHeight:"100vh", background:PALETTE.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <p style={{ color:PALETTE.textMuted, fontSize:"11px", letterSpacing:"0.10em", textTransform:"uppercase", fontFamily:SANS }}>Loading…</p>
+  // Group procedures by category
+  const procsByCategory = filteredProcs.reduce((acc, p) => {
+    const cat = p.category || "General";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(p);
+    return acc;
+  }, {});
+
+  // ── Anonymous feedback ────────────────────────────────────────────────────
+  const submitAnonFeedback = async () => {
+    if (!fbType) { setFbError("Please select a feedback type."); return; }
+    setFbSubmitting(true); setFbError("");
+    try {
+      await supabase.from("anonymous_feedback").insert({
+        company_id: safeUuid(profile.company_id) || null,
+        company:    profile.company || null,
+        facility_number: profile.facility_number || null,
+        feedback_type: fbType,
+        category:    fbCategory.trim() || null,
+        description: fbDescription.trim() || null,
+      });
+      setFbDone(true);
+    } catch (err) {
+      setFbError("Submission failed. Please try again.");
+    }
+    setFbSubmitting(false);
+  };
+
+  // ── Signals / analytics ───────────────────────────────────────────────────
+  const loadSignals = async () => {
+    setSigLoading(true);
+    try {
+      // Search stats
+      let sq = supabase.from("playbook_searches")
+        .select("id,situation_text,created_at,policy_id,company_policies(title,category)")
+        .order("created_at",{ascending:false}).limit(500);
+      sq = applyScope(sq, profile);
+      const { data: searches } = await sq;
+      const allS = searches || [];
+      setTotalSearches(allS.length);
+      setRecentSearches(allS.slice(0,30));
+
+      const catMap = {};
+      allS.forEach(s => {
+        const cat = s.company_policies?.category || "Uncategorized";
+        catMap[cat] = (catMap[cat]||0)+1;
+      });
+      setCatBreakdown(Object.entries(catMap).sort((a,b)=>b[1]-a[1]));
+
+      // Policy feedback
+      let fq = supabase.from("policy_feedback")
+        .select("id,flags,note,created_at,facility_number,policy_id,company_policies(title)")
+        .order("created_at",{ascending:false}).limit(100);
+      fq = applyScope(fq, profile);
+      const { data: fb } = await fq;
+      setFeedbackList(fb||[]);
+
+      // Anonymous feedback
+      let aq = supabase.from("anonymous_feedback")
+        .select("id,feedback_type,category,description,created_at,facility_number")
+        .order("created_at",{ascending:false}).limit(100);
+      aq = applyScope(aq, profile);
+      const { data: af } = await aq;
+      setAnonFeedback(af||[]);
+
+    } catch (err) { console.warn("signals load:", err.message); }
+    setSigLoading(false); setSigFetched(true);
+  };
+
+  // ─── Derived signals ────────────────────────────────────────────────────────
+  const anonByType = anonFeedback.reduce((acc,f) => {
+    acc[f.feedback_type] = (acc[f.feedback_type]||0)+1; return acc;
+  }, {});
+
+  // Friction alerts — categories with 3+ searches and any matching feedback
+  const frictionAlerts = catBreakdown.filter(([cat, count]) => {
+    if (count < 3) return false;
+    const hasFeedback = feedbackList.some(f => f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase()));
+    return hasFeedback || count >= 5;
+  }).slice(0,3);
+
+  // ─── Loading ─────────────────────────────────────────────────────────────────
+  if (authLoading) return (
+    <div style={{minHeight:"100vh",background:P.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{width:32,height:32,border:`2px solid ${P.borderMid}`,borderTopColor:P.blue,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>
+        <p style={{color:P.muted,fontSize:11,letterSpacing:"0.10em",textTransform:"uppercase",fontFamily:MONO,margin:0}}>Loading</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  const hasFacility = !!profile?.facility_number;
-
-  // Build nav items based on role
-  const navItems = isAdmin
-    ? [
-        { id: TABS.home,      label: "Playbook"  },
-        { id: TABS.analytics, label: "Analytics" },
-      ]
-    : [
-        { id: TABS.home,  label: "Playbook" },
-        ...(hasFacility ? [{ id: TABS.notes, label: "Facility Notes" }] : []),
-      ];
-
-  // ─── RENDER ────────────────────────────────────────────────────────────────
+  // ─── RENDER ───────────────────────────────────────────────────────────────────
   return (
-    <div style={s.page}>
+    <div style={s.shell}>
       <Head><title>Playbook</title></Head>
-      <style dangerouslySetInnerHTML={{ __html: css }} />
+      <style dangerouslySetInnerHTML={{__html:CSS}}/>
 
-      {/* ── TOP NAV ── */}
-      <header style={s.topNav}>
-        <div style={s.topNavBrand}>
-          <div style={s.topNavProduct}>Playbook</div>
-          <div style={s.topNavMeta}>
-            {profile?.full_name}
-            {profile?.role ? ` · ${profile.role}` : ""}
+      {/* ── TOP BAR ─────────────────────────────────────────────────────── */}
+      <header style={s.topBar}>
+        <div style={s.topBarInner}>
+          <div style={s.brand}>
+            <span style={s.brandDot}/>
+            <span style={s.brandName}>Playbook</span>
+            {isPro && <span style={s.proBadge}>PRO</span>}
           </div>
-        </div>
 
-        {!isMobile && (
-          <nav style={s.topNavItems}>
-            {navItems.map(item => (
-              <button key={item.id} className="nav-tab"
-                style={{ ...s.topNavBtn, ...(activeTab === item.id ? s.topNavBtnActive : {}) }}
-                onClick={() => setActiveTab(item.id)}>
-                {item.label}
-              </button>
-            ))}
-          </nav>
-        )}
-
-        <div style={s.topNavRight}>
-          {isMobile && (
-            <button style={s.mobileMenuBtn} onClick={() => setMobileOpen(o => !o)}>
-              {mobileOpen ? "✕" : "☰"}
-            </button>
+          {/* Desktop nav */}
+          {!isMobile && (
+            <nav style={s.desktopNav}>
+              {tabs.map(t => (
+                <button key={t.id} onClick={()=>setActiveTab(t.id)}
+                  className="nav-btn"
+                  style={{...s.desktopNavBtn,...(activeTab===t.id?s.desktopNavBtnActive:{})}}>
+                  {t.label}
+                </button>
+              ))}
+            </nav>
           )}
-          <button style={s.topNavLogout}
-            onClick={async () => { await supabase.auth.signOut(); router.replace("/"); }}>
-            Sign out
-          </button>
+
+          <div style={s.topBarRight}>
+            {isMobile && (
+              <div style={s.mobileUser}>{ROLE_LABELS[role]||role}</div>
+            )}
+            {!isMobile && (
+              <div style={{fontSize:11,color:P.muted,marginRight:12}}>
+                {profile?.full_name} · {ROLE_LABELS[role]||role}
+              </div>
+            )}
+            <button className="ghost-btn" style={s.signOutBtn}
+              onClick={async()=>{ await supabase.auth.signOut(); router.replace("/"); }}>
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
-      {isMobile && mobileOpen && (
-        <div style={s.mobileDropdown}>
-          {navItems.map(item => (
-            <button key={item.id}
-              style={{ ...s.navButton, ...(activeTab === item.id ? s.navButtonActive : {}) }}
-              onClick={() => { setActiveTab(item.id); setMobileOpen(false); }}>
-              {item.label}
-            </button>
-          ))}
-          <div style={s.navDivider} />
-          <a href="/support" style={{ ...s.navButton, textDecoration:"none", display:"block" }}>Support</a>
-        </div>
-      )}
+      {/* ── PAGE CONTENT ────────────────────────────────────────────────── */}
+      <main style={{...s.main, paddingBottom: isMobile ? 80 : 40}}>
 
-      {/* ── MAIN CONTENT ── */}
-      <main style={s.main}>
+        {/* ══════════════════════════════════════════════════════════════
+            HOME TAB
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "home" && (
+          <div className="fade-in">
+            {/* Header */}
+            <div style={s.pageHeader}>
+              <div style={s.pageGreeting}>
+                {profile?.full_name ? `Hey, ${profile.full_name.split(" ")[0]}` : "Welcome back"}
+              </div>
+              <div style={s.pageSubhead}>
+                {isLeader ? "Operational signals and insights" :
+                 isManager ? "Manager assistance and policy guidance" :
+                 "Quick answers for your shift"}
+              </div>
+            </div>
 
-        {/* ════════════════════ PLAYBOOK TAB ════════════════════ */}
-        {activeTab === TABS.home && (
-          <>
-            {/* Search Home */}
+            {/* Employee / Shift Lead home */}
+            {!isManager && !isLeader && !isAdmin && (
+              <div style={s.homeGrid}>
+                <button style={s.homeHeroCard} onClick={()=>setActiveTab("ask")}>
+                  <div style={s.homeHeroIcon}>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={P.blue} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                  <div style={s.homeHeroTitle}>Ask Playbook</div>
+                  <div style={s.homeHeroSub}>Get a quick answer to any work situation</div>
+                  <div style={s.homeHeroArrow}>→</div>
+                </button>
+
+                <button style={s.homeCard} onClick={()=>setActiveTab("feedback")}>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{...s.homeCardIcon, background:P.purpleDim}}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                    </div>
+                    <div>
+                      <div style={s.homeCardTitle}>Give Feedback</div>
+                      <div style={s.homeCardSub}>Anonymously flag unclear policies</div>
+                    </div>
+                  </div>
+                </button>
+
+                {isPro && (
+                  <button style={s.homeCard} onClick={()=>setActiveTab("procedures")}>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{...s.homeCardIcon, background:P.greenDim}}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                      </div>
+                      <div>
+                        <div style={s.homeCardTitle}>Step-by-Step Guides</div>
+                        <div style={s.homeCardSub}>Company procedures and workflows</div>
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Manager home */}
+            {isManager && !isLeader && !isAdmin && (
+              <div style={s.homeGrid}>
+                <button style={s.homeHeroCard} onClick={()=>setActiveTab("ask")}>
+                  <div style={s.homeHeroIcon}>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={P.blue} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                  <div style={s.homeHeroTitle}>Ask Playbook AI</div>
+                  <div style={s.homeHeroSub}>Manager-level guidance for any situation</div>
+                  <div style={s.homeHeroArrow}>→</div>
+                </button>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <button style={s.homeSmallCard} onClick={()=>setActiveTab("procedures")}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                    <div style={s.homeSmallTitle}>Guides</div>
+                  </button>
+                  <button style={s.homeSmallCard} onClick={()=>setActiveTab("feedback")}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                    <div style={s.homeSmallTitle}>Feedback</div>
+                  </button>
+                </div>
+
+                {recents.length > 0 && (
+                  <div style={s.homeSectionWrap}>
+                    <div style={s.homeSectionLabel}>Recent plays</div>
+                    {recents.slice(0,3).map(r=>(
+                      <button key={r.id} className="list-row" style={s.recentRow} onClick={()=>{setActiveTab("ask");reopenRecent(r);}}>
+                        <span style={s.recentRowText}>{r.situation_text}</span>
+                        <span style={s.recentRowTime}>{timeAgo(r.created_at)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Leadership home */}
+            {(isLeader || isAdmin) && (
+              <div style={s.homeGrid}>
+                {/* Signal summary cards */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{totalSearches || "—"}</div>
+                    <div style={s.statLabel}>Plays pulled</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{catBreakdown.length || "—"}</div>
+                    <div style={s.statLabel}>Categories active</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{feedbackList.length || "—"}</div>
+                    <div style={s.statLabel}>Feedback signals</div>
+                  </div>
+                </div>
+
+                {frictionAlerts.length > 0 && (
+                  <div style={s.homeSectionWrap}>
+                    <div style={s.homeSectionLabel}>Friction signals</div>
+                    {frictionAlerts.map(([cat,count])=>(
+                      <div key={cat} style={{...s.alertCard, borderLeftColor:P.amber}}>
+                        <div style={s.alertTitle}>"{cat}" searched heavily</div>
+                        <div style={s.alertSub}>{count} pulls — may indicate unclear guidance</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button style={s.homeHeroCard} onClick={()=>setActiveTab(isAdmin?"analytics":"signals")}>
+                  <div style={s.homeHeroIcon}>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={P.blue} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style={s.homeHeroTitle}>View Full Signals</div>
+                  <div style={s.homeHeroSub}>Category trends, feedback, and friction points</div>
+                  <div style={s.homeHeroArrow}>→</div>
+                </button>
+
+                <button style={s.homeCard} onClick={()=>setActiveTab("ask")}>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{...s.homeCardIcon,background:P.blueDim}}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={P.blue} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </div>
+                    <div>
+                      <div style={s.homeCardTitle}>Ask Playbook</div>
+                      <div style={s.homeCardSub}>Search policies and procedures</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            ASK TAB
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "ask" && (
+          <div className="fade-in">
             {!result && !noResult && !searching && (
-              <div className="fade-up">
-                <div style={s.heroLabel}>What's the situation?</div>
+              <>
+                <div style={s.pageHeader}>
+                  <div style={s.pageTitle}>
+                    {isManager ? "Ask Playbook AI" : "Ask a Question"}
+                  </div>
+                  <div style={s.pageSubhead}>
+                    {isManager ? "Describe the situation — get policy-backed guidance" : "Get a quick answer for your situation"}
+                  </div>
+                </div>
+
                 <form onSubmit={handleSearch} style={s.searchForm}>
                   <textarea
-                    ref={inputRef}
-                    value={situation}
-                    onChange={e => setSituation(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSearch(e); }}}
-                    placeholder={"e.g.  customer wants refund but no receipt\n       employee no call no show\n       product shortage during dinner rush"}
-                    style={s.searchInput}
-                    rows={3}
+                    ref={queryRef}
+                    value={query}
+                    onChange={e=>setQuery(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSearch();} }}
+                    placeholder={isManager
+                      ? "e.g.  employee called off 30 min before shift\n       customer dispute over return policy\n       team member repeated policy violation"
+                      : "e.g.  what do I do if a customer wants a refund?\n       who do I call for an equipment issue?"}
+                    style={s.searchTextarea}
                     autoFocus
                   />
-                  <button type="submit"
-                    style={{ ...s.searchBtn, ...(situation.trim() ? {} : { opacity:0.45, cursor:"not-allowed" }) }}
-                    disabled={!situation.trim()}>
-                    Get the Play →
+                  <button type="submit" style={{...s.searchSubmitBtn,...(!query.trim()?{opacity:0.45,pointerEvents:"none"}:{})}} disabled={!query.trim()}>
+                    Get the Play
                   </button>
                 </form>
 
                 {savedPlays.length > 0 && (
                   <div style={s.recentSection}>
-                    <div style={s.recentLabel}>Saved Plays</div>
-                    {savedPlays.map(r => (
-                      <button key={r.id} className="recent-chip" style={s.recentChip} onClick={() => reopenRecent(r)}>
-                        <span style={s.recentStar}>★</span>{r.situation_text}
+                    <div style={s.recentSectionLabel}>Saved plays</div>
+                    {savedPlays.map(r=>(
+                      <button key={r.id} className="list-row" style={s.recentChip} onClick={()=>reopenRecent(r)}>
+                        <span style={{color:P.amber,fontSize:13,flexShrink:0}}>★</span>
+                        <span style={s.recentChipText}>{r.situation_text}</span>
                       </button>
                     ))}
                   </div>
                 )}
-
                 {recents.length > 0 && (
                   <div style={s.recentSection}>
-                    <div style={s.recentLabel}>Recent</div>
-                    {recents.map(r => (
-                      <button key={r.id} className="recent-chip" style={s.recentChip} onClick={() => reopenRecent(r)}>
-                        {r.situation_text}
+                    <div style={s.recentSectionLabel}>Recent</div>
+                    {recents.map(r=>(
+                      <button key={r.id} className="list-row" style={s.recentChip} onClick={()=>reopenRecent(r)}>
+                        <span style={s.recentChipText}>{r.situation_text}</span>
                       </button>
                     ))}
                   </div>
                 )}
-              </div>
+              </>
             )}
 
             {searching && (
-              <div style={s.searchingState} className="fade-up">
-                <div style={s.searchingDot} />
-                <span style={s.searchingText}>Finding the play…</span>
+              <div style={s.loadingState} className="fade-in">
+                <div style={s.spinner}/>
+                <span style={s.loadingText}>Finding the play…</span>
               </div>
             )}
 
             {noResult && !searching && (
-              <div style={s.noResultWrap} className="fade-up">
-                <div style={s.noResultTitle}>No matching policy found</div>
-                <p style={s.noResultText}>Try different keywords, or check with your manager if this situation isn't covered yet.</p>
-                <button style={s.secondaryBtn} onClick={clearSearch}>← Try again</button>
+              <div style={s.emptyState} className="fade-in">
+                <div style={s.emptyIcon}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </div>
+                <div style={s.emptyTitle}>No matching policy found</div>
+                <div style={s.emptyBody}>Try different keywords, or check with your manager if this situation isn't covered.</div>
+                <button style={s.outlineBtn} onClick={clearSearch}>Try again</button>
               </div>
             )}
 
             {result && !searching && (
-              <div className="fade-up">
-                <div style={s.resultBar}>
-                  <button style={s.backBtn} onClick={clearSearch}>← New Search</button>
-                  <div style={s.resultBarActions}>
-                    <button style={{ ...s.saveBtn, ...(isSaved ? s.saveBtnActive : {}) }} onClick={handleSavePlay}>
-                      {isSaved ? "★ Saved" : "☆ Save Play"}
+              <div className="fade-in">
+                {/* Action bar */}
+                <div style={s.resultActionBar}>
+                  <button style={s.backTextBtn} onClick={clearSearch}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    New search
+                  </button>
+                  <div style={{display:"flex",gap:8}}>
+                    <button style={{...s.chipBtn,...(isSaved?s.chipBtnSaved:{})}} onClick={handleSave}>
+                      {isSaved?"★ Saved":"☆ Save"}
                     </button>
-                    <button style={s.flagBtn} onClick={() => { setShowFeedback(true); setFeedbackDone(false); }}>
-                      Flag Policy
+                    <button style={s.chipBtn} onClick={()=>{setShowPolicyFeedback(true);setPolicyFbDone(false);}}>
+                      Flag
                     </button>
                   </div>
                 </div>
 
+                {/* Situation echo */}
                 <div style={s.situationEcho}>
-                  <span style={s.situationEchoLabel}>Situation: </span>{situation}
+                  <span style={{color:P.muted,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em"}}>Situation · </span>
+                  {query}
                 </div>
 
+                {/* The Play */}
                 <div style={s.resultCard}>
-                  <div style={s.cardLabel}>The Play</div>
-                  <div style={s.actionSteps}>
+                  <div style={s.resultCardLabel}>The Play</div>
+                  <div style={s.resultCardBody}>
                     {result.action_steps || result.summary || result.policy_text || "No steps available."}
                   </div>
                 </div>
 
+                {/* Policy behind it */}
                 <div style={s.resultCard}>
-                  <div style={s.cardLabel}>Policy Behind It</div>
-                  <div style={s.policyTitle}>{result.title}</div>
-                  <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"6px" }}>
-                    {result.policy_code && <span style={s.codeBadge}>{result.policy_code}</span>}
-                    {result.category    && <span style={s.catBadge}>{result.category}</span>}
-                    {result.severity    && <span style={s.sevBadge}>{result.severity}</span>}
+                  <div style={s.resultCardLabel}>Policy Behind It</div>
+                  <div style={s.policyName}>{result.title}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                    {result.policy_code && <span style={s.badge(P.blue)}>{result.policy_code}</span>}
+                    {result.category    && <span style={s.badge(P.muted)}>{result.category}</span>}
+                    {result.severity    && <span style={s.badge(P.borderHigh)}>{result.severity}</span>}
                   </div>
                   {result.summary && result.action_steps && (
-                    <p style={s.policySummary}>{result.summary}</p>
+                    <div style={{...s.resultCardBody,marginTop:12,color:P.soft}}>{result.summary}</div>
                   )}
                 </div>
 
                 {result.incorrect_examples && (
-                  <div style={{ ...s.resultCard, borderLeft:`3px solid ${PALETTE.amber}` }}>
-                    <div style={{ ...s.cardLabel, color:PALETTE.amber }}>Avoid This</div>
-                    <div style={s.bodyText}>{result.incorrect_examples}</div>
+                  <div style={{...s.resultCard,borderLeft:`3px solid ${P.amber}`}}>
+                    <div style={{...s.resultCardLabel,color:P.amber}}>Avoid This</div>
+                    <div style={s.resultCardBody}>{result.incorrect_examples}</div>
                   </div>
                 )}
 
                 {result.escalation_guidance && (
-                  <div style={{ ...s.resultCard, borderLeft:`3px solid ${PALETTE.red}` }}>
-                    <div style={{ ...s.cardLabel, color:PALETTE.red }}>Escalate If</div>
-                    <div style={s.bodyText}>{result.escalation_guidance}</div>
+                  <div style={{...s.resultCard,borderLeft:`3px solid ${P.red}`}}>
+                    <div style={{...s.resultCardLabel,color:P.red}}>Escalate If</div>
+                    <div style={s.resultCardBody}>{result.escalation_guidance}</div>
                   </div>
                 )}
 
                 {altResults.length > 0 && (
-                  <div style={s.altSection}>
-                    <div style={s.altLabel}>Other Relevant Policies</div>
-                    {altResults.map(alt => (
-                      <button key={alt.id} className="alt-btn" style={s.altBtn}
-                        onClick={() => { setResult(alt); setAltResults([]); setSearchId(null); setIsSaved(false); }}>
-                        <span style={s.altTitle}>{alt.title}</span>
-                        {alt.policy_code && <span style={s.altCode}>{alt.policy_code}</span>}
+                  <div style={{marginTop:8}}>
+                    <div style={s.sectionMiniLabel}>Also relevant</div>
+                    {altResults.map(alt=>(
+                      <button key={alt.id} className="list-row" style={s.altPolicyRow}
+                        onClick={()=>{setResult(alt);setAltResults([]);setSearchId(null);setIsSaved(false);}}>
+                        <span style={{fontSize:14,color:P.soft,fontWeight:600}}>{alt.title}</span>
+                        {alt.category && <span style={s.badge(P.borderMid)}>{alt.category}</span>}
                       </button>
                     ))}
                   </div>
                 )}
 
-                <div style={s.searchBarBottom}>
-                  <form onSubmit={handleSearch} style={s.searchInlineForm}>
-                    <input
-                      value={situation}
-                      onChange={e => setSituation(e.target.value)}
-                      placeholder="Search another situation…"
-                      style={s.searchInlineInput}
-                    />
-                    <button type="submit" style={s.searchInlineBtn} disabled={!situation.trim()}>→</button>
+                {/* Search again */}
+                <div style={s.searchAgainWrap}>
+                  <form onSubmit={handleSearch} style={{display:"flex",gap:8}}>
+                    <input value={query} onChange={e=>setQuery(e.target.value)}
+                      placeholder="Search another situation…" style={s.inlineSearchInput}/>
+                    <button type="submit" style={s.inlineSearchBtn} disabled={!query.trim()}>→</button>
                   </form>
                 </div>
               </div>
-            )}
-          </>
-        )}
-
-        {/* ════════════════════ FACILITY NOTES TAB (user only) ════════════════════ */}
-        {activeTab === TABS.notes && !isAdmin && (
-          <div className="fade-up">
-            {!hasFacility ? (
-              <div style={s.panelCard}>
-                <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>No facility assigned to your account.</p>
-              </div>
-            ) : (
-              <>
-                <div style={s.panelCard}>
-                  <div style={s.sectionTopRow}>
-                    <div style={s.sectionHeading}>New Facility Note</div>
-                  </div>
-                  <form onSubmit={submitNote} style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:"12px" }}>
-                      <div>
-                        <label style={s.label}>Type</label>
-                        <select value={newNoteType} onChange={e => setNewNoteType(e.target.value)} style={s.selectInput}>
-                          {NOTE_TYPES.map(t => <option key={t}>{t}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={s.label}>Priority</label>
-                        <select value={newNotePriority} onChange={e => setNewNotePriority(e.target.value)} style={s.selectInput}>
-                          {NOTE_PRIORITIES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label style={s.label}>Note</label>
-                      <textarea value={newNoteText} onChange={e => setNewNoteText(e.target.value)}
-                        placeholder="Describe the issue…" style={{ ...s.textarea, minHeight:"90px" }} required />
-                    </div>
-                    {noteMsg && <p style={{ fontSize:"12px", color:PALETTE.textSoft, margin:0 }}>{noteMsg}</p>}
-                    <button type="submit" disabled={noteSubmitting || !newNoteText.trim()}
-                      style={{ ...s.primaryBtn, alignSelf:"flex-start", ...(noteSubmitting || !newNoteText.trim() ? { opacity:0.45, cursor:"not-allowed" } : {}) }}>
-                      {noteSubmitting ? "Saving…" : "Add Note"}
-                    </button>
-                  </form>
-                </div>
-
-                <div style={s.panelCard}>
-                  <div style={s.sectionTopRow}>
-                    <div style={s.sectionHeading}>Open Notes · Facility {profile?.facility_number}</div>
-                    <button style={s.secondaryBtn} onClick={loadNotes}>Refresh</button>
-                  </div>
-                  {notesLoading && <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>Loading…</p>}
-                  {!notesLoading && notes.length === 0 && (
-                    <p style={{ color:PALETTE.textMuted, fontSize:"13px" }}>No open notes.</p>
-                  )}
-                  <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-                    {notes.map(n => (
-                      <div key={n.id} style={s.noteCard}>
-                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"6px", flexWrap:"wrap", gap:"6px" }}>
-                          <div style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap" }}>
-                            <span style={{ ...s.noteBadge, ...priorityStyle(n.priority) }}>{n.priority}</span>
-                            <span style={s.noteType}>{NOTE_TYPE_LABEL[n.note_type] || n.note_type}</span>
-                          </div>
-                          <span style={s.noteTimestamp}>{timeAgo(n.created_at)}</span>
-                        </div>
-                        <div style={s.noteText}>{n.note_text}</div>
-                        {n.created_by_name && (
-                          <div style={s.noteBy}>{n.created_by_name}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
             )}
           </div>
         )}
 
-        {/* ════════════════════ ANALYTICS TAB (admin only) ════════════════════ */}
-        {activeTab === TABS.analytics && isAdmin && (
-          <div className="fade-up">
-            {adminLoading ? (
-              <div style={{ padding:"48px 0", display:"flex", alignItems:"center", gap:"12px" }}>
-                <div style={s.searchingDot} />
-                <span style={{ fontSize:"13px", color:PALETTE.textSoft }}>Loading analytics…</span>
+        {/* ══════════════════════════════════════════════════════════════
+            PROCEDURES TAB
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "procedures" && (
+          <div className="fade-in">
+            <div style={s.pageHeader}>
+              <div style={s.pageTitle}>Step-by-Step Guides</div>
+              <div style={s.pageSubhead}>Company procedures and workflows</div>
+            </div>
+
+            <div style={{position:"relative",marginBottom:20}}>
+              <svg style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}
+                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input value={procSearch} onChange={e=>setProcSearch(e.target.value)}
+                placeholder="Search guides…" style={{...s.inlineSearchInput,paddingLeft:40,width:"100%",boxSizing:"border-box"}}/>
+            </div>
+
+            {procsLoading && <div style={s.loadingState}><div style={s.spinner}/></div>}
+
+            {!procsLoading && procedures.length === 0 && (
+              <div style={s.emptyState}>
+                <div style={s.emptyTitle}>No guides yet</div>
+                <div style={s.emptyBody}>Company procedures will appear here once added.</div>
+              </div>
+            )}
+
+            {!procsLoading && Object.entries(procsByCategory).map(([cat, items]) => (
+              <div key={cat} style={{marginBottom:24}}>
+                <div style={s.catGroupLabel}>{cat}</div>
+                {items.map(proc => (
+                  <div key={proc.id} style={s.procCard}>
+                    <button className="proc-header" style={s.procHeader}
+                      onClick={()=>setExpandedProc(expandedProc===proc.id?null:proc.id)}>
+                      <div>
+                        <div style={s.procTitle}>{proc.title}</div>
+                        {proc.summary && expandedProc !== proc.id && (
+                          <div style={s.procSummaryLine}>{proc.summary}</div>
+                        )}
+                      </div>
+                      <svg style={{transform:`rotate(${expandedProc===proc.id?180:0}deg)`,transition:"transform 0.2s ease",flexShrink:0}}
+                        width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </button>
+                    {expandedProc === proc.id && (
+                      <div style={s.procBody}>
+                        {proc.action_steps ? (
+                          <>
+                            <div style={s.procStepLabel}>Steps</div>
+                            <div style={s.procSteps}>{proc.action_steps}</div>
+                          </>
+                        ) : (
+                          <div style={s.procSteps}>{proc.policy_text || proc.summary || "No content available."}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            FEEDBACK TAB
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "feedback" && (
+          <div className="fade-in">
+            <div style={s.pageHeader}>
+              <div style={s.pageTitle}>Anonymous Feedback</div>
+              <div style={s.pageSubhead}>Help improve company systems. Your identity is never recorded.</div>
+            </div>
+
+            {fbDone ? (
+              <div style={s.successCard}>
+                <div style={s.successIcon}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div style={s.successTitle}>Feedback submitted</div>
+                <div style={s.successBody}>Thanks. Your feedback helps leadership improve the systems you work with every day.</div>
+                <button style={s.primaryBtn} onClick={()=>{setFbDone(false);setFbType("");setFbCategory("");setFbDescription("");}}>
+                  Submit another
+                </button>
               </div>
             ) : (
-              <>
-                {/* ── STAT CARDS ── */}
-                <div style={s.statsRow}>
-                  <div style={s.statCard}>
-                    <div style={s.statValue}>{totalSearchCount}</div>
-                    <div style={s.statLabel}>Total Plays Pulled</div>
-                  </div>
-                  <div style={s.statCard}>
-                    <div style={s.statValue}>{categoryBreakdown.length}</div>
-                    <div style={s.statLabel}>Categories Used</div>
-                  </div>
-                  <div style={s.statCard}>
-                    <div style={s.statValue}>{adminFeedbackList.length}</div>
-                    <div style={s.statLabel}>Feedback Submitted</div>
+              <div style={s.card}>
+                <div style={s.cardSection}>
+                  <div style={s.fieldLabel}>What kind of issue?</div>
+                  <div style={s.fbTypeGrid}>
+                    {FB_TYPES.map(ft=>(
+                      <button key={ft.id} onClick={()=>setFbType(ft.id)}
+                        className="fb-type-btn"
+                        style={{...s.fbTypeBtn,...(fbType===ft.id?{...s.fbTypeBtnActive,borderColor:ft.color,color:ft.color}:{})}}>
+                        {ft.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* ── CATEGORY BREAKDOWN ── */}
-                <div style={s.panelCard}>
-                  <div style={s.sectionTopRow}>
-                    <div style={s.sectionHeading}>Plays by Category</div>
-                    <button style={s.secondaryBtn} onClick={() => { setAdminFetched(false); loadAdminData(); }}>Refresh</button>
+                <div style={s.cardSection}>
+                  <label style={s.fieldLabel}>
+                    Related area <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span>
+                  </label>
+                  <input value={fbCategory} onChange={e=>setFbCategory(e.target.value)}
+                    placeholder="e.g. call-offs, food safety, returns…"
+                    style={s.textInput}/>
+                </div>
+
+                <div style={s.cardSection}>
+                  <label style={s.fieldLabel}>
+                    Tell us more <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional, anonymous)</span>
+                  </label>
+                  <textarea value={fbDescription} onChange={e=>setFbDescription(e.target.value.slice(0,400))}
+                    placeholder="Describe what's confusing or what could be clearer…"
+                    style={{...s.textInput,minHeight:120,resize:"vertical",lineHeight:1.65}}/>
+                  <div style={{fontSize:10,color:P.muted,textAlign:"right",marginTop:4}}>{fbDescription.length}/400</div>
+                </div>
+
+                {fbError && <div style={s.errorBox}>{fbError}</div>}
+
+                <button style={{...s.primaryBtn,...(!fbType||fbSubmitting?{opacity:0.45,pointerEvents:"none"}:{})}}
+                  onClick={submitAnonFeedback} disabled={!fbType||fbSubmitting}>
+                  {fbSubmitting ? "Submitting…" : "Submit Feedback"}
+                </button>
+
+                <div style={{marginTop:16,padding:14,background:P.raise,borderRadius:8,border:`1px solid ${P.border}`}}>
+                  <div style={{fontSize:11,color:P.muted,lineHeight:1.6}}>
+                    🔒 Your name and account are never linked to this submission. Only the type, area, and description are stored.
                   </div>
-                  {categoryBreakdown.length === 0 ? (
-                    <p style={{ color:PALETTE.textMuted, fontSize:"13px", margin:0 }}>No data yet. Plays pulled will appear here.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            SIGNALS TAB (leadership)
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "signals" && (
+          <div className="fade-in">
+            <div style={s.pageHeader}>
+              <div style={s.pageTitle}>Operational Signals</div>
+              <div style={s.pageSubhead}>Where your systems are creating friction</div>
+            </div>
+
+            {sigLoading ? (
+              <div style={s.loadingState}><div style={s.spinner}/><span style={s.loadingText}>Loading signals…</span></div>
+            ) : (
+              <>
+                {/* Stats */}
+                <div style={s.statsGrid}>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{totalSearches}</div>
+                    <div style={s.statLabel}>Total plays pulled</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{feedbackList.length}</div>
+                    <div style={s.statLabel}>Policy flags</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statValue}>{anonFeedback.length}</div>
+                    <div style={s.statLabel}>Anon feedback</div>
+                  </div>
+                </div>
+
+                {/* Friction alerts */}
+                {frictionAlerts.length > 0 && (
+                  <div style={{marginBottom:24}}>
+                    <div style={s.sectionLabel}>Friction Alerts</div>
+                    {frictionAlerts.map(([cat,count])=>(
+                      <div key={cat} style={{...s.alertCard,borderLeftColor:P.amber}}>
+                        <div style={s.alertTitle}>High activity: {cat}</div>
+                        <div style={s.alertSub}>{count} searches — may indicate unclear guidance in this area</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Category breakdown */}
+                <div style={{marginBottom:24}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <div style={s.sectionLabel}>Policy Pulls by Category</div>
+                    <button style={s.ghostSmallBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
+                  </div>
+                  {catBreakdown.length === 0 ? (
+                    <div style={{...s.card,textAlign:"center",padding:"32px 20px"}}>
+                      <div style={{color:P.muted,fontSize:13}}>No data yet. Plays pulled will appear here.</div>
+                    </div>
                   ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-                      {categoryBreakdown.map(([cat, count]) => {
-                        const pct = Math.round((count / categoryBreakdown[0][1]) * 100);
+                    <div style={s.card}>
+                      {catBreakdown.map(([cat,count],i)=>{
+                        const pct = Math.round((count/catBreakdown[0][1])*100);
                         return (
-                          <div key={cat}>
-                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"5px" }}>
-                              <span style={{ fontSize:"13px", fontWeight:600, color:PALETTE.text }}>{cat}</span>
-                              <span style={{ fontSize:"12px", color:PALETTE.textMuted, fontFamily:MONO }}>{count} {count === 1 ? "play" : "plays"}</span>
+                          <div key={cat} style={{...(i>0?{marginTop:16,paddingTop:16,borderTop:`1px solid ${P.border}`}:{})}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                              <span style={{fontSize:14,fontWeight:600,color:P.text}}>{cat}</span>
+                              <span style={{fontSize:13,color:P.muted,fontFamily:MONO}}>{count}</span>
                             </div>
-                            <div style={{ height:"6px", background:PALETTE.panelAlt, borderRadius:"3px", overflow:"hidden" }}>
-                              <div style={{ height:"100%", width:`${pct}%`, background:PALETTE.blue, borderRadius:"3px", transition:"width 0.3s ease" }} />
+                            <div style={{height:5,background:P.raise,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:P.blue,borderRadius:3,transition:"width 0.4s ease"}}/>
                             </div>
                           </div>
                         );
@@ -729,75 +991,151 @@ export default function PlaybookDashboard() {
                   )}
                 </div>
 
-                {/* ── FEEDBACK LIST ── */}
-                <div style={s.panelCard}>
-                  <div style={s.sectionTopRow}>
-                    <div style={s.sectionHeading}>Policy Feedback</div>
-                    <span style={s.countPill}>{adminFeedbackList.length}</span>
-                  </div>
-                  {adminFeedbackList.length === 0 ? (
-                    <p style={{ color:PALETTE.textMuted, fontSize:"13px", margin:0 }}>No feedback submitted yet. Users can flag policies from the Playbook tab.</p>
+                {/* Anonymous feedback summary */}
+                <div style={{marginBottom:24}}>
+                  <div style={s.sectionLabel}>Anonymous Feedback</div>
+                  {anonFeedback.length === 0 ? (
+                    <div style={{...s.card,textAlign:"center",padding:"32px 20px"}}>
+                      <div style={{color:P.muted,fontSize:13}}>No feedback submitted yet.</div>
+                    </div>
                   ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-                      {adminFeedbackList.map(fb => (
-                        <div key={fb.id} style={s.feedbackCard}>
-                          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:"12px", marginBottom:"8px", flexWrap:"wrap" }}>
-                            <div style={{ fontSize:"13px", fontWeight:700, color:PALETTE.text }}>
-                              {fb.company_policies?.title || <span style={{ color:PALETTE.textMuted }}>Unknown policy</span>}
+                    <>
+                      {/* Type summary */}
+                      <div style={{...s.card,marginBottom:10}}>
+                        <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.09em",marginBottom:12}}>By type</div>
+                        {Object.entries(anonByType).sort((a,b)=>b[1]-a[1]).map(([type,count])=>{
+                          const ft = FB_TYPES.find(f=>f.id===type);
+                          return (
+                            <div key={type} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                              <span style={{fontSize:13,color:P.soft}}>{ft?.label||type}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:P.text,fontFamily:MONO}}>{count}</span>
                             </div>
-                            <div style={{ display:"flex", gap:"8px", alignItems:"center", flexShrink:0 }}>
-                              {fb.facility_number && (
-                                <span style={s.facilityPill}>Facility {fb.facility_number}</span>
-                              )}
-                              <span style={{ fontSize:"11px", color:PALETTE.textMuted, fontFamily:MONO }}>{fmtDate(fb.created_at)}</span>
-                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Recent entries */}
+                      {anonFeedback.slice(0,10).map(fb=>(
+                        <div key={fb.id} style={{...s.card,marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                            <span style={s.badge(P.purple)}>{FB_TYPES.find(f=>f.id===fb.feedback_type)?.label||fb.feedback_type}</span>
+                            <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{fmtDate(fb.created_at)}</span>
                           </div>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom: fb.note ? "8px" : "0" }}>
-                            {(fb.flags || []).map(flag => (
-                              <span key={flag} style={s.feedbackFlagChip}>{flag}</span>
-                            ))}
-                          </div>
-                          {fb.note && (
-                            <div style={s.feedbackNote}>"{fb.note}"</div>
-                          )}
+                          {fb.category && <div style={{fontSize:12,color:P.soft,marginBottom:4}}>Area: {fb.category}</div>}
+                          {fb.description && <div style={{fontSize:13,color:P.text,lineHeight:1.55}}>{fb.description}</div>}
                         </div>
                       ))}
-                    </div>
+                    </>
                   )}
                 </div>
 
-                {/* ── RECENT SEARCHES ── */}
-                <div style={s.panelCard}>
-                  <div style={s.sectionTopRow}>
-                    <div style={s.sectionHeading}>Recent Plays</div>
-                    <span style={s.countPill}>{recentSearchList.length}</span>
-                  </div>
-                  {recentSearchList.length === 0 ? (
-                    <p style={{ color:PALETTE.textMuted, fontSize:"13px", margin:0 }}>No searches yet.</p>
-                  ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
-                      {recentSearchList.map(s2 => (
-                        <div key={s2.id} style={s.searchRow}>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:"13px", color:PALETTE.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                              {s2.situation_text}
-                            </div>
-                            {s2.company_policies?.title && (
-                              <div style={{ fontSize:"11px", color:PALETTE.textSoft, marginTop:"2px" }}>
-                                → {s2.company_policies.title}
-                                {s2.company_policies.category && (
-                                  <span style={{ ...s.catBadge, marginLeft:"6px", padding:"1px 5px", fontSize:"9px" }}>
-                                    {s2.company_policies.category}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <span style={{ fontSize:"11px", color:PALETTE.textMuted, fontFamily:MONO, flexShrink:0 }}>{timeAgo(s2.created_at)}</span>
+                {/* Policy feedback */}
+                {feedbackList.length > 0 && (
+                  <div style={{marginBottom:24}}>
+                    <div style={s.sectionLabel}>Policy Flags</div>
+                    {feedbackList.map(fb=>(
+                      <div key={fb.id} style={{...s.card,marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+                          <div style={{fontSize:13,fontWeight:700,color:P.text,flex:1}}>{fb.company_policies?.title||"Policy"}</div>
+                          <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                          {(fb.flags||[]).map(flag=>(
+                            <span key={flag} style={s.badge(P.borderMid)}>{flag}</span>
+                          ))}
+                        </div>
+                        {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
+                        {fb.facility_number && <div style={{marginTop:6,fontSize:11,color:P.muted}}>Facility {fb.facility_number}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            ANALYTICS TAB (admin only)
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === "analytics" && isAdmin && (
+          <div className="fade-in">
+            <div style={s.pageHeader}>
+              <div style={s.pageTitle}>Analytics</div>
+              <div style={s.pageSubhead}>Full usage data and feedback</div>
+            </div>
+
+            {sigLoading ? (
+              <div style={s.loadingState}><div style={s.spinner}/><span style={s.loadingText}>Loading…</span></div>
+            ) : (
+              <>
+                <div style={s.statsGrid}>
+                  <div style={s.statCard}><div style={s.statValue}>{totalSearches}</div><div style={s.statLabel}>Total plays</div></div>
+                  <div style={s.statCard}><div style={s.statValue}>{catBreakdown.length}</div><div style={s.statLabel}>Categories</div></div>
+                  <div style={s.statCard}><div style={s.statValue}>{feedbackList.length}</div><div style={s.statLabel}>Policy flags</div></div>
+                </div>
+
+                <div style={{marginBottom:20}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <div style={s.sectionLabel}>Plays by Category</div>
+                    <button style={s.ghostSmallBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
+                  </div>
+                  <div style={s.card}>
+                    {catBreakdown.length === 0
+                      ? <div style={{color:P.muted,fontSize:13}}>No data yet.</div>
+                      : catBreakdown.map(([cat,count],i)=>{
+                          const pct=Math.round((count/catBreakdown[0][1])*100);
+                          return(
+                            <div key={cat} style={{...(i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{})}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                                <span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span>
+                                <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span>
+                              </div>
+                              <div style={{height:5,background:P.raise,borderRadius:3,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:P.blue,borderRadius:3}}/>
+                              </div>
+                            </div>
+                          );
+                        })
+                    }
+                  </div>
+                </div>
+
+                <div style={{marginBottom:20}}>
+                  <div style={s.sectionLabel}>Policy Feedback</div>
+                  {feedbackList.length === 0
+                    ? <div style={{...s.card,textAlign:"center",padding:"24px",color:P.muted,fontSize:13}}>No feedback yet.</div>
+                    : feedbackList.map(fb=>(
+                      <div key={fb.id} style={{...s.card,marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
+                          <div style={{fontSize:13,fontWeight:700,color:P.text}}>{fb.company_policies?.title||"Policy"}</div>
+                          <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
+                        </div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                          {(fb.flags||[]).map(f=><span key={f} style={s.badge(P.borderMid)}>{f}</span>)}
+                        </div>
+                        {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
+                      </div>
+                    ))
+                  }
+                </div>
+
+                <div style={{marginBottom:20}}>
+                  <div style={s.sectionLabel}>Recent Plays</div>
+                  <div style={s.card}>
+                    {recentSearches.length === 0
+                      ? <div style={{color:P.muted,fontSize:13}}>No searches yet.</div>
+                      : recentSearches.map((sr,i)=>(
+                        <div key={sr.id} style={{...(i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{})}}>
+                          <div style={{fontSize:13,color:P.text,marginBottom:3}}>{sr.situation_text}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            {sr.company_policies?.title && <span style={{fontSize:11,color:P.soft}}>→ {sr.company_policies.title}</span>}
+                            {sr.company_policies?.category && <span style={s.badge(P.borderMid)}>{sr.company_policies.category}</span>}
+                            <span style={{fontSize:11,color:P.muted,marginLeft:"auto",fontFamily:MONO}}>{timeAgo(sr.created_at)}</span>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
                 </div>
               </>
             )}
@@ -806,44 +1144,56 @@ export default function PlaybookDashboard() {
 
       </main>
 
-      {/* ── FEEDBACK MODAL ── */}
-      {showFeedback && (
-        <div style={s.overlay} onClick={closeFeedback}>
-          <div style={s.modal} onClick={e => e.stopPropagation()}>
-            {feedbackDone ? (
-              <>
-                <div style={s.modalTitle}>Thanks for the signal</div>
-                <p style={s.modalText}>Your feedback helps improve policies for the whole team.</p>
-                <button style={s.primaryBtn} onClick={closeFeedback}>Done</button>
-              </>
+      {/* ── BOTTOM NAV (mobile) ──────────────────────────────────────────── */}
+      {isMobile && (
+        <nav style={s.bottomNav}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setActiveTab(t.id)}
+              style={{...s.bottomNavItem,...(activeTab===t.id?s.bottomNavItemActive:{})}}>
+              <NavIcon name={t.icon} active={activeTab===t.id}/>
+              <span style={{...s.bottomNavLabel,...(activeTab===t.id?{color:P.blue}:{})}}>{t.label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* ── POLICY FEEDBACK MODAL ─────────────────────────────────────────── */}
+      {showPolicyFeedback && (
+        <div style={s.overlay} onClick={closePolicyFeedback}>
+          <div style={s.modal} onClick={e=>e.stopPropagation()}>
+            {policyFbDone ? (
+              <div style={{textAlign:"center",padding:"8px 0 16px"}}>
+                <div style={{...s.successIcon,margin:"0 auto 12px"}}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div style={{fontSize:16,fontWeight:700,color:P.text,marginBottom:8}}>Thanks for flagging that</div>
+                <div style={{fontSize:13,color:P.soft,lineHeight:1.55,marginBottom:20}}>Your feedback helps improve policies for everyone.</div>
+                <button style={s.primaryBtn} onClick={closePolicyFeedback}>Done</button>
+              </div>
             ) : (
               <>
                 <div style={s.modalTitle}>Flag Policy</div>
-                <p style={s.modalSub}>{result?.title}</p>
-                <div style={s.flagList}>
-                  {FEEDBACK_FLAGS.map(flag => (
-                    <button key={flag}
-                      style={{ ...s.flagChip, ...(feedbackFlags.includes(flag) ? s.flagChipOn : {}) }}
-                      onClick={() => toggleFlag(flag)}>
-                      {feedbackFlags.includes(flag) ? "✓  " : ""}{flag}
+                <div style={{fontSize:13,color:P.soft,marginBottom:16,lineHeight:1.5}}>{result?.title}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+                  {POLICY_FLAGS.map(flag=>(
+                    <button key={flag} onClick={()=>togglePolicyFlag(flag)}
+                      style={{...s.fbTypeBtn,...(policyFlags.includes(flag)?{...s.fbTypeBtnActive,borderColor:P.blue,color:P.text}:{})}}>
+                      {policyFlags.includes(flag)?"✓  ":""}{flag}
                     </button>
                   ))}
                 </div>
-                <div style={{ marginBottom:"16px" }}>
-                  <label style={s.label}>
-                    Optional note <span style={{ color:PALETTE.textMuted, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(max 280 chars)</span>
-                  </label>
-                  <textarea value={feedbackNote} onChange={e => setFeedbackNote(e.target.value.slice(0, 280))}
-                    placeholder="Any additional context…" style={{ ...s.textarea, minHeight:"64px" }} />
-                  <div style={{ fontSize:"10px", color:PALETTE.textMuted, textAlign:"right", marginTop:"-10px" }}>{feedbackNote.length}/280</div>
-                </div>
-                <div style={{ display:"flex", gap:"8px" }}>
-                  <button
-                    style={{ ...s.primaryBtn, flex:1, ...(!feedbackFlags.length || feedbackSubmitting ? { opacity:0.45, cursor:"not-allowed" } : {}) }}
-                    onClick={submitFeedback} disabled={!feedbackFlags.length || feedbackSubmitting}>
-                    {feedbackSubmitting ? "Submitting…" : "Submit Feedback"}
+                <label style={s.fieldLabel}>
+                  Optional note <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(max 280 chars)</span>
+                </label>
+                <textarea value={policyFeedbackNote} onChange={e=>setPolicyFeedbackNote(e.target.value.slice(0,280))}
+                  placeholder="Any context…" style={{...s.textInput,minHeight:72,resize:"vertical",marginBottom:4,lineHeight:1.65}}/>
+                <div style={{fontSize:10,color:P.muted,textAlign:"right",marginBottom:16}}>{policyFeedbackNote.length}/280</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button style={{...s.primaryBtn,flex:1,...(!policyFlags.length||policyFbSubmitting?{opacity:0.45,pointerEvents:"none"}:{})}}
+                    onClick={submitPolicyFeedback} disabled={!policyFlags.length||policyFbSubmitting}>
+                    {policyFbSubmitting?"Submitting…":"Submit"}
                   </button>
-                  <button style={s.secondaryBtn} onClick={closeFeedback}>Cancel</button>
+                  <button style={s.outlineBtn} onClick={closePolicyFeedback}>Cancel</button>
                 </div>
               </>
             )}
@@ -851,157 +1201,192 @@ export default function PlaybookDashboard() {
         </div>
       )}
 
-      {/* ── FOOTER ── */}
-      <footer style={s.footer}>
-        <a href="/support" style={s.footerLink}>Contact Support</a>
-        <div style={s.footerBrand}>Operator Support Systems</div>
-      </footer>
+      {/* ── FOOTER ───────────────────────────────────────────────────────── */}
+      {!isMobile && (
+        <footer style={s.footer}>
+          <a href="/support" style={s.footerLink}>Contact Support</a>
+          <span style={s.footerBrand}>Operator Support Systems</span>
+        </footer>
+      )}
     </div>
   );
 }
 
-// ─── CSS ──────────────────────────────────────────────────────────────────────
-const css = `
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
-  @keyframes fadeUp { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
-  @keyframes pulse  { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
-  .fade-up { animation: fadeUp 0.20s ease both; }
-  .nav-tab:hover { color: #E8EDF3 !important; }
+// ─── GLOBAL CSS ───────────────────────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; -webkit-font-smoothing: antialiased; }
+  @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes spin    { to { transform: rotate(360deg); } }
+  @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .fade-in           { animation: fadeIn 0.18s ease both; }
+  .nav-btn:hover     { color: #EDF1F5 !important; }
+  .ghost-btn:hover   { background: rgba(255,255,255,0.05) !important; }
+  .list-row:hover    { border-color: #3A5168 !important; background: rgba(74,130,176,0.05) !important; }
+  .proc-header:hover { background: rgba(255,255,255,0.02) !important; }
+  .fb-type-btn:hover { border-color: #3A5168 !important; }
   textarea:focus, input:focus, select:focus {
-    border-color: rgba(77,126,168,0.60) !important;
-    box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important;
+    border-color: rgba(74,130,176,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(74,130,176,0.10) !important;
     outline: none !important;
   }
-  ::-webkit-scrollbar { width:5px; height:5px; }
-  ::-webkit-scrollbar-track { background:#0B1118; }
-  ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
-  ::-webkit-scrollbar-thumb:hover { background:#3A5068; }
-  .recent-chip:hover { border-color:#4A6680 !important; color:#E8EDF3 !important; }
-  .alt-btn:hover { border-color:#4D7EA8 !important; background:rgba(77,126,168,0.07) !important; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #22303F; border-radius: 4px; }
+  button { font-family: inherit; }
+  a { -webkit-tap-highlight-color: transparent; }
+  button { -webkit-tap-highlight-color: transparent; cursor: pointer; }
 `;
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const s = {
-  page: { minHeight:"100vh", background:PALETTE.bg, color:PALETTE.text, fontFamily:SANS, padding:0, boxSizing:"border-box" },
+  shell:  { minHeight:"100vh", background:P.bg, color:P.text, fontFamily:SANS },
 
-  // nav
-  topNav:         { background:PALETTE.panel, borderBottom:`1px solid ${PALETTE.borderStrong}`, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, height:"52px", paddingLeft:"20px", paddingRight:"16px", boxSizing:"border-box", boxShadow:"0 1px 0 rgba(0,0,0,0.30)" },
-  topNavBrand:    { minWidth:"160px", flexShrink:0 },
-  topNavProduct:  { fontWeight:700, color:PALETTE.text, fontSize:"14px", letterSpacing:"-0.01em" },
-  topNavMeta:     { color:PALETTE.textMuted, marginTop:"2px", fontSize:"10px", letterSpacing:"0.03em" },
-  topNavItems:    { display:"flex", alignItems:"stretch", gap:0, flex:1, overflowX:"auto", height:"52px" },
-  topNavBtn:      { border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:PALETTE.textSoft, padding:"0 14px", fontSize:"11px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.05em", textTransform:"uppercase", display:"flex", alignItems:"center", transition:"color 0.15s ease" },
-  topNavBtnActive:{ borderBottom:`2px solid ${PALETTE.blue}`, color:PALETTE.text },
-  topNavRight:    { display:"flex", alignItems:"center", gap:"8px", flexShrink:0 },
-  topNavLogout:   { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"5px 11px", fontSize:"10px", fontWeight:700, cursor:"pointer", letterSpacing:"0.07em", textTransform:"uppercase" },
-  mobileMenuBtn:  { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.text, borderRadius:"3px", padding:"6px 10px", fontSize:"12px", fontWeight:700, cursor:"pointer" },
-  mobileDropdown: { background:PALETTE.panel, borderBottom:`1px solid ${PALETTE.border}`, padding:"10px 16px", display:"flex", flexDirection:"column", gap:"2px" },
-  navDivider:     { height:"1px", background:PALETTE.border, margin:"4px 0" },
-  navButton:      { width:"100%", textAlign:"left", border:"none", borderLeft:"2px solid transparent", background:"transparent", color:PALETTE.textSoft, padding:"10px 14px", fontSize:"12px", fontWeight:600, cursor:"pointer", letterSpacing:"0.04em", textTransform:"uppercase" },
-  navButtonActive:{ borderLeft:`2px solid ${PALETTE.blue}`, color:PALETTE.text, background:PALETTE.blueGlow },
+  // Top bar
+  topBar:       { background:P.surface, borderBottom:`1px solid ${P.border}`, position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 0 rgba(0,0,0,0.4)" },
+  topBarInner:  { maxWidth:900, margin:"0 auto", display:"flex", alignItems:"center", height:52, paddingLeft:16, paddingRight:16, gap:16 },
+  brand:        { display:"flex", alignItems:"center", gap:8, flexShrink:0 },
+  brandDot:     { width:8, height:8, borderRadius:"50%", background:P.blue, boxShadow:`0 0 8px ${P.blue}`, display:"inline-block" },
+  brandName:    { fontWeight:700, fontSize:15, color:P.text, letterSpacing:"-0.01em" },
+  proBadge:     { fontSize:9, fontWeight:800, color:P.blue, background:P.blueDim, border:`1px solid rgba(74,130,176,0.30)`, borderRadius:3, padding:"2px 6px", letterSpacing:"0.08em" },
+  desktopNav:   { display:"flex", alignItems:"stretch", flex:1, height:52, overflowX:"auto" },
+  desktopNavBtn:{ border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:P.muted, padding:"0 14px", fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.04em", textTransform:"uppercase", display:"flex", alignItems:"center", transition:"color 0.15s ease" },
+  desktopNavBtnActive: { borderBottom:`2px solid ${P.blue}`, color:P.text },
+  topBarRight:  { display:"flex", alignItems:"center", gap:10, marginLeft:"auto", flexShrink:0 },
+  mobileUser:   { fontSize:11, color:P.muted, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em" },
+  signOutBtn:   { border:`1px solid ${P.border}`, background:"transparent", color:P.muted, borderRadius:5, padding:"6px 12px", fontSize:11, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase", transition:"background 0.15s" },
 
-  // layout
-  main: { maxWidth:"860px", margin:"0 auto", display:"flex", flexDirection:"column", gap:"14px", padding:"28px 16px", boxSizing:"border-box" },
+  // Main
+  main: { maxWidth:860, margin:"0 auto", padding:"24px 16px 40px", display:"flex", flexDirection:"column", gap:0 },
 
-  // search
-  heroLabel:   { fontSize:"22px", fontWeight:700, color:PALETTE.text, letterSpacing:"-0.01em", marginBottom:"16px" },
-  searchForm:  { display:"flex", flexDirection:"column", gap:"10px", marginBottom:"24px" },
-  searchInput: { width:"100%", borderRadius:"4px", border:`1px solid ${PALETTE.borderStrong}`, borderTop:`1px solid ${PALETTE.borderBright}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"16px 18px", fontSize:"15px", lineHeight:1.6, resize:"vertical", outline:"none", boxSizing:"border-box", fontFamily:SANS, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.025)" },
-  searchBtn:   { alignSelf:"flex-end", border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.15)", color:PALETTE.blue, borderRadius:"3px", padding:"10px 22px", fontSize:"12px", fontWeight:700, cursor:"pointer", letterSpacing:"0.06em", textTransform:"uppercase", fontFamily:SANS },
+  // Page header
+  pageHeader:  { marginBottom:24 },
+  pageGreeting:{ fontSize:22, fontWeight:700, color:P.text, letterSpacing:"-0.02em", marginBottom:4, lineHeight:1.2 },
+  pageTitle:   { fontSize:22, fontWeight:700, color:P.text, letterSpacing:"-0.02em", marginBottom:4 },
+  pageSubhead: { fontSize:14, color:P.soft, lineHeight:1.55 },
 
-  // recents
-  recentSection: { marginBottom:"20px" },
-  recentLabel:   { fontSize:"10px", fontWeight:800, color:PALETTE.textMuted, textTransform:"uppercase", letterSpacing:"0.10em", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}`, marginBottom:"8px" },
-  recentChip:    { display:"flex", alignItems:"center", gap:"8px", width:"100%", textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"9px 14px", fontSize:"13px", cursor:"pointer", marginBottom:"4px", transition:"border-color 0.12s ease, color 0.12s ease" },
-  recentStar:    { color:PALETTE.amber, fontSize:"12px", flexShrink:0 },
+  // Bottom nav
+  bottomNav:          { position:"fixed", bottom:0, left:0, right:0, height:60, background:P.surface, borderTop:`1px solid ${P.border}`, display:"flex", alignItems:"stretch", zIndex:100, boxShadow:"0 -1px 0 rgba(0,0,0,0.5)" },
+  bottomNavItem:      { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, border:"none", background:"transparent", padding:"6px 0", minWidth:0, transition:"background 0.15s" },
+  bottomNavItemActive:{ background:`rgba(74,130,176,0.07)` },
+  bottomNavLabel:     { fontSize:10, fontWeight:600, color:P.muted, letterSpacing:"0.04em", textTransform:"uppercase" },
 
-  // searching / loading
-  searchingState: { display:"flex", alignItems:"center", gap:"12px", padding:"40px 0" },
-  searchingDot:   { width:"8px", height:"8px", borderRadius:"50%", background:PALETTE.blue, animation:"pulse 1.2s ease infinite", flexShrink:0 },
-  searchingText:  { fontSize:"14px", color:PALETTE.textSoft, fontWeight:600 },
+  // Home screen
+  homeGrid:       { display:"flex", flexDirection:"column", gap:12 },
+  homeHeroCard:   { width:"100%", background:P.raise, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.blue}`, borderRadius:10, padding:"22px 20px", textAlign:"left", cursor:"pointer", position:"relative", boxShadow:"0 4px 16px rgba(0,0,0,0.3)" },
+  homeHeroIcon:   { marginBottom:14, display:"inline-flex", padding:"10px", background:P.blueDim, borderRadius:8 },
+  homeHeroTitle:  { fontSize:18, fontWeight:700, color:P.text, marginBottom:4, letterSpacing:"-0.01em" },
+  homeHeroSub:    { fontSize:13, color:P.soft, lineHeight:1.5 },
+  homeHeroArrow:  { position:"absolute", right:20, top:"50%", transform:"translateY(-50%)", fontSize:18, color:P.blue, fontWeight:700 },
+  homeCard:       { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 18px", textAlign:"left", cursor:"pointer" },
+  homeCardIcon:   { width:40, height:40, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
+  homeCardTitle:  { fontSize:15, fontWeight:700, color:P.text, marginBottom:2 },
+  homeCardSub:    { fontSize:13, color:P.soft },
+  homeSmallCard:  { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px", display:"flex", flexDirection:"column", alignItems:"center", gap:8, cursor:"pointer", minHeight:80, justifyContent:"center" },
+  homeSmallTitle: { fontSize:12, fontWeight:700, color:P.soft, textTransform:"uppercase", letterSpacing:"0.06em" },
+  homeSectionWrap:{ marginTop:4 },
+  homeSectionLabel:{ fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:8, paddingLeft:2 },
 
-  // no result
-  noResultWrap:  { padding:"40px 0", display:"flex", flexDirection:"column", gap:"10px" },
-  noResultTitle: { fontSize:"16px", fontWeight:700, color:PALETTE.text },
-  noResultText:  { fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.6, margin:0 },
+  // Stat cards
+  statsGrid: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10, marginBottom:20 },
+  statCard:  { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 14px", boxShadow:"0 2px 8px rgba(0,0,0,0.2)" },
+  statValue: { fontSize:28, fontWeight:700, color:P.text, fontFamily:MONO, letterSpacing:"-0.03em", lineHeight:1 },
+  statLabel: { fontSize:11, fontWeight:600, color:P.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginTop:6 },
 
-  // result view
-  resultBar:        { display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", marginBottom:"14px", flexWrap:"wrap" },
-  backBtn:          { border:"none", background:"transparent", color:PALETTE.blue, fontSize:"12px", fontWeight:700, cursor:"pointer", letterSpacing:"0.04em", padding:0 },
-  resultBarActions: { display:"flex", gap:"8px", alignItems:"center" },
-  saveBtn:          { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"6px 12px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
-  saveBtnActive:    { border:`1px solid rgba(183,146,90,0.45)`, color:PALETTE.amber, background:"rgba(183,146,90,0.10)" },
-  flagBtn:          { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"6px 12px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
+  // Alert cards
+  alertCard:  { background:P.surface, border:`1px solid ${P.border}`, borderLeft:`3px solid ${P.amber}`, borderRadius:8, padding:"14px 16px", marginBottom:8 },
+  alertTitle: { fontSize:14, fontWeight:700, color:P.text, marginBottom:3 },
+  alertSub:   { fontSize:12, color:P.soft, lineHeight:1.5 },
 
-  situationEcho:      { fontSize:"13px", color:PALETTE.textSoft, marginBottom:"12px", padding:"10px 14px", background:PALETTE.panelAlt, border:`1px solid ${PALETTE.border}`, borderRadius:"3px", lineHeight:1.5 },
-  situationEchoLabel: { fontWeight:700, color:PALETTE.textMuted, marginRight:"4px" },
+  // Section labels
+  sectionLabel:     { fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:12, paddingLeft:4, borderLeft:`2px solid ${P.borderHigh}` },
+  sectionMiniLabel: { fontSize:10, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:8, paddingLeft:2 },
 
-  resultCard:   { background:PALETTE.panel, border:`1px solid ${PALETTE.border}`, borderTop:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"18px 20px", marginBottom:"10px", boxShadow:"0 2px 8px rgba(0,0,0,0.22)" },
-  cardLabel:    { fontSize:"10px", fontWeight:800, letterSpacing:"0.12em", textTransform:"uppercase", color:PALETTE.textMuted, marginBottom:"12px", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}` },
-  actionSteps:  { fontSize:"14px", lineHeight:1.8, color:PALETTE.text, whiteSpace:"pre-wrap" },
-  policyTitle:  { fontSize:"15px", fontWeight:700, color:PALETTE.text, marginBottom:"6px" },
-  policySummary:{ fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.65, margin:"10px 0 0" },
-  bodyText:     { fontSize:"13px", lineHeight:1.7, color:PALETTE.text, whiteSpace:"pre-wrap" },
+  // Cards
+  card: { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 18px" },
+  cardSection: { marginBottom:20 },
 
-  codeBadge: { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:700, background:"rgba(77,126,168,0.15)", border:`1px solid rgba(77,126,168,0.42)`, color:PALETTE.blue, letterSpacing:"0.06em", textTransform:"uppercase" },
-  catBadge:  { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:700, background:PALETTE.blueSoft, border:`1px solid ${PALETTE.border}`, color:PALETTE.textSoft, letterSpacing:"0.05em" },
-  sevBadge:  { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:600, background:"transparent", border:`1px solid ${PALETTE.border}`, color:PALETTE.textMuted, letterSpacing:"0.04em" },
+  // Recent rows
+  recentRow:     { width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, background:"transparent", border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 14px", textAlign:"left", marginBottom:6, transition:"border-color 0.12s,background 0.12s" },
+  recentRowText: { fontSize:13, color:P.soft, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
+  recentRowTime: { fontSize:11, color:P.muted, fontFamily:MONO, flexShrink:0 },
 
-  altSection: { marginTop:"4px", marginBottom:"10px" },
-  altLabel:   { fontSize:"10px", fontWeight:800, color:PALETTE.textMuted, letterSpacing:"0.10em", textTransform:"uppercase", marginBottom:"8px", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}` },
-  altBtn:     { width:"100%", textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", borderRadius:"3px", padding:"10px 14px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", marginBottom:"4px", transition:"border-color 0.12s ease, background 0.12s ease" },
-  altTitle:   { fontSize:"13px", fontWeight:600, color:PALETTE.textSoft },
-  altCode:    { fontSize:"11px", color:PALETTE.textMuted, fontFamily:MONO, flexShrink:0 },
+  // Search
+  searchForm:     { display:"flex", flexDirection:"column", gap:12, marginBottom:28 },
+  searchTextarea: { width:"100%", minHeight:120, background:P.raise, border:`1px solid ${P.borderMid}`, borderTop:`1px solid ${P.borderHigh}`, borderRadius:10, color:P.text, padding:"16px 18px", fontSize:15, lineHeight:1.65, resize:"vertical", outline:"none", fontFamily:SANS, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.025)" },
+  searchSubmitBtn:{ width:"100%", minHeight:52, background:P.blue, border:`1px solid ${P.blue}`, color:"#fff", borderRadius:10, fontSize:15, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 4px 14px rgba(74,130,176,0.30)", transition:"opacity 0.15s" },
+  recentSection:     { marginBottom:24 },
+  recentSectionLabel:{ fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:8, paddingLeft:2 },
+  recentChip:        { width:"100%", display:"flex", alignItems:"center", gap:10, background:"transparent", border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 14px", textAlign:"left", marginBottom:6, transition:"border-color 0.12s,background 0.12s" },
+  recentChipText:    { fontSize:13, color:P.soft, flex:1 },
 
-  searchBarBottom:   { marginTop:"8px", paddingTop:"16px", borderTop:`1px solid ${PALETTE.border}` },
-  searchInlineForm:  { display:"flex", gap:"8px" },
-  searchInlineInput: { flex:1, borderRadius:"3px", border:`1px solid ${PALETTE.borderStrong}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"10px 14px", fontSize:"13px", outline:"none", fontFamily:SANS },
-  searchInlineBtn:   { border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.13)", color:PALETTE.blue, borderRadius:"3px", padding:"10px 16px", fontSize:"14px", fontWeight:700, cursor:"pointer" },
+  // Loading / empty
+  loadingState: { display:"flex", alignItems:"center", gap:12, padding:"60px 0", justifyContent:"center" },
+  spinner:      { width:24, height:24, border:`2px solid ${P.borderMid}`, borderTopColor:P.blue, borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 },
+  loadingText:  { fontSize:13, color:P.soft },
+  emptyState:   { display:"flex", flexDirection:"column", alignItems:"center", gap:12, padding:"60px 20px", textAlign:"center" },
+  emptyIcon:    { width:56, height:56, borderRadius:12, background:P.raise, border:`1px solid ${P.border}`, display:"flex", alignItems:"center", justifyContent:"center" },
+  emptyTitle:   { fontSize:17, fontWeight:700, color:P.text },
+  emptyBody:    { fontSize:13, color:P.soft, lineHeight:1.6, maxWidth:280 },
 
-  // panels
-  panelCard:     { background:PALETTE.panel, border:`1px solid ${PALETTE.border}`, borderTop:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"20px 22px", boxShadow:"0 2px 10px rgba(0,0,0,0.25)" },
-  sectionTopRow: { display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", flexWrap:"wrap", marginBottom:"16px" },
-  sectionHeading:{ fontSize:"11px", fontWeight:800, color:PALETTE.text, textTransform:"uppercase", letterSpacing:"0.11em", paddingLeft:"8px", borderLeft:`2px solid ${PALETTE.borderBright}`, lineHeight:"14px" },
-  label:         { display:"block", marginBottom:"8px", fontSize:"10px", fontWeight:700, color:PALETTE.textSoft, textTransform:"uppercase", letterSpacing:"0.09em" },
-  selectInput:   { width:"100%", borderRadius:"3px", border:`1px solid ${PALETTE.border}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"10px 12px", fontSize:"13px", outline:"none", boxSizing:"border-box" },
-  textarea:      { width:"100%", minHeight:"110px", borderRadius:"3px", border:`1px solid ${PALETTE.border}`, background:PALETTE.panelAlt, color:PALETTE.text, padding:"12px 14px", fontSize:"14px", lineHeight:1.65, resize:"vertical", outline:"none", boxSizing:"border-box", fontFamily:SANS },
-  primaryBtn:    { border:`1px solid ${PALETTE.blue}`, background:"rgba(77,126,168,0.14)", color:PALETTE.blue, borderRadius:"3px", padding:"9px 18px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.07em", textTransform:"uppercase", fontFamily:SANS },
-  secondaryBtn:  { border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"7px 13px", fontSize:"11px", fontWeight:700, cursor:"pointer", letterSpacing:"0.05em" },
-  countPill:     { fontSize:"11px", fontWeight:700, color:PALETTE.textMuted, background:PALETTE.panelAlt, border:`1px solid ${PALETTE.border}`, borderRadius:"10px", padding:"2px 8px", fontFamily:MONO },
+  // Result view
+  resultActionBar:  { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:12 },
+  backTextBtn:      { display:"flex", alignItems:"center", gap:4, background:"transparent", border:"none", color:P.blue, fontSize:14, fontWeight:600, padding:0, cursor:"pointer" },
+  chipBtn:          { border:`1px solid ${P.border}`, background:"transparent", color:P.soft, borderRadius:6, padding:"7px 12px", fontSize:12, fontWeight:600, cursor:"pointer", letterSpacing:"0.02em" },
+  chipBtnSaved:     { border:`1px solid rgba(181,144,78,0.4)`, color:P.amber, background:P.amberDim },
+  situationEcho:    { background:P.raise, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 14px", fontSize:13, color:P.soft, lineHeight:1.55, marginBottom:12 },
+  resultCard:       { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"18px", marginBottom:10, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" },
+  resultCardLabel:  { fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.borderHigh}` },
+  resultCardBody:   { fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
+  policyName:       { fontSize:16, fontWeight:700, color:P.text, marginBottom:2 },
+  altPolicyRow:     { width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, background:"transparent", border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 14px", textAlign:"left", marginBottom:6, cursor:"pointer", transition:"border-color 0.12s,background 0.12s" },
+  searchAgainWrap:  { marginTop:20, paddingTop:16, borderTop:`1px solid ${P.border}` },
+  inlineSearchInput:{ flex:1, height:48, background:P.raise, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"0 14px", fontSize:14, outline:"none", fontFamily:SANS },
+  inlineSearchBtn:  { width:48, height:48, background:P.blue, border:"none", borderRadius:8, color:"#fff", fontSize:18, fontWeight:700, cursor:"pointer", flexShrink:0 },
 
-  // notes
-  noteCard:      { background:PALETTE.panelAlt, border:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"14px 16px", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.025), 0 1px 4px rgba(0,0,0,0.18)" },
-  noteBadge:     { display:"inline-flex", alignItems:"center", padding:"3px 7px", borderRadius:"2px", fontSize:"10px", fontWeight:800, letterSpacing:"0.07em", textTransform:"uppercase" },
-  noteType:      { fontSize:"12px", color:PALETTE.textSoft, fontWeight:600 },
-  noteTimestamp: { fontSize:"11px", color:"#8F9EAD", fontFamily:MONO },
-  noteText:      { fontSize:"13px", color:PALETTE.text, lineHeight:1.65 },
-  noteBy:        { marginTop:"8px", fontSize:"11px", color:PALETTE.textMuted },
+  // Procedures
+  catGroupLabel: { fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", paddingLeft:4, borderLeft:`2px solid ${P.borderHigh}`, marginBottom:10 },
+  procCard:      { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, marginBottom:8, overflow:"hidden" },
+  procHeader:    { width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, background:"transparent", border:"none", padding:"16px 18px", textAlign:"left", transition:"background 0.12s" },
+  procTitle:     { fontSize:15, fontWeight:700, color:P.text, marginBottom:2 },
+  procSummaryLine:{ fontSize:12, color:P.muted, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:"90%" },
+  procBody:      { padding:"0 18px 18px", borderTop:`1px solid ${P.border}` },
+  procStepLabel: { fontSize:10, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10, marginTop:16 },
+  procSteps:     { fontSize:14, color:P.text, lineHeight:1.8, whiteSpace:"pre-wrap" },
 
-  // admin analytics
-  statsRow:  { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:"12px" },
-  statCard:  { background:PALETTE.panel, border:`1px solid ${PALETTE.border}`, borderTop:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"18px 20px", boxShadow:"0 2px 8px rgba(0,0,0,0.20)" },
-  statValue: { fontSize:"32px", fontWeight:700, color:PALETTE.text, fontFamily:MONO, letterSpacing:"-0.02em", lineHeight:1 },
-  statLabel: { fontSize:"10px", fontWeight:700, color:PALETTE.textMuted, textTransform:"uppercase", letterSpacing:"0.10em", marginTop:"8px" },
+  // Feedback form
+  fbTypeGrid:    { display:"flex", flexDirection:"column", gap:8 },
+  fbTypeBtn:     { width:"100%", background:"transparent", border:`1px solid ${P.border}`, borderRadius:8, padding:"13px 16px", textAlign:"left", fontSize:14, color:P.soft, transition:"border-color 0.12s" },
+  fbTypeBtnActive:{ background:P.raise, color:P.text },
+  fieldLabel:    { display:"block", fontSize:11, fontWeight:700, color:P.soft, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 },
+  textInput:     { width:"100%", minHeight:48, background:P.raise, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"13px 16px", fontSize:14, outline:"none", fontFamily:SANS, display:"block" },
+  errorBox:      { background:P.redDim, border:`1px solid rgba(168,88,88,0.30)`, borderRadius:8, padding:"12px 16px", fontSize:13, color:P.red, marginBottom:16, lineHeight:1.5 },
 
-  feedbackCard:    { background:PALETTE.panelAlt, border:`1px solid ${PALETTE.borderStrong}`, borderRadius:"4px", padding:"14px 16px" },
-  feedbackFlagChip:{ display:"inline-flex", alignItems:"center", padding:"3px 8px", borderRadius:"2px", fontSize:"11px", fontWeight:600, background:"rgba(77,126,168,0.10)", border:`1px solid rgba(77,126,168,0.30)`, color:PALETTE.textSoft },
-  feedbackNote:    { fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.55, fontStyle:"italic", marginTop:"6px", paddingTop:"8px", borderTop:`1px solid ${PALETTE.border}` },
-  facilityPill:    { fontSize:"10px", fontWeight:700, color:PALETTE.textMuted, background:PALETTE.panelDeep, border:`1px solid ${PALETTE.border}`, borderRadius:"2px", padding:"2px 6px", letterSpacing:"0.05em" },
+  // Buttons
+  primaryBtn:  { width:"100%", minHeight:52, background:P.blue, border:`1px solid ${P.blue}`, color:"#fff", borderRadius:10, fontSize:15, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", display:"block", boxShadow:"0 4px 14px rgba(74,130,176,0.25)" },
+  outlineBtn:  { background:"transparent", border:`1px solid ${P.border}`, color:P.soft, borderRadius:8, padding:"10px 18px", fontSize:13, fontWeight:600, cursor:"pointer", minHeight:44 },
+  ghostSmallBtn:{ background:"transparent", border:`1px solid ${P.border}`, color:P.muted, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.06em" },
 
-  searchRow: { display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", padding:"10px 14px", background:PALETTE.panelAlt, border:`1px solid ${PALETTE.border}`, borderRadius:"3px" },
+  // Success
+  successCard:  { background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"32px 24px", textAlign:"center" },
+  successIcon:  { width:56, height:56, background:P.greenDim, border:`1px solid rgba(94,158,114,0.3)`, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px" },
+  successTitle: { fontSize:18, fontWeight:700, color:P.text, marginBottom:8 },
+  successBody:  { fontSize:14, color:P.soft, lineHeight:1.6, marginBottom:24 },
 
-  // feedback modal
-  overlay:    { position:"fixed", inset:0, zIndex:200, background:"rgba(11,17,24,0.82)", display:"flex", alignItems:"center", justifyContent:"center", padding:"16px", boxSizing:"border-box" },
-  modal:      { background:PALETTE.panel, border:`1px solid ${PALETTE.borderStrong}`, borderTop:`1px solid ${PALETTE.borderBright}`, borderRadius:"4px", padding:"24px 26px", width:"100%", maxWidth:"440px", boxShadow:"0 8px 40px rgba(0,0,0,0.55)" },
-  modalTitle: { fontSize:"16px", fontWeight:700, color:PALETTE.text, marginBottom:"4px" },
-  modalSub:   { fontSize:"12px", color:PALETTE.textSoft, margin:"4px 0 16px" },
-  modalText:  { fontSize:"13px", color:PALETTE.textSoft, lineHeight:1.6, marginBottom:"16px" },
-  flagList:   { display:"flex", flexDirection:"column", gap:"6px", marginBottom:"16px" },
-  flagChip:   { textAlign:"left", border:`1px solid ${PALETTE.border}`, background:"transparent", color:PALETTE.textSoft, borderRadius:"3px", padding:"10px 14px", fontSize:"13px", cursor:"pointer", transition:"border-color 0.12s ease" },
-  flagChipOn: { border:`1px solid rgba(77,126,168,0.50)`, background:"rgba(77,126,168,0.10)", color:PALETTE.text },
+  // Badge helper — call as s.badge(color)
+  badge: (c) => ({ display:"inline-flex", alignItems:"center", padding:"3px 8px", borderRadius:4, fontSize:11, fontWeight:600, background:`${c}22`, border:`1px solid ${c}55`, color:c, letterSpacing:"0.04em" }),
 
-  // footer
-  footer:      { borderTop:`1px solid ${PALETTE.border}`, padding:"14px 20px", textAlign:"center", marginTop:"8px" },
-  footerLink:  { fontSize:"11px", fontWeight:600, color:PALETTE.textSoft, textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase" },
-  footerBrand: { marginTop:"6px", fontSize:"10px", color:PALETTE.textMuted, letterSpacing:"0.04em" },
+  // Section category
+  catGroupSection: { marginBottom:24 },
+
+  // Modal
+  overlay:    { position:"fixed", inset:0, zIndex:200, background:"rgba(9,14,20,0.85)", display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0", boxSizing:"border-box" },
+  modal:      { background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.borderHigh}`, borderRadius:"16px 16px 0 0", padding:"24px 20px 36px", width:"100%", maxWidth:540, boxShadow:"0 -8px 40px rgba(0,0,0,0.6)", maxHeight:"90vh", overflowY:"auto" },
+  modalTitle: { fontSize:18, fontWeight:700, color:P.text, marginBottom:4 },
+
+  // Footer
+  footer:      { borderTop:`1px solid ${P.border}`, padding:"16px 20px", textAlign:"center", marginTop:16 },
+  footerLink:  { fontSize:11, color:P.muted, textDecoration:"none", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase", marginRight:20 },
+  footerBrand: { fontSize:11, color:P.muted, letterSpacing:"0.04em" },
 };
