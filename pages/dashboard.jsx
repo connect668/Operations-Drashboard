@@ -5,26 +5,20 @@ import { supabase } from "../lib/supabaseClient";
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const P = {
-  // Page
   pageBg:    "#F6F4FA",
-  // Surfaces
   surface:   "#FFFFFF",
   surfaceSub:"#FAF9FD",
-  // Borders
   border:    "#E5E0F0",
   borderMid: "#CFC8E8",
   borderHigh:"#A99AC8",
-  // Text
   text:      "#1C1830",
   soft:      "#5C5278",
   muted:     "#9589AE",
-  // Purple accent
   purple:    "#6B5EA8",
   purpleMid: "#7B6BBB",
   purpleDeep:"#4E4280",
   purpleDim: "rgba(107,94,168,0.10)",
   purpleGlow:"rgba(107,94,168,0.05)",
-  // Status
   green:     "#2E7D52",
   greenDim:  "rgba(46,125,82,0.09)",
   amber:     "#8A5E10",
@@ -32,8 +26,8 @@ const P = {
   red:       "#8A2E2E",
   redDim:    "rgba(138,46,46,0.08)",
 };
-const SANS = 'Inter,ui-sans-serif,system-ui,-apple-system,sans-serif';
-const MONO = '"JetBrains Mono","SF Mono",ui-monospace,monospace';
+const SANS     = "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif";
+const MONO     = '"JetBrains Mono","SF Mono",ui-monospace,monospace';
 const BTN_GRAD = "linear-gradient(135deg, #7B6BBB 0%, #5A4D94 100%)";
 
 // ─── ROLES ────────────────────────────────────────────────────────────────────
@@ -63,7 +57,7 @@ const POLICY_FLAGS = [
 ];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const safeUuid = v => UUID_RE.test(v) ? v : null;
 
 function applyScope(q, profile) {
@@ -87,13 +81,33 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
 
+// ─── MATCH REASON ─────────────────────────────────────────────────────────────
+function getMatchReason(policy, term) {
+  if (!term) return "Relevant to your situation";
+  const words = term.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const hit   = (val) => val && words.some(w => val.toLowerCase().includes(w));
+
+  if (hit(policy.title))    return `Policy title matches your scenario`;
+  if (hit(policy.keywords)) return `Tagged with keywords from your search`;
+  if (hit(policy.category)) return `Covers "${policy.category}" situations`;
+  if (hit(policy.summary))  return `Policy summary addresses this scenario`;
+  if (hit(policy.policy_text)) return `Policy content is relevant`;
+  return "Broadly relevant to your situation";
+}
+
+function getRelevanceLabel(index) {
+  if (index === 0) return "Best Match";
+  if (index <= 2)  return "Strong Match";
+  return "Related";
+}
+
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 function buildTabs(role) {
   const t = [
-    { id:"home",      label:"Home",     icon:"home"     },
-    { id:"ask",       label:"Ask",      icon:"ask"      },
+    { id:"home",      label:"Home",     icon:"home"      },
+    { id:"ask",       label:"Ask",      icon:"ask"       },
   ];
-  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides",    icon:"guides"   });
+  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides",    icon:"guides"    });
   t.push({ id:"feedback",  label:"Feedback",  icon:"feedback"  });
   if (atLeast(role,"gm"))   t.push({ id:"signals",   label:"Signals",   icon:"signals"   });
   if (role === "admin")     t.push({ id:"analytics", label:"Analytics", icon:"analytics" });
@@ -128,6 +142,18 @@ function Logo({ size = 22 }) {
   );
 }
 
+// ─── PDF ICON ─────────────────────────────────────────────────────────────────
+function PdfIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.red} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="9" y1="13" x2="15" y2="13"/>
+      <line x1="9" y1="17" x2="13" y2="17"/>
+    </svg>
+  );
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function PlaybookApp() {
   const router = useRouter();
@@ -137,32 +163,34 @@ export default function PlaybookApp() {
   const [activeTab,   setActiveTab]   = useState("home");
   const [isMobile,    setIsMobile]    = useState(false);
 
-  // Ask/Search
-  const [query,      setQuery]      = useState("");
-  const [searching,  setSearching]  = useState(false);
-  const [result,     setResult]     = useState(null);
-  const [altResults, setAltResults] = useState([]);
-  const [noResult,   setNoResult]   = useState(false);
-  const [searchId,   setSearchId]   = useState(null);
-  const [isSaved,    setIsSaved]    = useState(false);
-  const [recents,    setRecents]    = useState([]);
-  const [savedPlays, setSavedPlays] = useState([]);
+  // ── Ask / Search state
+  const [query,             setQuery]             = useState("");
+  const [searching,         setSearching]         = useState(false);
+  const [results,           setResults]           = useState([]);     // policy list
+  const [selectedPolicy,    setSelectedPolicy]    = useState(null);   // clicked policy detail
+  const [policyRefs,        setPolicyRefs]        = useState([]);     // PDF references
+  const [policyRefsLoading, setPolicyRefsLoading] = useState(false);
+  const [noResult,          setNoResult]          = useState(false);
+  const [searchId,          setSearchId]          = useState(null);
+  const [isSaved,           setIsSaved]           = useState(false);
+  const [recents,           setRecents]           = useState([]);
+  const [savedPlays,        setSavedPlays]        = useState([]);
 
-  // Policy feedback modal
+  // ── Policy feedback modal
   const [showPolicyFeedback, setShowPolicyFeedback] = useState(false);
   const [policyFlags,        setPolicyFlags]        = useState([]);
   const [policyFeedbackNote, setPolicyFeedbackNote] = useState("");
   const [policyFbSubmitting, setPolicyFbSubmitting] = useState(false);
   const [policyFbDone,       setPolicyFbDone]       = useState(false);
 
-  // Procedures
+  // ── Procedures
   const [procedures,   setProcedures]   = useState([]);
   const [procsLoading, setProcsLoading] = useState(false);
   const [procsFetched, setProcsFetched] = useState(false);
   const [expandedProc, setExpandedProc] = useState(null);
   const [procSearch,   setProcSearch]   = useState("");
 
-  // Anonymous feedback
+  // ── Anonymous feedback
   const [fbType,        setFbType]        = useState("");
   const [fbCategory,    setFbCategory]    = useState("");
   const [fbDescription, setFbDescription] = useState("");
@@ -170,18 +198,18 @@ export default function PlaybookApp() {
   const [fbDone,        setFbDone]        = useState(false);
   const [fbError,       setFbError]       = useState("");
 
-  // Signals
-  const [sigLoading,    setSigLoading]    = useState(false);
-  const [sigFetched,    setSigFetched]    = useState(false);
-  const [totalSearches, setTotalSearches] = useState(0);
-  const [catBreakdown,  setCatBreakdown]  = useState([]);
-  const [recentSearches,setRecentSearches]= useState([]);
-  const [feedbackList,  setFeedbackList]  = useState([]);
-  const [anonFeedback,  setAnonFeedback]  = useState([]);
+  // ── Signals
+  const [sigLoading,     setSigLoading]     = useState(false);
+  const [sigFetched,     setSigFetched]     = useState(false);
+  const [totalSearches,  setTotalSearches]  = useState(0);
+  const [catBreakdown,   setCatBreakdown]   = useState([]);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [feedbackList,   setFeedbackList]   = useState([]);
+  const [anonFeedback,   setAnonFeedback]   = useState([]);
 
   const queryRef = useRef(null);
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     let live = true;
     (async () => {
@@ -219,7 +247,7 @@ export default function PlaybookApp() {
   const isAdmin   = role === "admin";
   const tabs      = profile ? buildTabs(role) : [];
 
-  // ── Data loaders ────────────────────────────────────────────────────────────
+  // ── Data loaders ────────────────────────────────────────────────────────
   const loadRecents = async () => {
     try {
       const { data } = await supabase.from("playbook_searches")
@@ -276,94 +304,185 @@ export default function PlaybookApp() {
     setSigLoading(false); setSigFetched(true);
   };
 
-  // ── Search ──────────────────────────────────────────────────────────────────
+  // ── Search ──────────────────────────────────────────────────────────────
   const doSearch = async (term) => {
     if (!term.trim()) return;
-    setSearching(true); setNoResult(false); setResult(null); setAltResults([]); setSearchId(null); setIsSaved(false);
+    setSearching(true);
+    setNoResult(false);
+    setResults([]);
+    setSelectedPolicy(null);
+    setPolicyRefs([]);
+    setSearchId(null);
+    setIsSaved(false);
+
     try {
       let q = supabase.from("company_policies")
         .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
-        .eq("is_active",true);
+        .eq("is_active", true);
       q = applyScope(q, profile);
-      q = q.or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%`);
-      const { data: primary } = await q.limit(5);
+      q = q.or(`title.ilike.%${term}%,policy_text.ilike.%${term}%,keywords.ilike.%${term}%,summary.ilike.%${term}%,category.ilike.%${term}%`);
+      const { data: primary } = await q.limit(8);
       let hits = primary || [];
+
+      // Fallback: word-by-word search
       if (!hits.length) {
-        for (const w of term.split(/\s+/).filter(w=>w.length>3).slice(0,4)) {
-          let wq = supabase.from("company_policies").select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords").eq("is_active",true);
+        for (const w of term.split(/\s+/).filter(w => w.length > 3).slice(0, 5)) {
+          let wq = supabase.from("company_policies")
+            .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
+            .eq("is_active", true);
           wq = applyScope(wq, profile);
-          wq = wq.or(`title.ilike.%${w}%,keywords.ilike.%${w}%,summary.ilike.%${w}%`);
-          const { data: wr } = await wq.limit(3);
+          wq = wq.or(`title.ilike.%${w}%,keywords.ilike.%${w}%,summary.ilike.%${w}%,category.ilike.%${w}%`);
+          const { data: wr } = await wq.limit(6);
           if (wr?.length) { hits = wr; break; }
         }
       }
-      if (!hits.length) { setNoResult(true); }
-      else {
-        setResult(hits[0]); setAltResults(hits.slice(1));
+
+      if (!hits.length) {
+        setNoResult(true);
+      } else {
+        setResults(hits);
+        // Log the search against the top hit
         try {
           const { data: logged } = await supabase.from("playbook_searches")
-            .insert({ user_id:profile.id, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), situation_text:term, policy_id:hits[0].id, saved:false })
+            .insert({
+              user_id: profile.id,
+              facility_number: profile.facility_number || null,
+              company_id: safeUuid(profile.company_id),
+              situation_text: term,
+              policy_id: hits[0].id,
+              saved: false,
+            })
             .select("id").single();
           if (logged?.id) { setSearchId(logged.id); loadRecents(); }
         } catch {}
       }
-    } finally { setSearching(false); }
+    } finally {
+      setSearching(false);
+    }
   };
 
-  const handleSearch = e => { e?.preventDefault(); doSearch(query.trim()); };
-  const clearSearch  = () => { setResult(null); setNoResult(false); setQuery(""); setSearchId(null); setIsSaved(false); setTimeout(()=>queryRef.current?.focus(),50); };
+  // ── Select a policy from the list ────────────────────────────────────────
+  const selectPolicy = async (policy) => {
+    setSelectedPolicy(policy);
+    setPolicyRefs([]);
+    setPolicyRefsLoading(true);
+    try {
+      const { data: refs } = await supabase
+        .from("policy_references")
+        .select("id,file_name,file_url,description,created_at")
+        .eq("policy_id", policy.id)
+        .order("created_at", { ascending: true });
+      setPolicyRefs(refs || []);
+    } catch {
+      setPolicyRefs([]);
+    }
+    setPolicyRefsLoading(false);
+  };
+
+  const handleSearch  = e => { e?.preventDefault(); doSearch(query.trim()); };
+  const clearSearch   = () => {
+    setResults([]); setSelectedPolicy(null); setPolicyRefs([]);
+    setNoResult(false); setQuery(""); setSearchId(null); setIsSaved(false);
+    setTimeout(() => queryRef.current?.focus(), 50);
+  };
+  const backToResults = () => { setSelectedPolicy(null); setPolicyRefs([]); setIsSaved(false); };
 
   const reopenRecent = async (r) => {
     setQuery(r.situation_text);
     if (r.policy_id) {
-      setSearching(true); setResult(null); setAltResults([]);
+      setSearching(true);
+      setResults([]);
+      setSelectedPolicy(null);
+      setPolicyRefs([]);
       try {
-        const { data } = await supabase.from("company_policies").select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords").eq("id",r.policy_id).maybeSingle();
-        if (data) { setResult(data); setSearchId(r.id); setIsSaved(r.saved||false); }
-        else await doSearch(r.situation_text);
+        const { data } = await supabase.from("company_policies")
+          .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
+          .eq("id", r.policy_id).maybeSingle();
+        if (data) {
+          setResults([data]);
+          setSearchId(r.id);
+          setIsSaved(r.saved || false);
+          await selectPolicy(data);
+        } else {
+          await doSearch(r.situation_text);
+        }
       } finally { setSearching(false); }
-    } else await doSearch(r.situation_text);
+    } else {
+      await doSearch(r.situation_text);
+    }
   };
 
   const handleSave = async () => {
     if (!searchId) return;
-    try { await supabase.from("playbook_searches").update({saved:!isSaved}).eq("id",searchId); setIsSaved(!isSaved); loadRecents(); } catch {}
+    try {
+      await supabase.from("playbook_searches").update({ saved: !isSaved }).eq("id", searchId);
+      setIsSaved(!isSaved);
+      loadRecents();
+    } catch {}
   };
 
-  // ── Policy feedback ─────────────────────────────────────────────────────────
-  const togglePolicyFlag = f => setPolicyFlags(p=>p.includes(f)?p.filter(x=>x!==f):[...p,f]);
-  const submitPolicyFeedback = async () => {
+  // ── Policy feedback ──────────────────────────────────────────────────────
+  const togglePolicyFlag      = f => setPolicyFlags(p => p.includes(f) ? p.filter(x => x !== f) : [...p, f]);
+  const submitPolicyFeedback  = async () => {
     if (!policyFlags.length) return;
     setPolicyFbSubmitting(true);
-    try { await supabase.from("policy_feedback").insert({ user_id:profile.id, policy_id:result?.id||null, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), flags:policyFlags, note:policyFeedbackNote.trim()||null }); } catch {}
+    try {
+      await supabase.from("policy_feedback").insert({
+        user_id: profile.id,
+        policy_id: selectedPolicy?.id || null,
+        facility_number: profile.facility_number || null,
+        company_id: safeUuid(profile.company_id),
+        flags: policyFlags,
+        note: policyFeedbackNote.trim() || null,
+      });
+    } catch {}
     setPolicyFbDone(true); setPolicyFbSubmitting(false);
   };
-  const closePolicyFeedback = () => { setShowPolicyFeedback(false); setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false); };
+  const closePolicyFeedback = () => {
+    setShowPolicyFeedback(false);
+    setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false);
+  };
 
-  // ── Anon feedback ───────────────────────────────────────────────────────────
+  // ── Anon feedback ────────────────────────────────────────────────────────
   const submitAnonFeedback = async () => {
     if (!fbType) { setFbError("Please select a feedback type."); return; }
     setFbSubmitting(true); setFbError("");
-    try { await supabase.from("anonymous_feedback").insert({ company_id:safeUuid(profile.company_id)||null, company:profile.company||null, facility_number:profile.facility_number||null, feedback_type:fbType, category:fbCategory.trim()||null, description:fbDescription.trim()||null }); setFbDone(true); }
-    catch { setFbError("Submission failed. Please try again."); }
+    try {
+      await supabase.from("anonymous_feedback").insert({
+        company_id: safeUuid(profile.company_id) || null,
+        company: profile.company || null,
+        facility_number: profile.facility_number || null,
+        feedback_type: fbType,
+        category: fbCategory.trim() || null,
+        description: fbDescription.trim() || null,
+      });
+      setFbDone(true);
+    } catch { setFbError("Submission failed. Please try again."); }
     setFbSubmitting(false);
   };
 
-  // ── Derived signals ─────────────────────────────────────────────────────────
-  const anonByType = anonFeedback.reduce((acc,f)=>{ acc[f.feedback_type]=(acc[f.feedback_type]||0)+1; return acc; },{});
-  const frictionAlerts = catBreakdown.filter(([cat,count]) => {
+  // ── Derived signals ──────────────────────────────────────────────────────
+  const anonByType = anonFeedback.reduce((acc, f) => {
+    acc[f.feedback_type] = (acc[f.feedback_type] || 0) + 1; return acc;
+  }, {});
+  const frictionAlerts = catBreakdown.filter(([cat, count]) => {
     if (count < 3) return false;
-    return feedbackList.some(f=>f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count >= 5;
-  }).slice(0,3);
+    return feedbackList.some(f => f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count >= 5;
+  }).slice(0, 3);
 
   const filteredProcs = procedures.filter(p => {
     if (!procSearch.trim()) return true;
     const s = procSearch.toLowerCase();
-    return (p.title||"").toLowerCase().includes(s)||(p.category||"").toLowerCase().includes(s)||(p.summary||"").toLowerCase().includes(s);
+    return (p.title||"").toLowerCase().includes(s) || (p.category||"").toLowerCase().includes(s) || (p.summary||"").toLowerCase().includes(s);
   });
-  const procsByCategory = filteredProcs.reduce((acc,p)=>{ const cat=p.category||"General"; if(!acc[cat])acc[cat]=[]; acc[cat].push(p); return acc; },{});
+  const procsByCategory = filteredProcs.reduce((acc, p) => {
+    const cat = p.category || "General";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(p);
+    return acc;
+  }, {});
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────
   if (authLoading) return (
     <div style={{minHeight:"100vh",background:P.pageBg,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center"}}>
@@ -374,16 +493,15 @@ export default function PlaybookApp() {
     </div>
   );
 
-  // ─── RENDER ───────────────────────────────────────────────────────────────────
+  // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <div style={s.shell}>
       <Head><title>Playbook by OSS</title></Head>
       <style dangerouslySetInnerHTML={{__html:CSS}}/>
 
-      {/* ── HEADER ──────────────────────────────────────────────────────── */}
+      {/* ── HEADER ──────────────────────────────────────────────────── */}
       <header style={s.header}>
         <div style={s.headerInner}>
-          {/* Brand */}
           <div style={s.brand}>
             <Logo size={22}/>
             <div style={s.brandText}>
@@ -393,36 +511,34 @@ export default function PlaybookApp() {
             {isPro && <span style={s.proBadge}>PRO</span>}
           </div>
 
-          {/* Desktop nav */}
           {!isMobile && (
             <nav style={s.desktopNav}>
               {tabs.map(t => (
                 <button key={t.id} className="nav-tab"
                   style={{...s.navTab,...(activeTab===t.id?s.navTabActive:{})}}
-                  onClick={()=>setActiveTab(t.id)}>
+                  onClick={() => setActiveTab(t.id)}>
                   {t.label}
                 </button>
               ))}
             </nav>
           )}
 
-          {/* Right */}
           <div style={s.headerRight}>
             {!isMobile && (
               <span style={s.headerUser}>{profile?.full_name} · {ROLE_LABELS[role]||role}</span>
             )}
             <button className="signout-btn" style={s.signOutBtn}
-              onClick={async()=>{ await supabase.auth.signOut(); router.replace("/"); }}>
+              onClick={async () => { await supabase.auth.signOut(); router.replace("/"); }}>
               Sign out
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── CONTENT ─────────────────────────────────────────────────────── */}
+      {/* ── CONTENT ─────────────────────────────────────────────────── */}
       <main style={{...s.main, paddingBottom: isMobile ? 80 : 48}}>
 
-        {/* ══ HOME ══════════════════════════════════════════════════════ */}
+        {/* ══ HOME ════════════════════════════════════════════════════ */}
         {activeTab === "home" && (
           <div className="fade-in">
             <div style={s.pageHead}>
@@ -430,16 +546,16 @@ export default function PlaybookApp() {
                 {profile?.full_name ? `Good to see you, ${profile.full_name.split(" ")[0]}` : "Welcome"}
               </h1>
               <p style={s.pageSubtitle}>
-                {isLeader ? "Operational signals and team insights" :
-                 isManager ? "Policy guidance and manager tools" :
-                 "Quick answers for your shift"}
+                {isLeader  ? "Operational signals and team insights"  :
+                 isManager ? "Policy guidance and manager tools"       :
+                             "Quick answers for your shift"}
               </p>
             </div>
 
             {/* Employee / Shift Lead */}
             {!isManager && !isLeader && !isAdmin && (
               <div style={s.homeGrid}>
-                <button className="hero-card" style={s.heroCard} onClick={()=>setActiveTab("ask")}>
+                <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   </div>
@@ -447,7 +563,7 @@ export default function PlaybookApp() {
                   <div style={s.heroCardSub}>Get a quick answer to any work situation</div>
                   <div style={s.heroCardArrow}>→</div>
                 </button>
-                <button className="feature-card" style={s.featureCard} onClick={()=>setActiveTab("feedback")}>
+                <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("feedback")}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                   <div style={s.featureCardText}>
                     <div style={s.featureCardTitle}>Give Feedback</div>
@@ -456,7 +572,7 @@ export default function PlaybookApp() {
                   <span style={s.featureCardArrow}>→</span>
                 </button>
                 {isPro && (
-                  <button className="feature-card" style={s.featureCard} onClick={()=>setActiveTab("procedures")}>
+                  <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("procedures")}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
                     <div style={s.featureCardText}>
                       <div style={s.featureCardTitle}>Step-by-Step Guides</div>
@@ -471,7 +587,7 @@ export default function PlaybookApp() {
             {/* Manager */}
             {isManager && !isLeader && !isAdmin && (
               <div style={s.homeGrid}>
-                <button className="hero-card" style={s.heroCard} onClick={()=>setActiveTab("ask")}>
+                <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   </div>
@@ -480,11 +596,11 @@ export default function PlaybookApp() {
                   <div style={s.heroCardArrow}>→</div>
                 </button>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                  <button className="feature-card" style={{...s.featureCard,flexDirection:"column",alignItems:"flex-start",gap:10}} onClick={()=>setActiveTab("procedures")}>
+                  <button className="feature-card" style={{...s.featureCard,flexDirection:"column",alignItems:"flex-start",gap:10}} onClick={() => setActiveTab("procedures")}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
                     <div style={{fontSize:13,fontWeight:700,color:P.text}}>Guides</div>
                   </button>
-                  <button className="feature-card" style={{...s.featureCard,flexDirection:"column",alignItems:"flex-start",gap:10}} onClick={()=>setActiveTab("feedback")}>
+                  <button className="feature-card" style={{...s.featureCard,flexDirection:"column",alignItems:"flex-start",gap:10}} onClick={() => setActiveTab("feedback")}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                     <div style={{fontSize:13,fontWeight:700,color:P.text}}>Feedback</div>
                   </button>
@@ -492,8 +608,9 @@ export default function PlaybookApp() {
                 {recents.length > 0 && (
                   <div>
                     <div style={s.sectionLabel}>Recent plays</div>
-                    {recents.slice(0,3).map(r=>(
-                      <button key={r.id} className="list-row" style={s.listRow} onClick={()=>{setActiveTab("ask");reopenRecent(r);}}>
+                    {recents.slice(0,3).map(r => (
+                      <button key={r.id} className="list-row" style={s.listRow}
+                        onClick={() => { setActiveTab("ask"); reopenRecent(r); }}>
                         <span style={s.listRowText}>{r.situation_text}</span>
                         <span style={s.listRowMeta}>{timeAgo(r.created_at)}</span>
                       </button>
@@ -514,7 +631,7 @@ export default function PlaybookApp() {
                 {frictionAlerts.length > 0 && (
                   <div>
                     <div style={s.sectionLabel}>Friction signals</div>
-                    {frictionAlerts.map(([cat,count])=>(
+                    {frictionAlerts.map(([cat, count]) => (
                       <div key={cat} style={s.alertCard}>
                         <div style={s.alertTitle}>"{cat}" being searched heavily</div>
                         <div style={s.alertSub}>{count} pulls — may indicate unclear guidance in this area</div>
@@ -522,7 +639,8 @@ export default function PlaybookApp() {
                     ))}
                   </div>
                 )}
-                <button className="hero-card" style={s.heroCard} onClick={()=>setActiveTab(isAdmin?"analytics":"signals")}>
+                <button className="hero-card" style={s.heroCard}
+                  onClick={() => setActiveTab(isAdmin ? "analytics" : "signals")}>
                   <div style={s.heroCardIcon}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                   </div>
@@ -530,9 +648,12 @@ export default function PlaybookApp() {
                   <div style={s.heroCardSub}>Category trends, feedback, and friction points</div>
                   <div style={s.heroCardArrow}>→</div>
                 </button>
-                <button className="feature-card" style={s.featureCard} onClick={()=>setActiveTab("ask")}>
+                <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("ask")}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <div style={s.featureCardText}><div style={s.featureCardTitle}>Ask Playbook</div><div style={s.featureCardSub}>Search policies and procedures</div></div>
+                  <div style={s.featureCardText}>
+                    <div style={s.featureCardTitle}>Ask Playbook</div>
+                    <div style={s.featureCardSub}>Search policies and procedures</div>
+                  </div>
                   <span style={s.featureCardArrow}>→</span>
                 </button>
               </div>
@@ -540,22 +661,24 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ ASK ═══════════════════════════════════════════════════════ */}
+        {/* ══ ASK ═════════════════════════════════════════════════════ */}
         {activeTab === "ask" && (
           <div className="fade-in">
-            {!result && !noResult && !searching && (
+
+            {/* ── STATE 1: SEARCH FORM ── */}
+            {!results.length && !noResult && !searching && (
               <>
                 <div style={s.pageHead}>
                   <h1 style={s.pageTitle}>What's the situation?</h1>
-                  <p style={s.pageSubtitle}>Describe the issue and we'll help you find the right play.</p>
+                  <p style={s.pageSubtitle}>Describe the issue and we'll find the relevant policies.</p>
                 </div>
 
                 <form onSubmit={handleSearch} style={s.searchBlock}>
                   <textarea
                     ref={queryRef}
                     value={query}
-                    onChange={e=>setQuery(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSearch();} }}
+                    onChange={e => setQuery(e.target.value)}
+                    onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleSearch(); } }}
                     placeholder={isManager
                       ? "e.g.  Employee called off 30 min before shift\n       Customer dispute over return policy\n       Team member repeated policy violation"
                       : "e.g.  What do I do if a customer wants a refund?\n       Who do I call for an equipment issue?"}
@@ -575,8 +698,8 @@ export default function PlaybookApp() {
                 {savedPlays.length > 0 && (
                   <div style={s.recentBlock}>
                     <div style={s.sectionLabel}>Saved plays</div>
-                    {savedPlays.map(r=>(
-                      <button key={r.id} className="list-row" style={s.listRow} onClick={()=>reopenRecent(r)}>
+                    {savedPlays.map(r => (
+                      <button key={r.id} className="list-row" style={s.listRow} onClick={() => reopenRecent(r)}>
                         <span style={{color:P.amber,fontSize:12,flexShrink:0}}>★</span>
                         <span style={s.listRowText}>{r.situation_text}</span>
                       </button>
@@ -586,9 +709,10 @@ export default function PlaybookApp() {
                 {recents.length > 0 && (
                   <div style={s.recentBlock}>
                     <div style={s.sectionLabel}>Recent</div>
-                    {recents.map(r=>(
-                      <button key={r.id} className="list-row" style={s.listRow} onClick={()=>reopenRecent(r)}>
+                    {recents.map(r => (
+                      <button key={r.id} className="list-row" style={s.listRow} onClick={() => reopenRecent(r)}>
                         <span style={s.listRowText}>{r.situation_text}</span>
+                        <span style={s.listRowMeta}>{timeAgo(r.created_at)}</span>
                       </button>
                     ))}
                   </div>
@@ -596,13 +720,15 @@ export default function PlaybookApp() {
               </>
             )}
 
+            {/* ── STATE 2: SEARCHING ── */}
             {searching && (
               <div style={s.loadingBlock} className="fade-in">
                 <div style={s.spinner}/>
-                <span style={{fontSize:14,color:P.soft}}>Finding the play…</span>
+                <span style={{fontSize:14,color:P.soft}}>Finding relevant policies…</span>
               </div>
             )}
 
+            {/* ── STATE 3: NO RESULT ── */}
             {noResult && !searching && (
               <div style={s.emptyBlock} className="fade-in">
                 <div style={s.emptyIconWrap}>
@@ -614,18 +740,70 @@ export default function PlaybookApp() {
               </div>
             )}
 
-            {result && !searching && (
+            {/* ── STATE 4: RESULTS LIST ── */}
+            {results.length > 0 && !selectedPolicy && !searching && (
               <div className="fade-in">
                 <div style={s.resultTopBar}>
                   <button style={s.backBtn} onClick={clearSearch}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
                     New search
                   </button>
+                </div>
+
+                <div style={s.situationPill}>
+                  <span style={{color:P.muted,fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em"}}>Situation · </span>
+                  <span style={{color:P.soft}}>{query}</span>
+                </div>
+
+                <div style={s.sectionLabel}>Relevant Policies</div>
+
+                {results.map((policy, i) => (
+                  <button key={policy.id} className="policy-card"
+                    style={{...s.policyCard,...(i===0?s.policyCardTop:{})}}
+                    onClick={() => selectPolicy(policy)}>
+                    <div style={s.policyCardInner}>
+                      <div style={s.policyCardLeft}>
+                        <div style={s.policyCardTitle}>{policy.title}</div>
+                        <div style={s.policyCardReason}>{getMatchReason(policy, query)}</div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                          {policy.category && <span style={s.pill(P.soft)}>{policy.category}</span>}
+                          {policy.policy_code && <span style={s.pill(P.muted)}>{policy.policy_code}</span>}
+                        </div>
+                      </div>
+                      <div style={s.policyCardRight}>
+                        <span style={{...s.relevanceBadge,...(i===0?s.relevanceBadgeBest:i<=2?s.relevanceBadgeStrong:s.relevanceBadgeRelated)}}>
+                          {getRelevanceLabel(i)}
+                        </span>
+                        <svg style={{marginTop:8,flexShrink:0}} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+
+                <div style={s.searchAgain}>
+                  <form onSubmit={handleSearch} style={{display:"flex",gap:8}}>
+                    <input value={query} onChange={e => setQuery(e.target.value)}
+                      placeholder="Search another situation…" style={s.inlineInput}/>
+                    <button type="submit" style={s.inlineBtn} disabled={!query.trim()}>→</button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* ── STATE 5: POLICY DETAIL ── */}
+            {selectedPolicy && !searching && (
+              <div className="fade-in">
+                <div style={s.resultTopBar}>
+                  <button style={s.backBtn} onClick={results.length > 1 ? backToResults : clearSearch}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    {results.length > 1 ? "Back to results" : "New search"}
+                  </button>
                   <div style={{display:"flex",gap:8}}>
                     <button className="chip-btn" style={{...s.chipBtn,...(isSaved?s.chipBtnSaved:{})}} onClick={handleSave}>
-                      {isSaved?"★ Saved":"☆ Save"}
+                      {isSaved ? "★ Saved" : "☆ Save"}
                     </button>
-                    <button className="chip-btn" style={s.chipBtn} onClick={()=>{setShowPolicyFeedback(true);setPolicyFbDone(false);}}>
+                    <button className="chip-btn" style={s.chipBtn}
+                      onClick={() => { setShowPolicyFeedback(true); setPolicyFbDone(false); }}>
                       Flag
                     </button>
                   </div>
@@ -636,62 +814,90 @@ export default function PlaybookApp() {
                   <span style={{color:P.soft}}>{query}</span>
                 </div>
 
-                <div style={s.resultCard}>
-                  <div style={s.resultCardTag}>The Play</div>
-                  <div style={s.resultCardBody}>{result.action_steps||result.summary||result.policy_text||"No steps available."}</div>
-                </div>
-
-                <div style={s.resultCard}>
-                  <div style={s.resultCardTag}>Policy Behind It</div>
-                  <div style={s.resultPolicyName}>{result.title}</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-                    {result.policy_code && <span style={s.pill(P.purple)}>{result.policy_code}</span>}
-                    {result.category    && <span style={s.pill(P.soft)}>{result.category}</span>}
-                    {result.severity    && <span style={s.pill(P.muted)}>{result.severity}</span>}
+                {/* Policy header */}
+                <div style={s.detailHeaderCard}>
+                  <div style={s.detailPolicyTitle}>{selectedPolicy.title}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+                    {selectedPolicy.policy_code && <span style={s.pill(P.purple)}>{selectedPolicy.policy_code}</span>}
+                    {selectedPolicy.category    && <span style={s.pill(P.soft)}>{selectedPolicy.category}</span>}
+                    {selectedPolicy.severity    && <span style={s.pill(P.muted)}>{selectedPolicy.severity}</span>}
                   </div>
-                  {result.summary && result.action_steps && <div style={{...s.resultCardBody,marginTop:12,color:P.soft}}>{result.summary}</div>}
+                  {selectedPolicy.summary && (
+                    <div style={s.detailSummary}>{selectedPolicy.summary}</div>
+                  )}
                 </div>
 
-                {result.incorrect_examples && (
+                {/* Steps / The Play */}
+                {(selectedPolicy.action_steps || selectedPolicy.policy_text) && (
+                  <div style={s.resultCard}>
+                    <div style={s.resultCardTag}>The Play</div>
+                    <div style={s.resultCardBody}>
+                      {selectedPolicy.action_steps || selectedPolicy.policy_text}
+                    </div>
+                  </div>
+                )}
+
+                {/* Avoid This */}
+                {selectedPolicy.incorrect_examples && (
                   <div style={{...s.resultCard,borderLeft:`3px solid ${P.amber}`}}>
                     <div style={{...s.resultCardTag,color:P.amber}}>Avoid This</div>
-                    <div style={s.resultCardBody}>{result.incorrect_examples}</div>
+                    <div style={s.resultCardBody}>{selectedPolicy.incorrect_examples}</div>
                   </div>
                 )}
 
-                {result.escalation_guidance && (
+                {/* Escalation */}
+                {selectedPolicy.escalation_guidance && (
                   <div style={{...s.resultCard,borderLeft:`3px solid ${P.red}`}}>
                     <div style={{...s.resultCardTag,color:P.red}}>Escalate If</div>
-                    <div style={s.resultCardBody}>{result.escalation_guidance}</div>
+                    <div style={s.resultCardBody}>{selectedPolicy.escalation_guidance}</div>
                   </div>
                 )}
 
-                {altResults.length > 0 && (
-                  <div style={{marginTop:8,marginBottom:24}}>
-                    <div style={s.sectionLabel}>Also relevant</div>
-                    {altResults.map(alt=>(
-                      <button key={alt.id} className="list-row" style={s.altRow}
-                        onClick={()=>{setResult(alt);setAltResults([]);setSearchId(null);setIsSaved(false);}}>
-                        <span style={{fontSize:14,color:P.soft,fontWeight:600,flex:1}}>{alt.title}</span>
-                        {alt.category&&<span style={s.pill(P.muted)}>{alt.category}</span>}
-                      </button>
-                    ))}
+                {/* Reference PDFs */}
+                {policyRefsLoading && (
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 0"}}>
+                    <div style={s.spinner}/>
+                    <span style={{fontSize:13,color:P.muted}}>Loading references…</span>
+                  </div>
+                )}
+                {!policyRefsLoading && policyRefs.length > 0 && (
+                  <div style={s.resultCard}>
+                    <div style={s.resultCardTag}>Reference Documents</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:4}}>
+                      {policyRefs.map(ref => (
+                        <div key={ref.id} style={s.pdfRow}>
+                          <div style={s.pdfIcon}><PdfIcon/></div>
+                          <div style={s.pdfInfo}>
+                            <div style={s.pdfName}>{ref.file_name}</div>
+                            {ref.description && (
+                              <div style={s.pdfDesc}>{ref.description}</div>
+                            )}
+                          </div>
+                          <a href={ref.file_url} target="_blank" rel="noopener noreferrer"
+                            style={s.pdfOpenBtn}>
+                            Open ↗
+                          </a>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
+                {/* Search again inline */}
                 <div style={s.searchAgain}>
                   <form onSubmit={handleSearch} style={{display:"flex",gap:8}}>
-                    <input value={query} onChange={e=>setQuery(e.target.value)}
+                    <input value={query} onChange={e => setQuery(e.target.value)}
                       placeholder="Search another situation…" style={s.inlineInput}/>
                     <button type="submit" style={s.inlineBtn} disabled={!query.trim()}>→</button>
                   </form>
                 </div>
               </div>
             )}
+
           </div>
         )}
 
-        {/* ══ GUIDES ════════════════════════════════════════════════════ */}
+        {/* ══ GUIDES ══════════════════════════════════════════════════ */}
         {activeTab === "procedures" && (
           <div className="fade-in">
             <div style={s.pageHead}>
@@ -700,30 +906,41 @@ export default function PlaybookApp() {
             </div>
             <div style={{position:"relative",marginBottom:24}}>
               <svg style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input value={procSearch} onChange={e=>setProcSearch(e.target.value)}
-                placeholder="Search guides…" style={{...s.inlineInput,paddingLeft:40,width:"100%",boxSizing:"border-box"}}/>
+              <input value={procSearch} onChange={e => setProcSearch(e.target.value)}
+                placeholder="Search guides…"
+                style={{...s.inlineInput,paddingLeft:40,width:"100%",boxSizing:"border-box"}}/>
             </div>
             {procsLoading && <div style={s.loadingBlock}><div style={s.spinner}/></div>}
             {!procsLoading && procedures.length===0 && (
-              <div style={s.emptyBlock}><div style={s.emptyTitle}>No guides yet</div><div style={s.emptyBody}>Company procedures will appear here once added.</div></div>
+              <div style={s.emptyBlock}>
+                <div style={s.emptyTitle}>No guides yet</div>
+                <div style={s.emptyBody}>Company procedures will appear here once added.</div>
+              </div>
             )}
-            {!procsLoading && Object.entries(procsByCategory).map(([cat,items])=>(
+            {!procsLoading && Object.entries(procsByCategory).map(([cat, items]) => (
               <div key={cat} style={{marginBottom:28}}>
                 <div style={s.catLabel}>{cat}</div>
-                {items.map(proc=>(
+                {items.map(proc => (
                   <div key={proc.id} style={s.procCard}>
                     <button className="proc-toggle" style={s.procToggle}
-                      onClick={()=>setExpandedProc(expandedProc===proc.id?null:proc.id)}>
+                      onClick={() => setExpandedProc(expandedProc===proc.id ? null : proc.id)}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={s.procTitle}>{proc.title}</div>
-                        {proc.summary&&expandedProc!==proc.id&&<div style={s.procPreview}>{proc.summary}</div>}
+                        {proc.summary && expandedProc!==proc.id && (
+                          <div style={s.procPreview}>{proc.summary}</div>
+                        )}
                       </div>
-                      <svg style={{transform:`rotate(${expandedProc===proc.id?180:0}deg)`,transition:"transform 0.2s",flexShrink:0}} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                      <svg style={{transform:`rotate(${expandedProc===proc.id?180:0}deg)`,transition:"transform 0.2s",flexShrink:0}}
+                        width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
                     </button>
-                    {expandedProc===proc.id&&(
+                    {expandedProc===proc.id && (
                       <div style={s.procBody}>
                         <div style={s.procStepLabel}>Steps</div>
-                        <div style={s.procContent}>{proc.action_steps||proc.policy_text||proc.summary||"No content available."}</div>
+                        <div style={s.procContent}>
+                          {proc.action_steps || proc.policy_text || proc.summary || "No content available."}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -733,7 +950,7 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ FEEDBACK ══════════════════════════════════════════════════ */}
+        {/* ══ FEEDBACK ════════════════════════════════════════════════ */}
         {activeTab === "feedback" && (
           <div className="fade-in">
             <div style={s.pageHead}>
@@ -747,17 +964,19 @@ export default function PlaybookApp() {
                 </div>
                 <div style={s.successTitle}>Feedback submitted</div>
                 <div style={s.successBody}>Thanks. Your feedback helps leadership improve the systems you work with every day.</div>
-                <button style={s.primaryBtn} onClick={()=>{setFbDone(false);setFbType("");setFbCategory("");setFbDescription("");}}>Submit another</button>
+                <button style={s.primaryBtn} onClick={() => { setFbDone(false); setFbType(""); setFbCategory(""); setFbDescription(""); }}>
+                  Submit another
+                </button>
               </div>
             ) : (
               <div style={s.formCard}>
                 <div style={s.formSection}>
                   <div style={s.fieldLabel}>What kind of issue?</div>
                   <div style={s.fbGrid}>
-                    {FB_TYPES.map(ft=>(
+                    {FB_TYPES.map(ft => (
                       <button key={ft.id} className="fb-opt"
                         style={{...s.fbOpt,...(fbType===ft.id?s.fbOptActive:{})}}
-                        onClick={()=>setFbType(ft.id)}>
+                        onClick={() => setFbType(ft.id)}>
                         {fbType===ft.id && <span style={{color:P.purple,marginRight:4}}>✓</span>}
                         {ft.label}
                       </button>
@@ -766,17 +985,20 @@ export default function PlaybookApp() {
                 </div>
                 <div style={s.formSection}>
                   <label style={s.fieldLabel}>Related area <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-                  <input value={fbCategory} onChange={e=>setFbCategory(e.target.value)} placeholder="e.g. call-offs, food safety, returns…" style={s.textInput}/>
+                  <input value={fbCategory} onChange={e => setFbCategory(e.target.value)}
+                    placeholder="e.g. call-offs, food safety, returns…" style={s.textInput}/>
                 </div>
                 <div style={s.formSection}>
                   <label style={s.fieldLabel}>Tell us more <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional, anonymous)</span></label>
-                  <textarea value={fbDescription} onChange={e=>setFbDescription(e.target.value.slice(0,400))} placeholder="Describe what's confusing or what could be clearer…" style={{...s.textInput,minHeight:120,resize:"vertical",lineHeight:1.65}}/>
+                  <textarea value={fbDescription} onChange={e => setFbDescription(e.target.value.slice(0,400))}
+                    placeholder="Describe what's confusing or what could be clearer…"
+                    style={{...s.textInput,minHeight:120,resize:"vertical",lineHeight:1.65}}/>
                   <div style={{fontSize:11,color:P.muted,textAlign:"right",marginTop:4}}>{fbDescription.length}/400</div>
                 </div>
-                {fbError&&<div style={s.errorBox}>{fbError}</div>}
+                {fbError && <div style={s.errorBox}>{fbError}</div>}
                 <button style={{...s.primaryBtn,...(!fbType||fbSubmitting?{opacity:0.45,cursor:"not-allowed"}:{})}}
                   onClick={submitAnonFeedback} disabled={!fbType||fbSubmitting}>
-                  {fbSubmitting?"Submitting…":"Submit Feedback"}
+                  {fbSubmitting ? "Submitting…" : "Submit Feedback"}
                 </button>
                 <div style={s.privacyNote}>
                   🔒 Your name and account are never linked to this submission. Only the type, area, and description are stored.
@@ -786,14 +1008,16 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ SIGNALS ═══════════════════════════════════════════════════ */}
+        {/* ══ SIGNALS ═════════════════════════════════════════════════ */}
         {activeTab === "signals" && (
           <div className="fade-in">
             <div style={s.pageHead}>
               <h1 style={s.pageTitle}>Operational Signals</h1>
               <p style={s.pageSubtitle}>Where your systems are creating friction</p>
             </div>
-            {sigLoading ? <div style={s.loadingBlock}><div style={s.spinner}/><span style={{fontSize:14,color:P.soft}}>Loading signals…</span></div> : (
+            {sigLoading
+              ? <div style={s.loadingBlock}><div style={s.spinner}/><span style={{fontSize:14,color:P.soft}}>Loading signals…</span></div>
+              : (
               <>
                 <div style={s.statsRow}>
                   <div style={s.statCard}><div style={s.statVal}>{totalSearches}</div><div style={s.statLbl}>Total plays pulled</div></div>
@@ -801,10 +1025,10 @@ export default function PlaybookApp() {
                   <div style={s.statCard}><div style={s.statVal}>{anonFeedback.length}</div><div style={s.statLbl}>Anon feedback</div></div>
                 </div>
 
-                {frictionAlerts.length>0&&(
+                {frictionAlerts.length > 0 && (
                   <div style={{marginBottom:28}}>
                     <div style={s.sectionLabel}>Friction Alerts</div>
-                    {frictionAlerts.map(([cat,count])=>(
+                    {frictionAlerts.map(([cat, count]) => (
                       <div key={cat} style={s.alertCard}>
                         <div style={s.alertTitle}>High activity: {cat}</div>
                         <div style={s.alertSub}>{count} searches — may indicate unclear guidance in this area</div>
@@ -816,65 +1040,74 @@ export default function PlaybookApp() {
                 <div style={{marginBottom:28}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                     <div style={s.sectionLabel}>Policy Pulls by Category</div>
-                    <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
+                    <button className="ghost-btn" style={s.ghostBtn} onClick={() => { setSigFetched(false); loadSignals(); }}>Refresh</button>
                   </div>
-                  {catBreakdown.length===0 ? <div style={s.emptyCard}>No data yet. Plays pulled will appear here.</div> : (
-                    <div style={s.dataCard}>
-                      {catBreakdown.map(([cat,count],i)=>{
-                        const pct=Math.round((count/catBreakdown[0][1])*100);
-                        return(
-                          <div key={cat} style={{...(i>0?{marginTop:16,paddingTop:16,borderTop:`1px solid ${P.border}`}:{})}}>
-                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                              <span style={{fontSize:14,fontWeight:600,color:P.text}}>{cat}</span>
-                              <span style={{fontSize:13,color:P.muted,fontFamily:MONO}}>{count}</span>
+                  {catBreakdown.length===0
+                    ? <div style={s.emptyCard}>No data yet. Plays pulled will appear here.</div>
+                    : (
+                      <div style={s.dataCard}>
+                        {catBreakdown.map(([cat, count], i) => {
+                          const pct = Math.round((count/catBreakdown[0][1])*100);
+                          return (
+                            <div key={cat} style={i>0?{marginTop:16,paddingTop:16,borderTop:`1px solid ${P.border}`}:{}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                                <span style={{fontSize:14,fontWeight:600,color:P.text}}>{cat}</span>
+                                <span style={{fontSize:13,color:P.muted,fontFamily:MONO}}>{count}</span>
+                              </div>
+                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
+                              </div>
                             </div>
-                            <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                              <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          );
+                        })}
+                      </div>
+                    )}
                 </div>
 
                 <div style={{marginBottom:28}}>
                   <div style={s.sectionLabel}>Anonymous Feedback</div>
-                  {anonFeedback.length===0 ? <div style={s.emptyCard}>No feedback submitted yet.</div> : (
-                    <>
-                      <div style={{...s.dataCard,marginBottom:10}}>
-                        <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>By type</div>
-                        {Object.entries(anonByType).sort((a,b)=>b[1]-a[1]).map(([type,count])=>{
-                          const ft=FB_TYPES.find(f=>f.id===type);
-                          return <div key={type} style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:13,color:P.soft}}>{ft?.label||type}</span><span style={{fontSize:13,fontWeight:700,color:P.text,fontFamily:MONO}}>{count}</span></div>;
-                        })}
-                      </div>
-                      {anonFeedback.slice(0,10).map(fb=>(
-                        <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
-                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                            <span style={s.pill(P.purple)}>{FB_TYPES.find(f=>f.id===fb.feedback_type)?.label||fb.feedback_type}</span>
-                            <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{fmtDate(fb.created_at)}</span>
-                          </div>
-                          {fb.category&&<div style={{fontSize:12,color:P.soft,marginBottom:4}}>Area: {fb.category}</div>}
-                          {fb.description&&<div style={{fontSize:13,color:P.text,lineHeight:1.55}}>{fb.description}</div>}
+                  {anonFeedback.length===0
+                    ? <div style={s.emptyCard}>No feedback submitted yet.</div>
+                    : (
+                      <>
+                        <div style={{...s.dataCard,marginBottom:10}}>
+                          <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>By type</div>
+                          {Object.entries(anonByType).sort((a,b)=>b[1]-a[1]).map(([type, count]) => {
+                            const ft = FB_TYPES.find(f=>f.id===type);
+                            return (
+                              <div key={type} style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                                <span style={{fontSize:13,color:P.soft}}>{ft?.label||type}</span>
+                                <span style={{fontSize:13,fontWeight:700,color:P.text,fontFamily:MONO}}>{count}</span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </>
-                  )}
+                        {anonFeedback.slice(0,10).map(fb => (
+                          <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                              <span style={s.pill(P.purple)}>{FB_TYPES.find(f=>f.id===fb.feedback_type)?.label||fb.feedback_type}</span>
+                              <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{fmtDate(fb.created_at)}</span>
+                            </div>
+                            {fb.category    && <div style={{fontSize:12,color:P.soft,marginBottom:4}}>Area: {fb.category}</div>}
+                            {fb.description && <div style={{fontSize:13,color:P.text,lineHeight:1.55}}>{fb.description}</div>}
+                          </div>
+                        ))}
+                      </>
+                    )}
                 </div>
 
-                {feedbackList.length>0&&(
+                {feedbackList.length > 0 && (
                   <div style={{marginBottom:28}}>
                     <div style={s.sectionLabel}>Policy Flags</div>
-                    {feedbackList.map(fb=>(
+                    {feedbackList.map(fb => (
                       <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
                         <div style={{display:"flex",justifyContent:"space-between",gap:12,marginBottom:8,flexWrap:"wrap"}}>
                           <div style={{fontSize:13,fontWeight:700,color:P.text,flex:1}}>{fb.company_policies?.title||"Policy"}</div>
                           <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
                         </div>
                         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{(fb.flags||[]).map(flag=><span key={flag} style={s.pill(P.muted)}>{flag}</span>)}</div>
-                        {fb.note&&<div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
-                        {fb.facility_number&&<div style={{marginTop:6,fontSize:11,color:P.muted}}>Facility {fb.facility_number}</div>}
+                        {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
+                        {fb.facility_number && <div style={{marginTop:6,fontSize:11,color:P.muted}}>Facility {fb.facility_number}</div>}
                       </div>
                     ))}
                   </div>
@@ -884,14 +1117,16 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ ANALYTICS ═════════════════════════════════════════════════ */}
+        {/* ══ ANALYTICS ═══════════════════════════════════════════════ */}
         {activeTab === "analytics" && isAdmin && (
           <div className="fade-in">
             <div style={s.pageHead}>
               <h1 style={s.pageTitle}>Analytics</h1>
               <p style={s.pageSubtitle}>Full usage data and feedback</p>
             </div>
-            {sigLoading ? <div style={s.loadingBlock}><div style={s.spinner}/></div> : (
+            {sigLoading
+              ? <div style={s.loadingBlock}><div style={s.spinner}/></div>
+              : (
               <>
                 <div style={s.statsRow}>
                   <div style={s.statCard}><div style={s.statVal}>{totalSearches}</div><div style={s.statLbl}>Total plays</div></div>
@@ -901,46 +1136,57 @@ export default function PlaybookApp() {
                 <div style={{marginBottom:24}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                     <div style={s.sectionLabel}>Plays by Category</div>
-                    <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
+                    <button className="ghost-btn" style={s.ghostBtn} onClick={() => { setSigFetched(false); loadSignals(); }}>Refresh</button>
                   </div>
                   <div style={s.dataCard}>
-                    {catBreakdown.length===0 ? <span style={{color:P.muted,fontSize:13}}>No data yet.</span> : catBreakdown.map(([cat,count],i)=>{
-                      const pct=Math.round((count/catBreakdown[0][1])*100);
-                      return(
-                        <div key={cat} style={{...(i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{})}}>
-                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span><span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span></div>
-                          <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3}}/></div>
-                        </div>
-                      );
-                    })}
+                    {catBreakdown.length===0
+                      ? <span style={{color:P.muted,fontSize:13}}>No data yet.</span>
+                      : catBreakdown.map(([cat, count], i) => {
+                          const pct = Math.round((count/catBreakdown[0][1])*100);
+                          return (
+                            <div key={cat} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                                <span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span>
+                                <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span>
+                              </div>
+                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3}}/>
+                              </div>
+                            </div>
+                          );
+                        })}
                   </div>
                 </div>
                 <div style={{marginBottom:24}}>
                   <div style={s.sectionLabel}>Policy Feedback</div>
-                  {feedbackList.length===0 ? <div style={s.emptyCard}>No feedback yet.</div> : feedbackList.map(fb=>(
-                    <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
-                        <div style={{fontSize:13,fontWeight:700,color:P.text}}>{fb.company_policies?.title||"Policy"}</div>
-                        <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
-                      </div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{(fb.flags||[]).map(f=><span key={f} style={s.pill(P.muted)}>{f}</span>)}</div>
-                      {fb.note&&<div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
-                    </div>
-                  ))}
+                  {feedbackList.length===0
+                    ? <div style={s.emptyCard}>No feedback yet.</div>
+                    : feedbackList.map(fb => (
+                        <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
+                            <div style={{fontSize:13,fontWeight:700,color:P.text}}>{fb.company_policies?.title||"Policy"}</div>
+                            <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
+                          </div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{(fb.flags||[]).map(f=><span key={f} style={s.pill(P.muted)}>{f}</span>)}</div>
+                          {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
+                        </div>
+                      ))}
                 </div>
                 <div style={{marginBottom:24}}>
                   <div style={s.sectionLabel}>Recent Plays</div>
                   <div style={s.dataCard}>
-                    {recentSearches.length===0 ? <span style={{color:P.muted,fontSize:13}}>No searches yet.</span> : recentSearches.map((sr,i)=>(
-                      <div key={sr.id} style={{...(i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{})}}>
-                        <div style={{fontSize:13,color:P.text,marginBottom:3}}>{sr.situation_text}</div>
-                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                          {sr.company_policies?.title&&<span style={{fontSize:11,color:P.soft}}>→ {sr.company_policies.title}</span>}
-                          {sr.company_policies?.category&&<span style={s.pill(P.muted)}>{sr.company_policies.category}</span>}
-                          <span style={{fontSize:11,color:P.muted,marginLeft:"auto",fontFamily:MONO}}>{timeAgo(sr.created_at)}</span>
-                        </div>
-                      </div>
-                    ))}
+                    {recentSearches.length===0
+                      ? <span style={{color:P.muted,fontSize:13}}>No searches yet.</span>
+                      : recentSearches.map((sr, i) => (
+                          <div key={sr.id} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                            <div style={{fontSize:13,color:P.text,marginBottom:3}}>{sr.situation_text}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                              {sr.company_policies?.title    && <span style={{fontSize:11,color:P.soft}}>→ {sr.company_policies.title}</span>}
+                              {sr.company_policies?.category && <span style={s.pill(P.muted)}>{sr.company_policies.category}</span>}
+                              <span style={{fontSize:11,color:P.muted,marginLeft:"auto",fontFamily:MONO}}>{timeAgo(sr.created_at)}</span>
+                            </div>
+                          </div>
+                        ))}
                   </div>
                 </div>
               </>
@@ -953,8 +1199,8 @@ export default function PlaybookApp() {
       {/* ── BOTTOM NAV (mobile) ──────────────────────────────────────── */}
       {isMobile && (
         <nav style={s.bottomNav}>
-          {tabs.map(t=>(
-            <button key={t.id} onClick={()=>setActiveTab(t.id)}
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)}
               style={{...s.bottomNavBtn,...(activeTab===t.id?s.bottomNavBtnActive:{})}}>
               <NavIcon name={t.icon} active={activeTab===t.id}/>
               <span style={{...s.bottomNavLabel,...(activeTab===t.id?{color:P.purple}:{})}}>
@@ -965,13 +1211,15 @@ export default function PlaybookApp() {
         </nav>
       )}
 
-      {/* ── POLICY FEEDBACK MODAL ─────────────────────────────────────── */}
+      {/* ── POLICY FEEDBACK MODAL ───────────────────────────────────── */}
       {showPolicyFeedback && (
         <div style={s.overlay} onClick={closePolicyFeedback}>
-          <div style={s.modal} onClick={e=>e.stopPropagation()}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
             {policyFbDone ? (
               <div style={{textAlign:"center",padding:"8px 0 8px"}}>
-                <div style={{...s.successCheck,margin:"0 auto 14px"}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <div style={{...s.successCheck,margin:"0 auto 14px"}}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
                 <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:8}}>Thanks for flagging that</div>
                 <div style={{fontSize:13,color:P.soft,lineHeight:1.55,marginBottom:20}}>Your feedback helps improve policies for everyone.</div>
                 <button style={s.primaryBtn} onClick={closePolicyFeedback}>Done</button>
@@ -979,24 +1227,27 @@ export default function PlaybookApp() {
             ) : (
               <>
                 <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:4}}>Flag Policy</div>
-                <div style={{fontSize:13,color:P.soft,marginBottom:16,lineHeight:1.5}}>{result?.title}</div>
+                <div style={{fontSize:13,color:P.soft,marginBottom:16,lineHeight:1.5}}>{selectedPolicy?.title}</div>
                 <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-                  {POLICY_FLAGS.map(flag=>(
+                  {POLICY_FLAGS.map(flag => (
                     <button key={flag} className="fb-opt"
                       style={{...s.fbOpt,...(policyFlags.includes(flag)?s.fbOptActive:{})}}
-                      onClick={()=>togglePolicyFlag(flag)}>
-                      {policyFlags.includes(flag)&&<span style={{color:P.purple,marginRight:4}}>✓</span>}{flag}
+                      onClick={() => togglePolicyFlag(flag)}>
+                      {policyFlags.includes(flag) && <span style={{color:P.purple,marginRight:4}}>✓</span>}
+                      {flag}
                     </button>
                   ))}
                 </div>
                 <label style={s.fieldLabel}>Optional note <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(max 280 chars)</span></label>
-                <textarea value={policyFeedbackNote} onChange={e=>setPolicyFeedbackNote(e.target.value.slice(0,280))}
-                  placeholder="Any context…" style={{...s.textInput,minHeight:72,resize:"vertical",marginBottom:4,lineHeight:1.65}}/>
+                <textarea value={policyFeedbackNote}
+                  onChange={e => setPolicyFeedbackNote(e.target.value.slice(0,280))}
+                  placeholder="Any context…"
+                  style={{...s.textInput,minHeight:72,resize:"vertical",marginBottom:4,lineHeight:1.65}}/>
                 <div style={{fontSize:11,color:P.muted,textAlign:"right",marginBottom:16}}>{policyFeedbackNote.length}/280</div>
                 <div style={{display:"flex",gap:8}}>
                   <button style={{...s.primaryBtn,flex:1,...(!policyFlags.length||policyFbSubmitting?{opacity:0.45,cursor:"not-allowed"}:{})}}
                     onClick={submitPolicyFeedback} disabled={!policyFlags.length||policyFbSubmitting}>
-                    {policyFbSubmitting?"Submitting…":"Submit"}
+                    {policyFbSubmitting ? "Submitting…" : "Submit"}
                   </button>
                   <button className="ghost-btn" style={s.ghostBtn} onClick={closePolicyFeedback}>Cancel</button>
                 </div>
@@ -1006,7 +1257,7 @@ export default function PlaybookApp() {
         </div>
       )}
 
-      {/* ── FOOTER ───────────────────────────────────────────────────── */}
+      {/* ── FOOTER ──────────────────────────────────────────────────── */}
       {!isMobile && (
         <footer style={s.footer}>
           <a href="/support" style={s.footerLink}>Contact Support</a>
@@ -1025,15 +1276,23 @@ const CSS = `
   @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
   @keyframes spin   { to { transform: rotate(360deg); } }
   .fade-in { animation: fadeIn 0.16s ease both; }
-  .nav-tab:hover   { color: #1C1830 !important; }
-  .hero-card:hover { box-shadow: 0 6px 24px rgba(107,94,168,0.15) !important; transform: translateY(-1px); }
-  .feature-card:hover { border-color: #A99AC8 !important; background: #FAF9FD !important; }
-  .list-row:hover  { border-color: #CFC8E8 !important; background: #FAF9FD !important; }
-  .chip-btn:hover  { border-color: #A99AC8 !important; }
-  .proc-toggle:hover { background: #FAF9FD !important; }
-  .fb-opt:hover    { border-color: #A99AC8 !important; }
-  .ghost-btn:hover { border-color: #A99AC8 !important; background: #FAF9FD !important; }
-  .signout-btn:hover { color: #1C1830 !important; border-color: #A99AC8 !important; }
+
+  .nav-tab:hover       { color: #1C1830 !important; }
+  .hero-card:hover     { box-shadow: 0 6px 24px rgba(107,94,168,0.15) !important; transform: translateY(-1px); }
+  .feature-card:hover  { border-color: #A99AC8 !important; background: #FAF9FD !important; }
+  .list-row:hover      { border-color: #CFC8E8 !important; background: #FAF9FD !important; }
+  .chip-btn:hover      { border-color: #A99AC8 !important; }
+  .proc-toggle:hover   { background: #FAF9FD !important; }
+  .fb-opt:hover        { border-color: #A99AC8 !important; }
+  .ghost-btn:hover     { border-color: #A99AC8 !important; background: #FAF9FD !important; }
+  .signout-btn:hover   { color: #1C1830 !important; border-color: #A99AC8 !important; }
+
+  .policy-card:hover {
+    border-color: rgba(107,94,168,0.40) !important;
+    box-shadow: 0 3px 16px rgba(107,94,168,0.10) !important;
+    transform: translateY(-1px);
+  }
+
   textarea:focus, input:focus, select:focus {
     border-color: rgba(107,94,168,0.50) !important;
     box-shadow: 0 0 0 3px rgba(107,94,168,0.08) !important;
@@ -1066,8 +1325,7 @@ const s = {
   signOutBtn:  { border:`1px solid ${P.border}`, background:"transparent", color:P.muted, borderRadius:7, padding:"7px 14px", fontSize:12, fontWeight:600, letterSpacing:"0.02em", transition:"all 0.15s" },
 
   // Main
-  main: { maxWidth:1120, margin:"0 auto", padding:"36px 28px 48px", display:"flex", flexDirection:"column", gap:0,
-    "@media(max-width:768px)": {padding:"24px 16px"} },
+  main: { maxWidth:1120, margin:"0 auto", padding:"36px 28px 48px" },
 
   // Page heading
   pageHead:    { marginBottom:32 },
@@ -1075,19 +1333,19 @@ const s = {
   pageSubtitle:{ fontSize:15, color:P.soft, margin:0, lineHeight:1.55 },
 
   // Bottom nav
-  bottomNav:       { position:"fixed", bottom:0, left:0, right:0, height:62, background:P.surface, borderTop:`1px solid ${P.border}`, display:"flex", alignItems:"stretch", zIndex:100, boxShadow:"0 -1px 8px rgba(107,94,168,0.07)" },
-  bottomNavBtn:    { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, border:"none", background:"transparent", padding:"6px 4px", minWidth:0, transition:"background 0.15s" },
+  bottomNav:          { position:"fixed", bottom:0, left:0, right:0, height:62, background:P.surface, borderTop:`1px solid ${P.border}`, display:"flex", alignItems:"stretch", zIndex:100, boxShadow:"0 -1px 8px rgba(107,94,168,0.07)" },
+  bottomNavBtn:       { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, border:"none", background:"transparent", padding:"6px 4px", minWidth:0, transition:"background 0.15s" },
   bottomNavBtnActive: { background:P.purpleGlow },
-  bottomNavLabel:  { fontSize:10, fontWeight:600, color:P.muted, letterSpacing:"0.03em" },
+  bottomNavLabel:     { fontSize:10, fontWeight:600, color:P.muted, letterSpacing:"0.03em" },
 
   // Home
-  homeGrid:      { display:"flex", flexDirection:"column", gap:14 },
-  heroCard:      { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:12, padding:"24px 22px", textAlign:"left", cursor:"pointer", position:"relative", boxShadow:"0 2px 12px rgba(107,94,168,0.08)", transition:"all 0.18s ease" },
-  heroCardIcon:  { marginBottom:14, display:"inline-flex", padding:"10px", background:P.purpleDim, borderRadius:10 },
-  heroCardTitle: { fontSize:18, fontWeight:700, color:P.text, marginBottom:4, letterSpacing:"-0.01em" },
-  heroCardSub:   { fontSize:13, color:P.soft, lineHeight:1.5 },
-  heroCardArrow: { position:"absolute", right:22, top:"50%", transform:"translateY(-50%)", fontSize:18, color:P.purple, fontWeight:700 },
-  featureCard:   { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"16px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", transition:"all 0.15s", textAlign:"left" },
+  homeGrid:         { display:"flex", flexDirection:"column", gap:14 },
+  heroCard:         { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:12, padding:"24px 22px", textAlign:"left", cursor:"pointer", position:"relative", boxShadow:"0 2px 12px rgba(107,94,168,0.08)", transition:"all 0.18s ease" },
+  heroCardIcon:     { marginBottom:14, display:"inline-flex", padding:"10px", background:P.purpleDim, borderRadius:10 },
+  heroCardTitle:    { fontSize:18, fontWeight:700, color:P.text, marginBottom:4, letterSpacing:"-0.01em" },
+  heroCardSub:      { fontSize:13, color:P.soft, lineHeight:1.5 },
+  heroCardArrow:    { position:"absolute", right:22, top:"50%", transform:"translateY(-50%)", fontSize:18, color:P.purple, fontWeight:700 },
+  featureCard:      { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"16px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", transition:"all 0.15s", textAlign:"left" },
   featureCardText:  { flex:1, minWidth:0 },
   featureCardTitle: { fontSize:14, fontWeight:700, color:P.text, marginBottom:2 },
   featureCardSub:   { fontSize:12, color:P.soft },
@@ -1095,32 +1353,58 @@ const s = {
 
   // Stats
   statsRow: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:12, marginBottom:24 },
-  statCard: { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"18px 16px", boxShadow:"0 1px 4px rgba(107,94,168,0.06)" },
-  statVal:  { fontSize:30, fontWeight:700, color:P.text, fontFamily:MONO, letterSpacing:"-0.03em", lineHeight:1 },
-  statLbl:  { fontSize:11, fontWeight:600, color:P.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginTop:6 },
+  statCard:  { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"18px 16px", boxShadow:"0 1px 4px rgba(107,94,168,0.06)" },
+  statVal:   { fontSize:30, fontWeight:700, color:P.text, fontFamily:MONO, letterSpacing:"-0.03em", lineHeight:1 },
+  statLbl:   { fontSize:11, fontWeight:600, color:P.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginTop:6 },
 
   // Alert
-  alertCard: { background:"#FFFBF0", border:`1px solid #F0DFA0`, borderLeft:`3px solid ${P.amber}`, borderRadius:8, padding:"14px 16px", marginBottom:8 },
-  alertTitle:{ fontSize:14, fontWeight:700, color:P.amber, marginBottom:3 },
-  alertSub:  { fontSize:12, color:P.soft, lineHeight:1.5 },
+  alertCard:  { background:"#FFFBF0", border:`1px solid #F0DFA0`, borderLeft:`3px solid ${P.amber}`, borderRadius:8, padding:"14px 16px", marginBottom:8 },
+  alertTitle: { fontSize:14, fontWeight:700, color:P.amber, marginBottom:3 },
+  alertSub:   { fontSize:12, color:P.soft, lineHeight:1.5 },
 
   // Labels
   sectionLabel: { fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:12, paddingLeft:10, borderLeft:`2px solid ${P.purple}` },
   catLabel:     { fontSize:11, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10, paddingLeft:10, borderLeft:`2px solid ${P.borderMid}` },
 
   // List rows
-  listRow:    { width:"100%", display:"flex", alignItems:"center", gap:12, background:P.surface, border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 16px", textAlign:"left", marginBottom:6, transition:"all 0.12s", cursor:"pointer" },
-  listRowText:{ fontSize:13, color:P.soft, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  listRowMeta:{ fontSize:11, color:P.muted, fontFamily:MONO, flexShrink:0 },
+  listRow:     { width:"100%", display:"flex", alignItems:"center", gap:12, background:P.surface, border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 16px", textAlign:"left", marginBottom:6, transition:"all 0.12s", cursor:"pointer" },
+  listRowText: { fontSize:13, color:P.soft, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  listRowMeta: { fontSize:11, color:P.muted, fontFamily:MONO, flexShrink:0 },
 
   // Search
   searchBlock:  { display:"flex", flexDirection:"column", gap:0, marginBottom:32 },
   searchInput:  { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:10, color:P.text, padding:"18px 20px", fontSize:15, lineHeight:1.65, resize:"vertical", outline:"none", fontFamily:SANS, boxShadow:"0 1px 4px rgba(107,94,168,0.06)", marginBottom:14 },
   searchBtnRow: { display:"flex", justifyContent:"flex-end" },
   searchBtn:    { background:BTN_GRAD, border:"none", color:"#fff", borderRadius:9, padding:"13px 28px", fontSize:14, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 3px 12px rgba(107,94,168,0.28)", transition:"opacity 0.15s" },
+  recentBlock:  { marginBottom:28 },
 
-  // Recents
-  recentBlock: { marginBottom:28 },
+  // Policy list cards
+  policyCard: {
+    width:"100%", background:P.surface, border:`1px solid ${P.border}`,
+    borderRadius:10, padding:"16px 18px", marginBottom:10,
+    textAlign:"left", cursor:"pointer",
+    boxShadow:"0 1px 4px rgba(107,94,168,0.05)",
+    transition:"all 0.16s ease",
+  },
+  policyCardTop: {
+    borderLeft:`3px solid ${P.purple}`,
+  },
+  policyCardInner:  { display:"flex", alignItems:"flex-start", gap:12 },
+  policyCardLeft:   { flex:1, minWidth:0 },
+  policyCardRight:  { display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0 },
+  policyCardTitle:  { fontSize:15, fontWeight:700, color:P.text, marginBottom:4, lineHeight:1.3 },
+  policyCardReason: { fontSize:12, color:P.muted, lineHeight:1.5 },
+
+  // Relevance badges
+  relevanceBadge:        { fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:5, letterSpacing:"0.05em", textTransform:"uppercase", display:"inline-block" },
+  relevanceBadgeBest:    { background:"rgba(107,94,168,0.12)", color:P.purple, border:`1px solid rgba(107,94,168,0.30)` },
+  relevanceBadgeStrong:  { background:"rgba(46,125,82,0.09)",  color:P.green,  border:`1px solid rgba(46,125,82,0.25)` },
+  relevanceBadgeRelated: { background:P.surfaceSub, color:P.muted, border:`1px solid ${P.border}` },
+
+  // Policy detail
+  detailHeaderCard:   { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"22px 22px 20px", marginBottom:10, boxShadow:"0 2px 8px rgba(107,94,168,0.07)" },
+  detailPolicyTitle:  { fontSize:20, fontWeight:700, color:P.text, lineHeight:1.25, letterSpacing:"-0.01em" },
+  detailSummary:      { fontSize:14, color:P.soft, lineHeight:1.65, marginTop:14, paddingTop:14, borderTop:`1px solid ${P.border}` },
 
   // Loading / empty
   loadingBlock: { display:"flex", alignItems:"center", gap:12, padding:"60px 0", justifyContent:"center" },
@@ -1131,29 +1415,35 @@ const s = {
   emptyBody:    { fontSize:13, color:P.soft, lineHeight:1.6, maxWidth:280 },
   emptyCard:    { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:10, padding:"24px", textAlign:"center", color:P.muted, fontSize:13 },
 
-  // Result
-  resultTopBar: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:12 },
-  backBtn:      { display:"flex", alignItems:"center", gap:5, background:"transparent", border:"none", color:P.purple, fontSize:13, fontWeight:600, padding:0, cursor:"pointer" },
-  chipBtn:      { border:`1px solid ${P.border}`, background:P.surface, color:P.soft, borderRadius:7, padding:"7px 13px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"border-color 0.12s" },
-  chipBtnSaved: { border:`1px solid rgba(138,94,16,0.35)`, color:P.amber, background:"rgba(138,94,16,0.06)" },
-  situationPill:{ background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 16px", fontSize:13, lineHeight:1.5, marginBottom:14 },
-  resultCard:   { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
-  resultCardTag:{ fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.purple}` },
-  resultCardBody:{ fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
-  resultPolicyName:{ fontSize:16, fontWeight:700, color:P.text, marginBottom:2 },
-  altRow:       { width:"100%", display:"flex", alignItems:"center", gap:12, background:P.surface, border:`1px solid ${P.border}`, borderRadius:8, padding:"12px 16px", textAlign:"left", marginBottom:6, cursor:"pointer", transition:"all 0.12s" },
-  searchAgain:  { marginTop:20, paddingTop:18, borderTop:`1px solid ${P.border}` },
-  inlineInput:  { flex:1, height:46, background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"0 14px", fontSize:14, outline:"none", fontFamily:SANS },
-  inlineBtn:    { width:46, height:46, background:BTN_GRAD, border:"none", borderRadius:8, color:"#fff", fontSize:16, fontWeight:700, cursor:"pointer", flexShrink:0 },
+  // Result cards
+  resultTopBar:    { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:12 },
+  backBtn:         { display:"flex", alignItems:"center", gap:5, background:"transparent", border:"none", color:P.purple, fontSize:13, fontWeight:600, padding:0, cursor:"pointer" },
+  chipBtn:         { border:`1px solid ${P.border}`, background:P.surface, color:P.soft, borderRadius:7, padding:"7px 13px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"border-color 0.12s" },
+  chipBtnSaved:    { border:`1px solid rgba(138,94,16,0.35)`, color:P.amber, background:"rgba(138,94,16,0.06)" },
+  situationPill:   { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 16px", fontSize:13, lineHeight:1.5, marginBottom:16 },
+  resultCard:      { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
+  resultCardTag:   { fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.purple}` },
+  resultCardBody:  { fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
+  searchAgain:     { marginTop:20, paddingTop:18, borderTop:`1px solid ${P.border}` },
+  inlineInput:     { flex:1, height:46, background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"0 14px", fontSize:14, outline:"none", fontFamily:SANS },
+  inlineBtn:       { width:46, height:46, background:BTN_GRAD, border:"none", borderRadius:8, color:"#fff", fontSize:16, fontWeight:700, cursor:"pointer", flexShrink:0 },
+
+  // PDF references
+  pdfRow:    { display:"flex", alignItems:"flex-start", gap:12, padding:"12px 14px", background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8 },
+  pdfIcon:   { flexShrink:0, marginTop:1 },
+  pdfInfo:   { flex:1, minWidth:0 },
+  pdfName:   { fontSize:14, fontWeight:600, color:P.text, marginBottom:2, lineHeight:1.3 },
+  pdfDesc:   { fontSize:12, color:P.muted, lineHeight:1.5 },
+  pdfOpenBtn:{ flexShrink:0, background:BTN_GRAD, color:"#fff", border:"none", borderRadius:6, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"none", whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", boxShadow:"0 2px 8px rgba(107,94,168,0.20)" },
 
   // Procedures
-  procCard:    { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, marginBottom:8, overflow:"hidden" },
-  procToggle:  { width:"100%", display:"flex", alignItems:"center", gap:12, background:"transparent", border:"none", padding:"16px 18px", textAlign:"left", transition:"background 0.12s" },
-  procTitle:   { fontSize:15, fontWeight:700, color:P.text, marginBottom:2 },
-  procPreview: { fontSize:12, color:P.muted, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
-  procBody:    { padding:"0 18px 18px", borderTop:`1px solid ${P.border}` },
+  procCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, marginBottom:8, overflow:"hidden" },
+  procToggle:   { width:"100%", display:"flex", alignItems:"center", gap:12, background:"transparent", border:"none", padding:"16px 18px", textAlign:"left", transition:"background 0.12s" },
+  procTitle:    { fontSize:15, fontWeight:700, color:P.text, marginBottom:2 },
+  procPreview:  { fontSize:12, color:P.muted, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
+  procBody:     { padding:"0 18px 18px", borderTop:`1px solid ${P.border}` },
   procStepLabel:{ fontSize:10, fontWeight:700, color:P.muted, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10, marginTop:16 },
-  procContent: { fontSize:14, color:P.text, lineHeight:1.8, whiteSpace:"pre-wrap" },
+  procContent:  { fontSize:14, color:P.text, lineHeight:1.8, whiteSpace:"pre-wrap" },
 
   // Feedback form
   formCard:    { background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"24px" },
