@@ -3,30 +3,41 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabaseClient'
 
-const PALETTE = {
-  bg:           "#0B1118",
-  panel:        "#141D26",
-  panelAlt:     "#1B2839",
-  border:       "#2A3B4E",
-  borderStrong: "#3A5068",
-  text:         "#E8EDF3",
-  textSoft:     "#A6B4C2",
-  textMuted:    "#7E8F9E",
-  blue:         "#4D7EA8",
-  blueSoft:     "rgba(77, 126, 168, 0.13)",
-  green:        "#6E9477",
-  greenSoft:    "rgba(110, 148, 119, 0.13)",
-  amber:        "#B7925A",
-  amberSoft:    "rgba(183, 146, 90, 0.13)",
-  red:          "#A86161",
-  redSoft:      "rgba(168, 97, 97, 0.13)",
+const P = {
+  pageBg:    "#F6F4FA",
+  surface:   "#FFFFFF",
+  surfaceSub:"#FAF9FD",
+  border:    "#E5E0F0",
+  borderMid: "#CFC8E8",
+  text:      "#1C1830",
+  soft:      "#5C5278",
+  muted:     "#9589AE",
+  purple:    "#6B5EA8",
+  purpleMid: "#7B6BBB",
+  purpleDim: "rgba(107,94,168,0.10)",
+  green:     "#2E7D52",
+  greenDim:  "rgba(46,125,82,0.09)",
+  red:       "#8A2E2E",
+  redDim:    "rgba(138,46,46,0.08)",
 }
-
-const MONO = '"JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace'
+const BTN_GRAD = "linear-gradient(135deg, #7B6BBB 0%, #5A4D94 100%)"
 const SANS = 'Inter,ui-sans-serif,system-ui,-apple-system,sans-serif'
+const MONO = '"JetBrains Mono","SF Mono",ui-monospace,monospace'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 function safeUuid(v) { return UUID_RE.test(v) ? v : null }
+
+function Logo({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="2" width="14" height="18" rx="2" fill={P.purple} opacity="0.15"/>
+      <rect x="3" y="2" width="14" height="18" rx="2" stroke={P.purple} strokeWidth="1.6"/>
+      <path d="M7 7h6M7 11h6M7 15h4" stroke={P.purple} strokeWidth="1.4" strokeLinecap="round"/>
+      <circle cx="18" cy="17" r="4" fill={P.purpleDim} stroke={P.purple} strokeWidth="1.4"/>
+      <path d="M18 15v4M16 17h4" stroke={P.purple} strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  )
+}
 
 export default function SupportPage() {
   const router = useRouter()
@@ -44,7 +55,6 @@ export default function SupportPage() {
   const [submitted,   setSubmitted]   = useState(false)
   const [error,       setError]       = useState('')
 
-  // ── Auth + profile prefill
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession()
@@ -72,22 +82,22 @@ export default function SupportPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!name.trim())        { setError('Please enter your name.');          return }
-    if (!issueTitle.trim())  { setError('Please enter an issue title.');     return }
-    if (!description.trim()) { setError('Please describe the issue.');       return }
+    if (!name.trim())        { setError('Please enter your name.');       return }
+    if (!issueTitle.trim())  { setError('Please enter an issue title.');  return }
+    if (!description.trim()) { setError('Please describe the issue.');    return }
 
     setSubmitting(true)
     setError('')
 
     const { error: dbError } = await supabase.from('support_requests').insert([{
-      name:          name.trim(),
-      facility:      facility.trim() || null,
-      issue_title:   issueTitle.trim(),
-      description:   description.trim(),
-      user_id:       user?.id || null,
-      company:       profile?.company    || null,
-      company_id:    safeUuid(profile?.company_id),
-      user_role:     profile?.role       || null,
+      name:        name.trim(),
+      facility:    facility.trim() || null,
+      issue_title: issueTitle.trim(),
+      description: description.trim(),
+      user_id:     user?.id || null,
+      company:     profile?.company    || null,
+      company_id:  safeUuid(profile?.company_id),
+      user_role:   profile?.role       || null,
     }])
 
     if (dbError) {
@@ -100,59 +110,48 @@ export default function SupportPage() {
     setSubmitting(false)
   }
 
-  if (authLoading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: PALETTE.bg }}>
-        <p style={{ color: PALETTE.textSoft, fontSize: '11px', letterSpacing: '0.10em', textTransform: 'uppercase', fontFamily: MONO }}>
-          Loading…
-        </p>
-      </div>
-    )
-  }
+  if (authLoading) return (
+    <div style={{ minHeight:'100vh', background:P.pageBg, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ width:26, height:26, border:`2px solid ${P.border}`, borderTopColor:P.purple, borderRadius:'50%', animation:'spin 0.8s linear infinite' }}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
 
   return (
     <div style={s.page}>
-      <Head><title>Support — Playbook</title></Head>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
-        body { margin: 0; }
-        input:focus, textarea:focus {
-          border-color: rgba(77,126,168,0.55) !important;
-          box-shadow: 0 0 0 3px rgba(77,126,168,0.10) !important;
-          outline: none !important;
-        }
-        ::-webkit-scrollbar { width:5px; }
-        ::-webkit-scrollbar-track { background:#0B1118; }
-        ::-webkit-scrollbar-thumb { background:#2A3B4E; border-radius:3px; }
-      `}} />
+      <Head><title>Support — Playbook by OSS</title></Head>
+      <style dangerouslySetInnerHTML={{ __html: CSS }}/>
 
-      {/* ── TOP NAV ── */}
-      <header style={s.topNav}>
-        <div style={s.topNavBrand}>
-          <div style={s.topNavName}>Support</div>
-          <div style={s.topNavMeta}>Playbook</div>
-        </div>
-        <div style={s.topNavRight}>
+      {/* ── HEADER ── */}
+      <header style={s.header}>
+        <div style={s.headerInner}>
+          <div style={s.brand}>
+            <Logo size={20}/>
+            <div style={s.brandText}>
+              <span style={s.brandName}>Playbook</span>
+              <span style={s.brandBy}>by OSS</span>
+            </div>
+          </div>
           <button style={s.backBtn} onClick={() => router.back()}>← Back</button>
         </div>
       </header>
 
       <main style={s.main}>
 
-        {/* ── ISSUE FORM ── */}
-        <div style={s.panelCard}>
-          <div style={s.sectionTopRow}>
-            <div style={s.sectionHeading}>Submit a Support Request</div>
+        {/* ── FORM CARD ── */}
+        <div style={s.card}>
+          <div style={s.cardHeader}>
+            <div style={s.cardTitle}>Submit a Support Request</div>
           </div>
-          <div style={s.sectionDivider} />
+          <div style={s.divider}/>
 
           {submitted ? (
             <div style={s.successBox}>
-              <div style={s.successTitle}>Request submitted</div>
+              <div style={s.successTitle}>Request submitted ✓</div>
               <div style={s.successText}>
                 We've received your request and will follow up as soon as possible.
               </div>
-              <button style={{ ...s.primaryButton, marginTop: '16px' }} onClick={() => router.back()}>
+              <button style={s.primaryBtn} onClick={() => router.back()}>
                 ← Back to Dashboard
               </button>
             </div>
@@ -162,22 +161,17 @@ export default function SupportPage() {
                 <div style={s.fieldGroup}>
                   <label style={s.label}>Your Name</label>
                   <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    placeholder="Jane Smith"
-                    style={s.input}
+                    type="text" value={name} onChange={e => setName(e.target.value)}
+                    required placeholder="Jane Smith" style={s.input}
                   />
                 </div>
                 <div style={s.fieldGroup}>
-                  <label style={s.label}>Facility <span style={s.optionalTag}>(optional)</span></label>
+                  <label style={s.label}>
+                    Facility <span style={s.optionalTag}>(optional)</span>
+                  </label>
                   <input
-                    type="text"
-                    value={facility}
-                    onChange={(e) => setFacility(e.target.value)}
-                    placeholder="e.g. 4821"
-                    style={s.input}
+                    type="text" value={facility} onChange={e => setFacility(e.target.value)}
+                    placeholder="e.g. 4821" style={s.input}
                   />
                 </div>
               </div>
@@ -185,32 +179,26 @@ export default function SupportPage() {
               <div style={s.fieldGroup}>
                 <label style={s.label}>Issue Title</label>
                 <input
-                  type="text"
-                  value={issueTitle}
-                  onChange={(e) => setIssueTitle(e.target.value)}
-                  required
-                  placeholder="Brief summary of the issue"
-                  style={s.input}
+                  type="text" value={issueTitle} onChange={e => setIssueTitle(e.target.value)}
+                  required placeholder="Brief summary of the issue" style={s.input}
                 />
               </div>
 
               <div style={s.fieldGroup}>
                 <label style={s.label}>What's happening?</label>
                 <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  value={description} onChange={e => setDescription(e.target.value)}
                   required
                   placeholder="Describe the issue in as much detail as possible — what you were doing, what went wrong, and any error messages you saw."
                   style={s.textarea}
                 />
               </div>
 
-              {error && <p style={s.errorBox}>{error}</p>}
+              {error && <div style={s.errorBox}>{error}</div>}
 
               <button
-                type="submit"
-                disabled={submitting}
-                style={{ ...s.primaryButton, ...(submitting ? s.buttonDisabled : {}) }}
+                type="submit" disabled={submitting}
+                style={{ ...s.submitBtn, ...(submitting ? { opacity: 0.65 } : {}) }}
               >
                 {submitting ? 'Submitting…' : 'Submit Request →'}
               </button>
@@ -218,13 +206,13 @@ export default function SupportPage() {
           )}
         </div>
 
-        {/* ── QUICK SUPPORT ── */}
-        <div style={s.quickSupportCard}>
-          <div style={s.quickSupportLabel}>Quick Support</div>
-          <div style={s.quickSupportText}>
-            For quicker support, call this number during business hours:
+        {/* ── QUICK SUPPORT CARD ── */}
+        <div style={s.quickCard}>
+          <div style={s.quickLabel}>Quick Support</div>
+          <div style={s.quickText}>
+            For faster help, call us during business hours:
           </div>
-          <div style={s.quickSupportPhone}>205-269-1916</div>
+          <div style={s.quickPhone}>205-269-1916</div>
         </div>
 
       </main>
@@ -232,137 +220,61 @@ export default function SupportPage() {
   )
 }
 
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: #F6F4FA; -webkit-font-smoothing: antialiased; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  input:focus, textarea:focus {
+    border-color: rgba(107,94,168,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(107,94,168,0.08) !important;
+    outline: none !important;
+  }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: #F6F4FA; }
+  ::-webkit-scrollbar-thumb { background: #CFC8E8; border-radius: 3px; }
+`
+
 const s = {
-  page: {
-    minHeight: '100vh',
-    background: PALETTE.bg,
-    color: PALETTE.text,
-    fontFamily: SANS,
-  },
+  page:    { minHeight:'100vh', background:P.pageBg, color:P.text, fontFamily:SANS },
 
-  // ── NAV
-  topNav: {
-    background: PALETTE.panel,
-    borderBottom: `1px solid ${PALETTE.border}`,
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    position: 'sticky', top: 0, zIndex: 100,
-    height: '52px', paddingLeft: '20px', paddingRight: '16px',
-    boxSizing: 'border-box',
-  },
-  topNavBrand: { display: 'flex', flexDirection: 'column', gap: '2px' },
-  topNavName:  { fontWeight: 700, color: PALETTE.text, fontSize: '13px', letterSpacing: '0.01em' },
-  topNavMeta:  { color: PALETTE.textSoft, fontSize: '10px', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: MONO },
-  topNavRight: { display: 'flex', alignItems: 'center' },
-  backBtn: {
-    border: `1px solid ${PALETTE.border}`,
-    background: 'transparent',
-    color: PALETTE.textSoft, borderRadius: '3px', padding: '5px 11px',
-    fontSize: '10px', fontWeight: 700, cursor: 'pointer',
-    letterSpacing: '0.07em', textTransform: 'uppercase',
-    fontFamily: SANS,
-  },
+  // ── Header
+  header:      { background:P.surface, borderBottom:`1px solid ${P.border}`, position:'sticky', top:0, zIndex:100, height:60, boxShadow:'0 1px 8px rgba(107,94,168,0.06)' },
+  headerInner: { maxWidth:760, margin:'0 auto', padding:'0 24px', height:'100%', display:'flex', alignItems:'center', justifyContent:'space-between' },
+  brand:       { display:'flex', alignItems:'center', gap:10 },
+  brandText:   { display:'flex', flexDirection:'column', gap:1 },
+  brandName:   { fontSize:14, fontWeight:700, color:P.text, letterSpacing:'-0.01em', lineHeight:1 },
+  brandBy:     { fontSize:9, fontWeight:600, color:P.muted, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:MONO, lineHeight:1 },
+  backBtn:     { background:'transparent', border:`1.5px solid ${P.border}`, borderRadius:7, color:P.soft, padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:SANS, transition:'border-color 0.15s,color 0.15s' },
 
-  // ── LAYOUT
-  main: {
-    maxWidth: '760px', margin: '0 auto',
-    display: 'flex', flexDirection: 'column', gap: '14px',
-    padding: '20px 16px', boxSizing: 'border-box',
-  },
+  // ── Layout
+  main:  { maxWidth:760, margin:'0 auto', padding:'28px 20px 60px', display:'flex', flexDirection:'column', gap:16 },
 
-  // ── CARDS
-  panelCard: {
-    background: PALETTE.panel,
-    border: `1px solid ${PALETTE.border}`,
-    borderRadius: '4px', padding: '20px 22px',
-  },
-  quickSupportCard: {
-    background: PALETTE.panel,
-    border: `1px solid ${PALETTE.border}`,
-    borderLeft: `3px solid ${PALETTE.blue}`,
-    borderRadius: '4px', padding: '20px 22px',
-  },
+  // ── Cards
+  card:      { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:'24px 28px', boxShadow:'0 2px 12px rgba(107,94,168,0.05)' },
+  cardHeader:{ marginBottom:16 },
+  cardTitle: { fontSize:12, fontWeight:700, color:P.text, textTransform:'uppercase', letterSpacing:'0.09em' },
+  divider:   { height:1, background:P.border, margin:'0 0 22px' },
 
-  // ── TYPOGRAPHY
-  sectionTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' },
-  sectionHeading: { fontSize: '11px', fontWeight: 800, color: PALETTE.text, textTransform: 'uppercase', letterSpacing: '0.10em' },
-  sectionDivider: { height: '1px', background: PALETTE.border, margin: '0 0 20px' },
+  quickCard:  { background:P.surface, border:`1px solid ${P.border}`, borderLeft:`3px solid ${P.purple}`, borderRadius:10, padding:'20px 28px', boxShadow:'0 2px 12px rgba(107,94,168,0.05)' },
+  quickLabel: { fontSize:11, fontWeight:700, color:P.purple, textTransform:'uppercase', letterSpacing:'0.10em', marginBottom:8 },
+  quickText:  { fontSize:13, color:P.soft, lineHeight:1.6, marginBottom:10 },
+  quickPhone: { fontSize:22, fontWeight:700, color:P.text, fontFamily:MONO, letterSpacing:'0.04em' },
 
-  label: {
-    display: 'block', marginBottom: '8px',
-    fontSize: '10px', fontWeight: 700, color: PALETTE.textSoft,
-    textTransform: 'uppercase', letterSpacing: '0.09em',
-  },
-  optionalTag: {
-    color: PALETTE.textMuted, fontWeight: 400,
-    textTransform: 'none', letterSpacing: 0,
-  },
+  // ── Form
+  form:        { display:'flex', flexDirection:'column', gap:18 },
+  fieldRow:    { display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:16 },
+  fieldGroup:  { display:'flex', flexDirection:'column', gap:6 },
+  label:       { fontSize:11, fontWeight:600, color:P.soft, textTransform:'uppercase', letterSpacing:'0.08em' },
+  optionalTag: { color:P.muted, fontWeight:400, textTransform:'none', letterSpacing:0 },
+  input:       { padding:'11px 13px', borderRadius:8, border:`1.5px solid ${P.border}`, background:P.surfaceSub, color:P.text, fontSize:14, width:'100%', fontFamily:SANS, transition:'border-color 0.15s' },
+  textarea:    { width:'100%', minHeight:140, borderRadius:8, border:`1.5px solid ${P.border}`, background:P.surfaceSub, color:P.text, padding:'12px 14px', fontSize:14, lineHeight:1.7, resize:'vertical', fontFamily:SANS },
+  errorBox:    { padding:'10px 14px', borderRadius:8, background:P.redDim, border:`1px solid rgba(138,46,46,0.20)`, color:P.red, fontSize:13, lineHeight:1.5 },
+  submitBtn:   { width:'100%', height:46, background:BTN_GRAD, border:'none', borderRadius:8, color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer', boxShadow:'0 2px 10px rgba(107,94,168,0.22)', transition:'opacity 0.15s', letterSpacing:'-0.01em', fontFamily:SANS },
 
-  // ── FORM
-  form: { display: 'flex', flexDirection: 'column', gap: '16px' },
-  fieldRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '16px',
-  },
-  fieldGroup: { display: 'flex', flexDirection: 'column' },
-  input: {
-    padding: '11px 13px', borderRadius: '3px',
-    border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt,
-    color: PALETTE.text, outline: 'none',
-    fontSize: '14px', boxSizing: 'border-box', width: '100%',
-    fontFamily: SANS,
-    transition: 'border-color 0.15s ease',
-  },
-  textarea: {
-    width: '100%', minHeight: '130px', borderRadius: '3px',
-    border: `1px solid ${PALETTE.border}`,
-    background: PALETTE.panelAlt,
-    color: PALETTE.text, padding: '14px 16px',
-    fontSize: '14px', lineHeight: 1.7,
-    resize: 'vertical', outline: 'none',
-    boxSizing: 'border-box', fontFamily: SANS,
-  },
-  errorBox: {
-    margin: 0, padding: '10px 13px', borderRadius: '3px',
-    background: 'rgba(168,97,97,0.10)',
-    border: '1px solid rgba(168,97,97,0.30)',
-    color: PALETTE.red, fontSize: '12px', lineHeight: 1.5,
-  },
-
-  // ── BUTTONS
-  primaryButton: {
-    border: `1px solid ${PALETTE.blue}`,
-    background: 'rgba(77,126,168,0.12)',
-    color: PALETTE.blue, borderRadius: '3px', padding: '10px 18px',
-    fontSize: '11px', fontWeight: 700, cursor: 'pointer',
-    letterSpacing: '0.07em', textTransform: 'uppercase',
-    fontFamily: SANS,
-  },
-  buttonDisabled: { opacity: 0.45, cursor: 'not-allowed' },
-
-  // ── SUCCESS STATE
-  successBox: {
-    padding: '12px 0',
-  },
-  successTitle: {
-    fontSize: '16px', fontWeight: 700, color: PALETTE.green, marginBottom: '8px',
-  },
-  successText: {
-    fontSize: '13px', color: PALETTE.textSoft, lineHeight: 1.6,
-  },
-
-  // ── QUICK SUPPORT
-  quickSupportLabel: {
-    fontSize: '10px', fontWeight: 800, color: PALETTE.blue,
-    textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: '10px',
-  },
-  quickSupportText: {
-    fontSize: '13px', color: PALETTE.textSoft, lineHeight: 1.6, marginBottom: '10px',
-  },
-  quickSupportPhone: {
-    fontSize: '22px', fontWeight: 700, fontFamily: MONO,
-    color: PALETTE.text, letterSpacing: '0.04em',
-    fontVariantNumeric: 'tabular-nums',
-  },
+  // ── Success
+  successBox:   { padding:'8px 0' },
+  successTitle: { fontSize:16, fontWeight:700, color:P.green, marginBottom:8 },
+  successText:  { fontSize:13, color:P.soft, lineHeight:1.6, marginBottom:16 },
+  primaryBtn:   { background:'transparent', border:`1.5px solid ${P.purple}`, borderRadius:8, color:P.purple, padding:'9px 18px', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:SANS },
 }
