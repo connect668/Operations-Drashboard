@@ -31,12 +31,9 @@ const MONO     = '"JetBrains Mono","SF Mono",ui-monospace,monospace';
 const BTN_GRAD = "linear-gradient(135deg, #7B6BBB 0%, #5A4D94 100%)";
 
 // ─── ROLES ────────────────────────────────────────────────────────────────────
-const RANK = { employee:0, shift_lead:1, manager:2, gm:3, area_coach:4, executive:5, admin:99 };
+const RANK = { user:0, manager:1, admin:99 };
 const atLeast = (role, min) => (RANK[role]??0) >= (RANK[min]??0);
-const ROLE_LABELS = {
-  employee:"Employee", shift_lead:"Shift Lead", manager:"Manager",
-  gm:"General Manager", area_coach:"Area Coach", executive:"Executive", admin:"Admin",
-};
+const ROLE_LABELS = { user:"User", manager:"Manager", admin:"Admin" };
 
 // ─── FEEDBACK TYPES ───────────────────────────────────────────────────────────
 const FB_TYPES = [
@@ -112,18 +109,26 @@ function getRelevanceLabel(index) {
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 function buildTabs(role) {
   if (role === "admin") return [
-    { id:"home",      label:"Dashboard", icon:"analytics" },
-    { id:"ask",       label:"Ask",       icon:"ask"       },
-    { id:"analytics", label:"Analytics", icon:"signals"   },
+    { id:"home",       label:"Dashboard", icon:"analytics" },
+    { id:"ask",        label:"Ask",       icon:"ask"       },
+    { id:"jack",       label:"Jack AI",   icon:"jack"      },
+    { id:"procedures", label:"Guides",    icon:"guides"    },
+    { id:"feedback",   label:"Feedback",  icon:"feedback"  },
   ];
-  const t = [
-    { id:"home",     label:"Home",    icon:"home"    },
-    { id:"ask",      label:"Ask",     icon:"ask"     },
+  if (role === "manager") return [
+    { id:"home",       label:"Home",     icon:"home"     },
+    { id:"ask",        label:"Ask",      icon:"ask"      },
+    { id:"jack",       label:"Jack AI",  icon:"jack"     },
+    { id:"procedures", label:"Guides",   icon:"guides"   },
+    { id:"feedback",   label:"Feedback", icon:"feedback" },
   ];
-  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides",   icon:"guides"   });
-  t.push({ id:"feedback", label:"Feedback", icon:"feedback" });
-  if (atLeast(role,"gm")) t.push({ id:"signals", label:"Signals", icon:"signals" });
-  return t;
+  // user
+  return [
+    { id:"home",       label:"Home",     icon:"home"     },
+    { id:"ask",        label:"Ask",      icon:"ask"      },
+    { id:"procedures", label:"Guides",   icon:"guides"   },
+    { id:"feedback",   label:"Feedback", icon:"feedback" },
+  ];
 }
 
 // ─── NAV ICONS ────────────────────────────────────────────────────────────────
@@ -133,6 +138,7 @@ function NavIcon({ name, active }) {
   const icons = {
     home:      <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>,
     ask:       <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    jack:      <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/><circle cx="8.5" cy="14" r="1" fill={c}/><circle cx="15.5" cy="14" r="1" fill={c}/><path d="M9.5 17.5h5"/></svg>,
     guides:    <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
     feedback:  <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
     signals:   <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
@@ -230,7 +236,15 @@ export default function PlaybookApp() {
   const [helpStatsLoading, setHelpStatsLoading] = useState(false);
   const [helpStatsFetched, setHelpStatsFetched] = useState(false);
 
-  const queryRef = useRef(null);
+  // ── Jack AI
+  const [jackMessages, setJackMessages] = useState([
+    { role:"assistant", content:"Hey, I'm Jack. Describe the situation and I'll help you handle it." }
+  ]);
+  const [jackInput,   setJackInput]   = useState("");
+  const [jackLoading, setJackLoading] = useState(false);
+
+  const queryRef  = useRef(null);
+  const jackEndRef = useRef(null);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -260,8 +274,11 @@ export default function PlaybookApp() {
   useEffect(() => {
     if (!profile) return;
     if (activeTab === "procedures" && !procsFetched) loadProcedures();
-    if ((activeTab === "signals" || activeTab === "analytics") && !sigFetched) loadSignals();
-    if ((activeTab === "home" || activeTab === "analytics") && profile.role === "admin" && !helpStatsFetched) loadHelpStats();
+    if (activeTab === "signals" && !sigFetched) loadSignals();
+    if (activeTab === "home" && profile.role === "admin") {
+      if (!sigFetched) loadSignals();
+      if (!helpStatsFetched) loadHelpStats();
+    }
   }, [activeTab, profile]);
 
   // Reset helpful feedback state whenever a new policy is selected
@@ -271,10 +288,8 @@ export default function PlaybookApp() {
     setHelpfulFbRowId(null);
   }, [selectedPolicy?.id]);
 
-  const role      = profile?.role || "employee";
-  const isPro     = profile?.plan === "pro" || atLeast(role, "manager");
-  const isLeader  = atLeast(role, "gm");
-  const isManager = atLeast(role, "manager");
+  const role      = profile?.role || "user";
+  const isManager = role === "manager" || role === "admin";
   const isAdmin   = role === "admin";
   const tabs      = profile ? buildTabs(role) : [];
 
@@ -506,6 +521,32 @@ export default function PlaybookApp() {
   };
   const closePolicyFeedback = () => { setShowPolicyFeedback(false); setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false); };
 
+  // ── Jack AI ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    jackEndRef.current?.scrollIntoView({ behavior:"smooth" });
+  }, [jackMessages]);
+
+  const sendJackMessage = async () => {
+    const text = jackInput.trim();
+    if (!text || jackLoading) return;
+    const updated = [...jackMessages, { role:"user", content:text }];
+    setJackMessages(updated);
+    setJackInput("");
+    setJackLoading(true);
+    try {
+      const res  = await fetch("/api/jack", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ messages: updated }),
+      });
+      const data = await res.json();
+      setJackMessages(prev => [...prev, { role:"assistant", content: data.reply || "Sorry, I couldn't process that." }]);
+    } catch {
+      setJackMessages(prev => [...prev, { role:"assistant", content:"Something went wrong. Please try again." }]);
+    }
+    setJackLoading(false);
+  };
+
   // ── Anon feedback ─────────────────────────────────────────────────────────
   const submitAnonFeedback = async () => {
     if (!fbType) { setFbError("Please select a feedback type."); return; }
@@ -519,6 +560,31 @@ export default function PlaybookApp() {
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const anonByType = anonFeedback.reduce((acc,f)=>{ acc[f.feedback_type]=(acc[f.feedback_type]||0)+1; return acc; },{});
+
+  // Admin dashboard computed values (from recentSearches — up to 500 records)
+  const facilityBreakdown = (() => {
+    if (!recentSearches.length) return [];
+    const map = {};
+    recentSearches.forEach(s => {
+      const f = s.facility_number ? `Facility ${s.facility_number}` : "No Facility";
+      map[f] = (map[f]||0) + 1;
+    });
+    return Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0,12);
+  })();
+
+  const commonSearchTitles = (() => {
+    if (!recentSearches.length) return [];
+    const map = {};
+    recentSearches.forEach(s => {
+      const t = s.company_policies?.title;
+      if (t) { map[t] = (map[t]||0) + 1; }
+    });
+    return Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0,8);
+  })();
+
+  const helpfulnessPct = helpStats && helpStats.total > 0
+    ? Math.round((helpStats.positive / helpStats.total) * 100)
+    : null;
   const frictionAlerts = catBreakdown.filter(([cat,count]) => {
     if (count < 3) return false;
     return feedbackList.some(f=>f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count>=5;
@@ -556,7 +622,6 @@ export default function PlaybookApp() {
               <span style={s.brandName}>Playbook</span>
               <span style={s.brandBy}>by OSS</span>
             </div>
-            {isPro && <span style={s.proBadge}>PRO</span>}
           </div>
 
           {!isMobile && (
@@ -590,121 +655,162 @@ export default function PlaybookApp() {
         {activeTab === "home" && isAdmin && (
           <div className="fade-in">
             <div style={s.pageHead}>
-              <h1 style={s.pageTitle}>Admin Dashboard</h1>
-              <p style={s.pageSubtitle}>{buildFacilityContext(profile) || "Policy helpfulness and usage overview"}</p>
+              <h1 style={s.pageTitle}>Operations Dashboard</h1>
+              <p style={s.pageSubtitle}>{buildFacilityContext(profile) || "Usage, searches, and policy feedback overview"}</p>
             </div>
 
-            {helpStatsLoading && (
-              <div style={s.loadingBlock}><div style={s.spinner}/><span style={{fontSize:14,color:P.soft}}>Loading data…</span></div>
-            )}
-
-            {!helpStatsLoading && helpStats && (
-              <>
-                {/* Helpfulness counts */}
-                <div style={s.statsRow}>
-                  <div style={{...s.statCard, borderTopColor: P.green}}>
-                    <div style={{...s.statVal, color: P.green}}>{helpStats.positive}</div>
-                    <div style={s.statLbl}>Helpful responses</div>
+            {/* ── TOP STATS ── */}
+            <div style={s.statsRow}>
+              <div style={s.statCard}>
+                <div style={s.statVal}>{sigLoading ? "…" : totalSearches}</div>
+                <div style={s.statLbl}>Total Plays</div>
+              </div>
+              <div style={s.statCard}>
+                <div style={s.statVal}>{sigLoading ? "…" : facilityBreakdown.length}</div>
+                <div style={s.statLbl}>Facilities Active</div>
+              </div>
+              {helpfulnessPct !== null ? (
+                <div style={{...s.statCard, borderTopColor: helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
+                  <div style={{...s.statVal, color: helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
+                    {helpfulnessPct}%
                   </div>
-                  <div style={{...s.statCard, borderTopColor: P.red}}>
-                    <div style={{...s.statVal, color: P.red}}>{helpStats.negative}</div>
-                    <div style={s.statLbl}>Not helpful</div>
-                  </div>
-                  <div style={s.statCard}>
-                    <div style={s.statVal}>{helpStats.total}</div>
-                    <div style={s.statLbl}>Total rated</div>
-                  </div>
+                  <div style={s.statLbl}>Helpfulness Rate</div>
                 </div>
+              ) : (
+                <div style={s.statCard}>
+                  <div style={{...s.statVal,color:P.muted,fontSize:18}}>No data</div>
+                  <div style={s.statLbl}>Helpfulness Rate</div>
+                </div>
+              )}
+            </div>
 
-                {/* Most helpful */}
-                {helpStats.mostHelpful.length > 0 && (
-                  <div style={{marginBottom:28}}>
-                    <div style={s.sectionLabel}>Most Helpful Policies</div>
-                    <div style={s.dataCard}>
-                      {helpStats.mostHelpful.map((p,i) => (
-                        <div key={p.title} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                            <span style={{fontSize:14,fontWeight:600,color:P.text,flex:1}}>{p.title}</span>
-                            <span style={{...s.pill(P.green),flexShrink:0}}>{Math.round(p.score*100)}% helpful</span>
-                          </div>
-                          <div style={{display:"flex",gap:12,marginTop:6}}>
-                            <span style={{fontSize:12,color:P.green}}>✓ {p.helpful} helpful</span>
-                            <span style={{fontSize:12,color:P.muted}}>✗ {p.not} not helpful</span>
-                          </div>
+            {/* ── PER-FACILITY BREAKDOWN ── */}
+            <div style={{marginBottom:28}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={s.sectionLabel}>Plays by Facility</div>
+                <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);setHelpStatsFetched(false);}}>Refresh</button>
+              </div>
+              {sigLoading ? (
+                <div style={s.loadingBlock}><div style={s.spinner}/></div>
+              ) : facilityBreakdown.length === 0 ? (
+                <div style={s.emptyCard}>No play data yet.</div>
+              ) : (
+                <div style={s.dataCard}>
+                  {facilityBreakdown.map(([fac,count],i) => {
+                    const pct = Math.round((count/facilityBreakdown[0][1])*100);
+                    return (
+                      <div key={fac} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                          <span style={{fontSize:13,fontWeight:600,color:P.text}}>{fac}</span>
+                          <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count} plays</span>
                         </div>
-                      ))}
+                        <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── COMMON SEARCHES ── */}
+            <div style={{marginBottom:28}}>
+              <div style={s.sectionLabel}>Most Searched Policies</div>
+              {sigLoading ? (
+                <div style={s.loadingBlock}><div style={s.spinner}/></div>
+              ) : commonSearchTitles.length === 0 ? (
+                <div style={s.emptyCard}>No search data yet.</div>
+              ) : (
+                <div style={s.dataCard}>
+                  {commonSearchTitles.map(([title,count],i) => {
+                    const pct = Math.round((count/commonSearchTitles[0][1])*100);
+                    return (
+                      <div key={title} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                          <span style={{fontSize:13,fontWeight:600,color:P.text,flex:1,marginRight:8}}>{title}</span>
+                          <span style={{fontSize:12,color:P.muted,fontFamily:MONO,flexShrink:0}}>{count}×</span>
+                        </div>
+                        <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${P.purpleMid},${P.purple})`,borderRadius:3,transition:"width 0.4s ease"}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── POLICY HELPFULNESS ── */}
+            <div style={{marginBottom:28}}>
+              <div style={s.sectionLabel}>Policy Helpfulness</div>
+              {helpStatsLoading ? (
+                <div style={s.loadingBlock}><div style={s.spinner}/></div>
+              ) : !helpStats || helpStats.total === 0 ? (
+                <div style={s.emptyCard}>No helpfulness ratings yet. These appear after users view and rate policies.</div>
+              ) : (
+                <>
+                  {/* Big % number */}
+                  <div style={{...s.dataCard, display:"flex", alignItems:"center", gap:20, marginBottom:10, flexWrap:"wrap"}}>
+                    <div style={{textAlign:"center", minWidth:80}}>
+                      <div style={{
+                        fontSize:52, fontWeight:800, fontFamily:MONO, letterSpacing:"-0.04em", lineHeight:1,
+                        color: helpfulnessPct>=70 ? P.green : helpfulnessPct>=50 ? P.amber : P.red,
+                      }}>{helpfulnessPct}%</div>
+                      <div style={{fontSize:11,fontWeight:600,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginTop:4}}>Helpful</div>
+                    </div>
+                    <div style={{flex:1, display:"flex", flexDirection:"column", gap:8, minWidth:160}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:13,color:P.green,fontWeight:600,minWidth:28}}>✓ {helpStats.positive}</span>
+                        <div style={{flex:1,height:6,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.positive/helpStats.total*100):0}%`,background:P.green,borderRadius:3}}/>
+                        </div>
+                        <span style={{fontSize:11,color:P.muted,minWidth:40,textAlign:"right"}}>Helpful</span>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:13,color:P.red,fontWeight:600,minWidth:28}}>✗ {helpStats.negative}</span>
+                        <div style={{flex:1,height:6,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.negative/helpStats.total*100):0}%`,background:P.red,borderRadius:3}}/>
+                        </div>
+                        <span style={{fontSize:11,color:P.muted,minWidth:40,textAlign:"right"}}>Not helpful</span>
+                      </div>
                     </div>
                   </div>
-                )}
 
-                {/* Least helpful */}
-                {helpStats.leastHelpful.length > 0 && helpStats.leastHelpful[0].score < 1 && (
-                  <div style={{marginBottom:28}}>
-                    <div style={s.sectionLabel}>Needs Improvement</div>
+                  {/* Per-policy table */}
+                  {helpStats.mostHelpful.length > 0 && (
                     <div style={s.dataCard}>
-                      {helpStats.leastHelpful.filter(p=>p.score<1).map((p,i) => (
-                        <div key={p.title} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                            <span style={{fontSize:14,fontWeight:600,color:P.text,flex:1}}>{p.title}</span>
-                            <span style={{...s.pill(P.red),flexShrink:0}}>{Math.round(p.score*100)}% helpful</span>
-                          </div>
-                          <div style={{display:"flex",gap:12,marginTop:6}}>
-                            <span style={{fontSize:12,color:P.green}}>✓ {p.helpful} helpful</span>
-                            <span style={{fontSize:12,color:P.red}}>✗ {p.not} not helpful</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Recent feedback */}
-                {helpStats.recent.length > 0 && (
-                  <div style={{marginBottom:28}}>
-                    <div style={s.sectionLabel}>Recent Ratings</div>
-                    <div style={s.dataCard}>
-                      {helpStats.recent.map((r,i) => (
-                        <div key={r.id} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
-                            <span style={{fontSize:13,color:P.text,fontWeight:600,flex:1}}>{r.policy_title}</span>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                              <span style={r.helpful ? s.helpBadgePos : s.helpBadgeNeg}>
-                                {r.helpful ? "✓ Helpful" : "✗ Not helpful"}
-                              </span>
-                              <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{timeAgo(r.created_at)}</span>
+                      <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Per-Policy Breakdown</div>
+                      {[...helpStats.mostHelpful, ...helpStats.leastHelpful.filter(p=>p.score<1&&!helpStats.mostHelpful.find(m=>m.title===p.title))]
+                        .slice(0,8).map((p,i) => {
+                          const pct = Math.round(p.score*100);
+                          const col = pct>=70?P.green:pct>=50?P.amber:P.red;
+                          return (
+                            <div key={p.title} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:5}}>
+                                <span style={{fontSize:13,fontWeight:600,color:P.text,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.title}</span>
+                                <span style={{fontSize:13,fontWeight:700,color:col,fontFamily:MONO,flexShrink:0}}>{pct}%</span>
+                              </div>
+                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:col,borderRadius:3,opacity:0.7}}/>
+                              </div>
+                              <div style={{display:"flex",gap:12,marginTop:4}}>
+                                <span style={{fontSize:11,color:P.green}}>✓ {p.helpful}</span>
+                                <span style={{fontSize:11,color:P.red}}>✗ {p.not}</span>
+                                <span style={{fontSize:11,color:P.muted}}>{p.total} total</span>
+                              </div>
                             </div>
-                          </div>
-                          {r.facility_number && <div style={{fontSize:11,color:P.muted,marginTop:3}}>Facility {r.facility_number}</div>}
-                        </div>
-                      ))}
+                          );
+                        })}
                     </div>
-                  </div>
-                )}
-
-                {helpStats.total === 0 && (
-                  <div style={s.emptyCard}>No helpfulness ratings yet. Ratings appear after users view and rate policies.</div>
-                )}
-              </>
-            )}
-
-            {!helpStatsLoading && !helpStats && (
-              <div style={s.emptyCard}>Could not load data. Check your connection and try refreshing.</div>
-            )}
-
-            <div style={{marginTop:4}}>
-              <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("analytics")}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                <div style={s.featureCardText}>
-                  <div style={s.featureCardTitle}>Full Analytics</div>
-                  <div style={s.featureCardSub}>Searches, category trends, policy flags</div>
-                </div>
-                <span style={s.featureCardArrow}>→</span>
-              </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
 
-        {/* ══ HOME — MANAGER / GM ═════════════════════════════════════ */}
+        {/* ══ HOME — USER / MANAGER ═══════════════════════════════════ */}
         {activeTab === "home" && !isAdmin && (
           <div className="fade-in">
             <div style={s.pageHead}>
@@ -712,14 +818,12 @@ export default function PlaybookApp() {
                 {profile?.full_name ? `Good to see you, ${profile.full_name.split(" ")[0]}` : "Welcome"}
               </h1>
               <p style={s.pageSubtitle}>
-                {isLeader  ? "Operational signals and team insights"  :
-                 isManager ? "Policy guidance and manager tools"       :
-                             "Quick answers for your shift"}
+                {isManager ? "Policy guidance, manager tools, and Jack AI" : "Quick answers for your shift"}
               </p>
             </div>
 
-            {/* Employee / Shift Lead */}
-            {!isManager && !isLeader && (
+            {/* User */}
+            {!isManager && (
               <div style={s.homeGrid}>
                 <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
@@ -729,6 +833,14 @@ export default function PlaybookApp() {
                   <div style={s.heroCardSub}>Get a quick answer to any work situation</div>
                   <div style={s.heroCardArrow}>→</div>
                 </button>
+                <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("procedures")}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                  <div style={s.featureCardText}>
+                    <div style={s.featureCardTitle}>Step-by-Step Guides</div>
+                    <div style={s.featureCardSub}>Company procedures and workflows</div>
+                  </div>
+                  <span style={s.featureCardArrow}>→</span>
+                </button>
                 <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("feedback")}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                   <div style={s.featureCardText}>
@@ -737,21 +849,11 @@ export default function PlaybookApp() {
                   </div>
                   <span style={s.featureCardArrow}>→</span>
                 </button>
-                {isPro && (
-                  <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("procedures")}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-                    <div style={s.featureCardText}>
-                      <div style={s.featureCardTitle}>Step-by-Step Guides</div>
-                      <div style={s.featureCardSub}>Company procedures and workflows</div>
-                    </div>
-                    <span style={s.featureCardArrow}>→</span>
-                  </button>
-                )}
               </div>
             )}
 
             {/* Manager */}
-            {isManager && !isLeader && (
+            {isManager && (
               <div style={s.homeGrid}>
                 <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
@@ -759,6 +861,14 @@ export default function PlaybookApp() {
                   </div>
                   <div style={s.heroCardTitle}>Ask Playbook</div>
                   <div style={s.heroCardSub}>Policy-backed guidance for any situation</div>
+                  <div style={s.heroCardArrow}>→</div>
+                </button>
+                <button className="hero-card" style={{...s.heroCard,borderTopColor:P.purpleMid}} onClick={() => setActiveTab("jack")}>
+                  <div style={s.heroCardIcon}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/><circle cx="8.5" cy="14" r="1" fill={P.purple}/><circle cx="15.5" cy="14" r="1" fill={P.purple}/><path d="M9.5 17.5h5"/></svg>
+                  </div>
+                  <div style={s.heroCardTitle}>Ask Jack AI</div>
+                  <div style={s.heroCardSub}>AI-powered help for tricky workplace situations</div>
                   <div style={s.heroCardArrow}>→</div>
                 </button>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -783,41 +893,6 @@ export default function PlaybookApp() {
                     ))}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* GM / Leadership */}
-            {isLeader && (
-              <div style={s.homeGrid}>
-                <div style={s.statsRow}>
-                  <div style={s.statCard}><div style={s.statVal}>{totalSearches||"—"}</div><div style={s.statLbl}>Plays pulled</div></div>
-                  <div style={s.statCard}><div style={s.statVal}>{catBreakdown.length||"—"}</div><div style={s.statLbl}>Categories</div></div>
-                  <div style={s.statCard}><div style={s.statVal}>{feedbackList.length||"—"}</div><div style={s.statLbl}>Feedback</div></div>
-                </div>
-                {frictionAlerts.length > 0 && (
-                  <div>
-                    <div style={s.sectionLabel}>Friction signals</div>
-                    {frictionAlerts.map(([cat,count]) => (
-                      <div key={cat} style={s.alertCard}>
-                        <div style={s.alertTitle}>"{cat}" being searched heavily</div>
-                        <div style={s.alertSub}>{count} pulls — may indicate unclear guidance in this area</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("signals")}>
-                  <div style={s.heroCardIcon}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                  </div>
-                  <div style={s.heroCardTitle}>View Full Signals</div>
-                  <div style={s.heroCardSub}>Category trends, feedback, and friction points</div>
-                  <div style={s.heroCardArrow}>→</div>
-                </button>
-                <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("ask")}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <div style={s.featureCardText}><div style={s.featureCardTitle}>Ask Playbook</div><div style={s.featureCardSub}>Search policies and procedures</div></div>
-                  <span style={s.featureCardArrow}>→</span>
-                </button>
               </div>
             )}
           </div>
@@ -1081,6 +1156,71 @@ export default function PlaybookApp() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ══ JACK AI ═════════════════════════════════════════════════ */}
+        {activeTab === "jack" && (
+          <div className="fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 140px)",minHeight:400}}>
+            <div style={{...s.pageHead,marginBottom:16}}>
+              <h1 style={s.pageTitle}>Jack AI</h1>
+              <p style={s.pageSubtitle}>Describe any workplace situation — call-offs, disputes, performance, safety, and more.</p>
+            </div>
+
+            {/* Messages */}
+            <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,paddingBottom:8}}>
+              {jackMessages.map((m,i) => (
+                <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+                  {m.role === "assistant" && (
+                    <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(107,94,168,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:8,marginTop:2}}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/><circle cx="8.5" cy="14" r="1" fill={P.purple}/><circle cx="15.5" cy="14" r="1" fill={P.purple}/></svg>
+                    </div>
+                  )}
+                  <div style={{
+                    maxWidth:"78%",
+                    padding:"12px 15px",
+                    borderRadius: m.role==="user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+                    background: m.role==="user" ? BTN_GRAD : P.surface,
+                    border: m.role==="user" ? "none" : `1px solid ${P.border}`,
+                    color: m.role==="user" ? "#fff" : P.text,
+                    fontSize:14,
+                    lineHeight:1.7,
+                    boxShadow: m.role==="user" ? "0 2px 10px rgba(107,94,168,0.25)" : "0 1px 4px rgba(107,94,168,0.05)",
+                    whiteSpace:"pre-wrap",
+                  }}>{m.content}</div>
+                </div>
+              ))}
+              {jackLoading && (
+                <div style={{display:"flex",justifyContent:"flex-start",alignItems:"center",gap:8}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(107,94,168,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/></svg>
+                  </div>
+                  <div style={{padding:"10px 14px",background:P.surface,border:`1px solid ${P.border}`,borderRadius:"14px 14px 14px 3px",display:"flex",gap:5,alignItems:"center"}}>
+                    <div style={{...s.spinner,width:12,height:12}}/>
+                    <span style={{fontSize:13,color:P.muted}}>Jack is thinking…</span>
+                  </div>
+                </div>
+              )}
+              <div ref={jackEndRef}/>
+            </div>
+
+            {/* Input row */}
+            <div style={{paddingTop:12,borderTop:`1px solid ${P.border}`,display:"flex",gap:8,flexShrink:0}}>
+              <input
+                value={jackInput}
+                onChange={e => setJackInput(e.target.value)}
+                onKeyDown={e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendJackMessage();} }}
+                placeholder="Describe the situation…"
+                disabled={jackLoading}
+                style={{...s.inlineInput,flex:1}}
+              />
+              <button
+                onClick={sendJackMessage}
+                disabled={!jackInput.trim()||jackLoading}
+                style={{...s.inlineBtn,opacity:(!jackInput.trim()||jackLoading)?0.45:1,transition:"opacity 0.15s"}}>
+                →
+              </button>
+            </div>
           </div>
         )}
 

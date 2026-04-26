@@ -26,12 +26,9 @@ const SANS = 'Inter,ui-sans-serif,system-ui,-apple-system,sans-serif'
 const MONO = '"JetBrains Mono","SF Mono",ui-monospace,monospace'
 
 const ROLES = [
-  { value:'employee',   label:'Employee'        },
-  { value:'shift_lead', label:'Shift Lead'       },
-  { value:'manager',    label:'Manager'          },
-  { value:'gm',         label:'General Manager'  },
-  { value:'area_coach', label:'Area Coach'       },
-  { value:'executive',  label:'Executive'        },
+  { value:'user',    label:'User'    },
+  { value:'manager', label:'Manager' },
+  { value:'admin',   label:'Admin'   },
 ]
 
 function Logo({ size = 22 }) {
@@ -50,7 +47,7 @@ export default function SignupPage() {
   const router = useRouter()
   const [name,     setName]     = useState('')
   const [company,  setCompany]  = useState('')
-  const [role,     setRole]     = useState('employee')
+  const [role,     setRole]     = useState('user')
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [msg,      setMsg]      = useState('')
