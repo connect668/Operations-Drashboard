@@ -67,6 +67,15 @@ function applyScope(q, profile) {
   return q;
 }
 
+function buildFacilityContext(profile) {
+  const fac = profile?.facility_number;
+  const co  = profile?.company;
+  if (fac && co)  return `Facility ${fac}: ${co}`;
+  if (fac)        return `Facility ${fac}`;
+  if (co)         return co;
+  return ROLE_LABELS[profile?.role] || profile?.role || "";
+}
+
 function timeAgo(d) {
   if (!d) return "";
   const s = Math.floor((Date.now() - new Date(d)) / 1000);
@@ -86,12 +95,11 @@ function getMatchReason(policy, term) {
   if (!term) return "Relevant to your situation";
   const words = term.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   const hit   = (val) => val && words.some(w => val.toLowerCase().includes(w));
-
-  if (hit(policy.title))    return `Policy title matches your scenario`;
-  if (hit(policy.keywords)) return `Tagged with keywords from your search`;
-  if (hit(policy.category)) return `Covers "${policy.category}" situations`;
-  if (hit(policy.summary))  return `Policy summary addresses this scenario`;
-  if (hit(policy.policy_text)) return `Policy content is relevant`;
+  if (hit(policy.title))       return "Policy title matches your scenario";
+  if (hit(policy.keywords))    return "Tagged with keywords from your search";
+  if (hit(policy.category))    return `Covers "${policy.category}" situations`;
+  if (hit(policy.summary))     return "Policy summary addresses this scenario";
+  if (hit(policy.policy_text)) return "Policy content is relevant";
   return "Broadly relevant to your situation";
 }
 
@@ -103,14 +111,18 @@ function getRelevanceLabel(index) {
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 function buildTabs(role) {
-  const t = [
-    { id:"home",      label:"Home",     icon:"home"      },
-    { id:"ask",       label:"Ask",      icon:"ask"       },
+  if (role === "admin") return [
+    { id:"home",      label:"Dashboard", icon:"analytics" },
+    { id:"ask",       label:"Ask",       icon:"ask"       },
+    { id:"analytics", label:"Analytics", icon:"signals"   },
   ];
-  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides",    icon:"guides"    });
-  t.push({ id:"feedback",  label:"Feedback",  icon:"feedback"  });
-  if (atLeast(role,"gm"))   t.push({ id:"signals",   label:"Signals",   icon:"signals"   });
-  if (role === "admin")     t.push({ id:"analytics", label:"Analytics", icon:"analytics" });
+  const t = [
+    { id:"home",     label:"Home",    icon:"home"    },
+    { id:"ask",      label:"Ask",     icon:"ask"     },
+  ];
+  if (atLeast(role,"shift_lead")) t.push({ id:"procedures", label:"Guides",   icon:"guides"   });
+  t.push({ id:"feedback", label:"Feedback", icon:"feedback" });
+  if (atLeast(role,"gm")) t.push({ id:"signals", label:"Signals", icon:"signals" });
   return t;
 }
 
@@ -163,12 +175,12 @@ export default function PlaybookApp() {
   const [activeTab,   setActiveTab]   = useState("home");
   const [isMobile,    setIsMobile]    = useState(false);
 
-  // ── Ask / Search state
+  // ── Ask / Search
   const [query,             setQuery]             = useState("");
   const [searching,         setSearching]         = useState(false);
-  const [results,           setResults]           = useState([]);     // policy list
-  const [selectedPolicy,    setSelectedPolicy]    = useState(null);   // clicked policy detail
-  const [policyRefs,        setPolicyRefs]        = useState([]);     // PDF references
+  const [results,           setResults]           = useState([]);
+  const [selectedPolicy,    setSelectedPolicy]    = useState(null);
+  const [policyRefs,        setPolicyRefs]        = useState([]);
   const [policyRefsLoading, setPolicyRefsLoading] = useState(false);
   const [noResult,          setNoResult]          = useState(false);
   const [searchId,          setSearchId]          = useState(null);
@@ -176,7 +188,13 @@ export default function PlaybookApp() {
   const [recents,           setRecents]           = useState([]);
   const [savedPlays,        setSavedPlays]        = useState([]);
 
-  // ── Policy feedback modal
+  // ── Helpful feedback (per policy view)
+  const [helpfulChoice,   setHelpfulChoice]   = useState(null);  // null | true | false
+  const [helpfulSaving,   setHelpfulSaving]   = useState(false);
+  const [helpfulSaved,    setHelpfulSaved]    = useState(false);
+  const [helpfulFbRowId,  setHelpfulFbRowId]  = useState(null);  // existing row to update
+
+  // ── Policy flag modal
   const [showPolicyFeedback, setShowPolicyFeedback] = useState(false);
   const [policyFlags,        setPolicyFlags]        = useState([]);
   const [policyFeedbackNote, setPolicyFeedbackNote] = useState("");
@@ -206,6 +224,11 @@ export default function PlaybookApp() {
   const [recentSearches, setRecentSearches] = useState([]);
   const [feedbackList,   setFeedbackList]   = useState([]);
   const [anonFeedback,   setAnonFeedback]   = useState([]);
+
+  // ── Helpfulness analytics (admin)
+  const [helpStats,        setHelpStats]        = useState(null);
+  const [helpStatsLoading, setHelpStatsLoading] = useState(false);
+  const [helpStatsFetched, setHelpStatsFetched] = useState(false);
 
   const queryRef = useRef(null);
 
@@ -238,7 +261,15 @@ export default function PlaybookApp() {
     if (!profile) return;
     if (activeTab === "procedures" && !procsFetched) loadProcedures();
     if ((activeTab === "signals" || activeTab === "analytics") && !sigFetched) loadSignals();
+    if ((activeTab === "home" || activeTab === "analytics") && profile.role === "admin" && !helpStatsFetched) loadHelpStats();
   }, [activeTab, profile]);
+
+  // Reset helpful feedback state whenever a new policy is selected
+  useEffect(() => {
+    setHelpfulChoice(null);
+    setHelpfulSaved(false);
+    setHelpfulFbRowId(null);
+  }, [selectedPolicy?.id]);
 
   const role      = profile?.role || "employee";
   const isPro     = profile?.plan === "pro" || atLeast(role, "manager");
@@ -247,7 +278,7 @@ export default function PlaybookApp() {
   const isAdmin   = role === "admin";
   const tabs      = profile ? buildTabs(role) : [];
 
-  // ── Data loaders ────────────────────────────────────────────────────────
+  // ── Data loaders ──────────────────────────────────────────────────────────
   const loadRecents = async () => {
     try {
       const { data } = await supabase.from("playbook_searches")
@@ -304,16 +335,48 @@ export default function PlaybookApp() {
     setSigLoading(false); setSigFetched(true);
   };
 
-  // ── Search ──────────────────────────────────────────────────────────────
+  const loadHelpStats = async () => {
+    setHelpStatsLoading(true);
+    try {
+      let q = supabase.from("policy_helpfulness_feedback")
+        .select("id,policy_id,policy_title,helpful,created_at,facility_number,user_id");
+      q = applyScope(q, profile);
+      const { data } = await q.limit(1000);
+      const all = data || [];
+
+      const positiveCount = all.filter(r => r.helpful).length;
+      const negativeCount = all.filter(r => !r.helpful).length;
+
+      // Group by policy_title for rankings
+      const pMap = {};
+      all.forEach(r => {
+        if (!pMap[r.policy_title]) pMap[r.policy_title] = { title:r.policy_title, id:r.policy_id, helpful:0, not:0 };
+        if (r.helpful) pMap[r.policy_title].helpful++;
+        else           pMap[r.policy_title].not++;
+      });
+      const pList = Object.values(pMap).map(p => ({
+        ...p, total: p.helpful + p.not,
+        score: p.helpful / (p.helpful + p.not),
+      })).filter(p => p.total >= 1);
+
+      setHelpStats({
+        total:       all.length,
+        positive:    positiveCount,
+        negative:    negativeCount,
+        mostHelpful: pList.sort((a,b)=>b.score-a.score||b.total-a.total).slice(0,5),
+        leastHelpful:pList.sort((a,b)=>a.score-b.score||b.total-a.total).slice(0,5),
+        recent:      [...all].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,10),
+      });
+    } catch (err) { console.warn("help stats:", err.message); }
+    setHelpStatsLoading(false); setHelpStatsFetched(true);
+  };
+
+  // ── Search ────────────────────────────────────────────────────────────────
   const doSearch = async (term) => {
     if (!term.trim()) return;
     setSearching(true);
-    setNoResult(false);
-    setResults([]);
-    setSelectedPolicy(null);
-    setPolicyRefs([]);
-    setSearchId(null);
-    setIsSaved(false);
+    setNoResult(false); setResults([]); setSelectedPolicy(null);
+    setPolicyRefs([]); setSearchId(null); setIsSaved(false);
 
     try {
       let q = supabase.from("company_policies")
@@ -324,12 +387,11 @@ export default function PlaybookApp() {
       const { data: primary } = await q.limit(8);
       let hits = primary || [];
 
-      // Fallback: word-by-word search
       if (!hits.length) {
-        for (const w of term.split(/\s+/).filter(w => w.length > 3).slice(0, 5)) {
+        for (const w of term.split(/\s+/).filter(w=>w.length>3).slice(0,5)) {
           let wq = supabase.from("company_policies")
             .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
-            .eq("is_active", true);
+            .eq("is_active",true);
           wq = applyScope(wq, profile);
           wq = wq.or(`title.ilike.%${w}%,keywords.ilike.%${w}%,summary.ilike.%${w}%,category.ilike.%${w}%`);
           const { data: wr } = await wq.limit(6);
@@ -341,41 +403,26 @@ export default function PlaybookApp() {
         setNoResult(true);
       } else {
         setResults(hits);
-        // Log the search against the top hit
         try {
           const { data: logged } = await supabase.from("playbook_searches")
-            .insert({
-              user_id: profile.id,
-              facility_number: profile.facility_number || null,
-              company_id: safeUuid(profile.company_id),
-              situation_text: term,
-              policy_id: hits[0].id,
-              saved: false,
-            })
+            .insert({ user_id:profile.id, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), situation_text:term, policy_id:hits[0].id, saved:false })
             .select("id").single();
           if (logged?.id) { setSearchId(logged.id); loadRecents(); }
         } catch {}
       }
-    } finally {
-      setSearching(false);
-    }
+    } finally { setSearching(false); }
   };
 
-  // ── Select a policy from the list ────────────────────────────────────────
+  // ── Select policy ──────────────────────────────────────────────────────────
   const selectPolicy = async (policy) => {
     setSelectedPolicy(policy);
-    setPolicyRefs([]);
-    setPolicyRefsLoading(true);
+    setPolicyRefs([]); setPolicyRefsLoading(true);
     try {
-      const { data: refs } = await supabase
-        .from("policy_references")
+      const { data: refs } = await supabase.from("policy_references")
         .select("id,file_name,file_url,description,created_at")
-        .eq("policy_id", policy.id)
-        .order("created_at", { ascending: true });
-      setPolicyRefs(refs || []);
-    } catch {
-      setPolicyRefs([]);
-    }
+        .eq("policy_id", policy.id).order("created_at",{ascending:true});
+      setPolicyRefs(refs||[]);
+    } catch { setPolicyRefs([]); }
     setPolicyRefsLoading(false);
   };
 
@@ -385,104 +432,105 @@ export default function PlaybookApp() {
     setNoResult(false); setQuery(""); setSearchId(null); setIsSaved(false);
     setTimeout(() => queryRef.current?.focus(), 50);
   };
-  const backToResults = () => { setSelectedPolicy(null); setPolicyRefs([]); setIsSaved(false); };
+  const backToResults = () => { setSelectedPolicy(null); setPolicyRefs([]); };
 
   const reopenRecent = async (r) => {
     setQuery(r.situation_text);
     if (r.policy_id) {
-      setSearching(true);
-      setResults([]);
-      setSelectedPolicy(null);
-      setPolicyRefs([]);
+      setSearching(true); setResults([]); setSelectedPolicy(null); setPolicyRefs([]);
       try {
         const { data } = await supabase.from("company_policies")
           .select("id,title,policy_code,category,severity,summary,policy_text,action_steps,escalation_guidance,incorrect_examples,keywords")
-          .eq("id", r.policy_id).maybeSingle();
-        if (data) {
-          setResults([data]);
-          setSearchId(r.id);
-          setIsSaved(r.saved || false);
-          await selectPolicy(data);
-        } else {
-          await doSearch(r.situation_text);
-        }
+          .eq("id",r.policy_id).maybeSingle();
+        if (data) { setResults([data]); setSearchId(r.id); setIsSaved(r.saved||false); await selectPolicy(data); }
+        else await doSearch(r.situation_text);
       } finally { setSearching(false); }
-    } else {
-      await doSearch(r.situation_text);
-    }
+    } else { await doSearch(r.situation_text); }
   };
 
   const handleSave = async () => {
     if (!searchId) return;
-    try {
-      await supabase.from("playbook_searches").update({ saved: !isSaved }).eq("id", searchId);
-      setIsSaved(!isSaved);
-      loadRecents();
-    } catch {}
+    try { await supabase.from("playbook_searches").update({saved:!isSaved}).eq("id",searchId); setIsSaved(!isSaved); loadRecents(); } catch {}
   };
 
-  // ── Policy feedback ──────────────────────────────────────────────────────
-  const togglePolicyFlag      = f => setPolicyFlags(p => p.includes(f) ? p.filter(x => x !== f) : [...p, f]);
-  const submitPolicyFeedback  = async () => {
+  // ── Helpful feedback ──────────────────────────────────────────────────────
+  const submitHelpfulFeedback = async (isHelpful) => {
+    if (helpfulSaving) return;
+    setHelpfulSaving(true);
+    setHelpfulChoice(isHelpful);
+    try {
+      if (helpfulFbRowId) {
+        // Update existing row if user changes their mind
+        await supabase.from("policy_helpfulness_feedback")
+          .update({ helpful: isHelpful, updated_at: new Date().toISOString() })
+          .eq("id", helpfulFbRowId);
+      } else {
+        // Check for existing row this session (same user + policy)
+        const { data: existing } = await supabase.from("policy_helpfulness_feedback")
+          .select("id")
+          .eq("user_id", profile.id)
+          .eq("policy_id", selectedPolicy.id)
+          .order("created_at",{ascending:false})
+          .limit(1).maybeSingle();
+
+        if (existing) {
+          setHelpfulFbRowId(existing.id);
+          await supabase.from("policy_helpfulness_feedback")
+            .update({ helpful: isHelpful, updated_at: new Date().toISOString() })
+            .eq("id", existing.id);
+        } else {
+          const { data: inserted } = await supabase.from("policy_helpfulness_feedback")
+            .insert({
+              user_id:         profile.id,
+              company_id:      safeUuid(profile.company_id),
+              facility_number: profile.facility_number || null,
+              policy_id:       selectedPolicy.id,
+              policy_title:    selectedPolicy.title,
+              helpful:         isHelpful,
+            }).select("id").single();
+          if (inserted?.id) setHelpfulFbRowId(inserted.id);
+        }
+      }
+      setHelpfulSaved(true);
+    } catch (err) { console.warn("helpful feedback:", err.message); }
+    setHelpfulSaving(false);
+  };
+
+  // ── Policy flag modal ─────────────────────────────────────────────────────
+  const togglePolicyFlag     = f => setPolicyFlags(p => p.includes(f) ? p.filter(x=>x!==f) : [...p,f]);
+  const submitPolicyFeedback = async () => {
     if (!policyFlags.length) return;
     setPolicyFbSubmitting(true);
-    try {
-      await supabase.from("policy_feedback").insert({
-        user_id: profile.id,
-        policy_id: selectedPolicy?.id || null,
-        facility_number: profile.facility_number || null,
-        company_id: safeUuid(profile.company_id),
-        flags: policyFlags,
-        note: policyFeedbackNote.trim() || null,
-      });
-    } catch {}
+    try { await supabase.from("policy_feedback").insert({ user_id:profile.id, policy_id:selectedPolicy?.id||null, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), flags:policyFlags, note:policyFeedbackNote.trim()||null }); } catch {}
     setPolicyFbDone(true); setPolicyFbSubmitting(false);
   };
-  const closePolicyFeedback = () => {
-    setShowPolicyFeedback(false);
-    setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false);
-  };
+  const closePolicyFeedback = () => { setShowPolicyFeedback(false); setPolicyFlags([]); setPolicyFeedbackNote(""); setPolicyFbDone(false); };
 
-  // ── Anon feedback ────────────────────────────────────────────────────────
+  // ── Anon feedback ─────────────────────────────────────────────────────────
   const submitAnonFeedback = async () => {
     if (!fbType) { setFbError("Please select a feedback type."); return; }
     setFbSubmitting(true); setFbError("");
     try {
-      await supabase.from("anonymous_feedback").insert({
-        company_id: safeUuid(profile.company_id) || null,
-        company: profile.company || null,
-        facility_number: profile.facility_number || null,
-        feedback_type: fbType,
-        category: fbCategory.trim() || null,
-        description: fbDescription.trim() || null,
-      });
+      await supabase.from("anonymous_feedback").insert({ company_id:safeUuid(profile.company_id)||null, company:profile.company||null, facility_number:profile.facility_number||null, feedback_type:fbType, category:fbCategory.trim()||null, description:fbDescription.trim()||null });
       setFbDone(true);
     } catch { setFbError("Submission failed. Please try again."); }
     setFbSubmitting(false);
   };
 
-  // ── Derived signals ──────────────────────────────────────────────────────
-  const anonByType = anonFeedback.reduce((acc, f) => {
-    acc[f.feedback_type] = (acc[f.feedback_type] || 0) + 1; return acc;
-  }, {});
-  const frictionAlerts = catBreakdown.filter(([cat, count]) => {
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const anonByType = anonFeedback.reduce((acc,f)=>{ acc[f.feedback_type]=(acc[f.feedback_type]||0)+1; return acc; },{});
+  const frictionAlerts = catBreakdown.filter(([cat,count]) => {
     if (count < 3) return false;
-    return feedbackList.some(f => f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count >= 5;
-  }).slice(0, 3);
-
+    return feedbackList.some(f=>f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count>=5;
+  }).slice(0,3);
   const filteredProcs = procedures.filter(p => {
     if (!procSearch.trim()) return true;
     const s = procSearch.toLowerCase();
-    return (p.title||"").toLowerCase().includes(s) || (p.category||"").toLowerCase().includes(s) || (p.summary||"").toLowerCase().includes(s);
+    return (p.title||"").toLowerCase().includes(s)||(p.category||"").toLowerCase().includes(s)||(p.summary||"").toLowerCase().includes(s);
   });
-  const procsByCategory = filteredProcs.reduce((acc, p) => {
-    const cat = p.category || "General";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(p);
-    return acc;
-  }, {});
+  const procsByCategory = filteredProcs.reduce((acc,p)=>{ const cat=p.category||"General"; if(!acc[cat])acc[cat]=[]; acc[cat].push(p); return acc; },{});
 
-  // ── Loading ────────────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (authLoading) return (
     <div style={{minHeight:"100vh",background:P.pageBg,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center"}}>
@@ -525,7 +573,7 @@ export default function PlaybookApp() {
 
           <div style={s.headerRight}>
             {!isMobile && (
-              <span style={s.headerUser}>{profile?.full_name} · {ROLE_LABELS[role]||role}</span>
+              <span style={s.headerContext}>{buildFacilityContext(profile)}</span>
             )}
             <button className="signout-btn" style={s.signOutBtn}
               onClick={async () => { await supabase.auth.signOut(); router.replace("/"); }}>
@@ -538,8 +586,126 @@ export default function PlaybookApp() {
       {/* ── CONTENT ─────────────────────────────────────────────────── */}
       <main style={{...s.main, paddingBottom: isMobile ? 80 : 48}}>
 
-        {/* ══ HOME ════════════════════════════════════════════════════ */}
-        {activeTab === "home" && (
+        {/* ══ HOME — ADMIN DASHBOARD ══════════════════════════════════ */}
+        {activeTab === "home" && isAdmin && (
+          <div className="fade-in">
+            <div style={s.pageHead}>
+              <h1 style={s.pageTitle}>Admin Dashboard</h1>
+              <p style={s.pageSubtitle}>{buildFacilityContext(profile) || "Policy helpfulness and usage overview"}</p>
+            </div>
+
+            {helpStatsLoading && (
+              <div style={s.loadingBlock}><div style={s.spinner}/><span style={{fontSize:14,color:P.soft}}>Loading data…</span></div>
+            )}
+
+            {!helpStatsLoading && helpStats && (
+              <>
+                {/* Helpfulness counts */}
+                <div style={s.statsRow}>
+                  <div style={{...s.statCard, borderTopColor: P.green}}>
+                    <div style={{...s.statVal, color: P.green}}>{helpStats.positive}</div>
+                    <div style={s.statLbl}>Helpful responses</div>
+                  </div>
+                  <div style={{...s.statCard, borderTopColor: P.red}}>
+                    <div style={{...s.statVal, color: P.red}}>{helpStats.negative}</div>
+                    <div style={s.statLbl}>Not helpful</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statVal}>{helpStats.total}</div>
+                    <div style={s.statLbl}>Total rated</div>
+                  </div>
+                </div>
+
+                {/* Most helpful */}
+                {helpStats.mostHelpful.length > 0 && (
+                  <div style={{marginBottom:28}}>
+                    <div style={s.sectionLabel}>Most Helpful Policies</div>
+                    <div style={s.dataCard}>
+                      {helpStats.mostHelpful.map((p,i) => (
+                        <div key={p.title} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <span style={{fontSize:14,fontWeight:600,color:P.text,flex:1}}>{p.title}</span>
+                            <span style={{...s.pill(P.green),flexShrink:0}}>{Math.round(p.score*100)}% helpful</span>
+                          </div>
+                          <div style={{display:"flex",gap:12,marginTop:6}}>
+                            <span style={{fontSize:12,color:P.green}}>✓ {p.helpful} helpful</span>
+                            <span style={{fontSize:12,color:P.muted}}>✗ {p.not} not helpful</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Least helpful */}
+                {helpStats.leastHelpful.length > 0 && helpStats.leastHelpful[0].score < 1 && (
+                  <div style={{marginBottom:28}}>
+                    <div style={s.sectionLabel}>Needs Improvement</div>
+                    <div style={s.dataCard}>
+                      {helpStats.leastHelpful.filter(p=>p.score<1).map((p,i) => (
+                        <div key={p.title} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <span style={{fontSize:14,fontWeight:600,color:P.text,flex:1}}>{p.title}</span>
+                            <span style={{...s.pill(P.red),flexShrink:0}}>{Math.round(p.score*100)}% helpful</span>
+                          </div>
+                          <div style={{display:"flex",gap:12,marginTop:6}}>
+                            <span style={{fontSize:12,color:P.green}}>✓ {p.helpful} helpful</span>
+                            <span style={{fontSize:12,color:P.red}}>✗ {p.not} not helpful</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent feedback */}
+                {helpStats.recent.length > 0 && (
+                  <div style={{marginBottom:28}}>
+                    <div style={s.sectionLabel}>Recent Ratings</div>
+                    <div style={s.dataCard}>
+                      {helpStats.recent.map((r,i) => (
+                        <div key={r.id} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:13,color:P.text,fontWeight:600,flex:1}}>{r.policy_title}</span>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                              <span style={r.helpful ? s.helpBadgePos : s.helpBadgeNeg}>
+                                {r.helpful ? "✓ Helpful" : "✗ Not helpful"}
+                              </span>
+                              <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{timeAgo(r.created_at)}</span>
+                            </div>
+                          </div>
+                          {r.facility_number && <div style={{fontSize:11,color:P.muted,marginTop:3}}>Facility {r.facility_number}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {helpStats.total === 0 && (
+                  <div style={s.emptyCard}>No helpfulness ratings yet. Ratings appear after users view and rate policies.</div>
+                )}
+              </>
+            )}
+
+            {!helpStatsLoading && !helpStats && (
+              <div style={s.emptyCard}>Could not load data. Check your connection and try refreshing.</div>
+            )}
+
+            <div style={{marginTop:4}}>
+              <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("analytics")}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <div style={s.featureCardText}>
+                  <div style={s.featureCardTitle}>Full Analytics</div>
+                  <div style={s.featureCardSub}>Searches, category trends, policy flags</div>
+                </div>
+                <span style={s.featureCardArrow}>→</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ══ HOME — MANAGER / GM ═════════════════════════════════════ */}
+        {activeTab === "home" && !isAdmin && (
           <div className="fade-in">
             <div style={s.pageHead}>
               <h1 style={s.pageTitle}>
@@ -553,7 +719,7 @@ export default function PlaybookApp() {
             </div>
 
             {/* Employee / Shift Lead */}
-            {!isManager && !isLeader && !isAdmin && (
+            {!isManager && !isLeader && (
               <div style={s.homeGrid}>
                 <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
@@ -585,7 +751,7 @@ export default function PlaybookApp() {
             )}
 
             {/* Manager */}
-            {isManager && !isLeader && !isAdmin && (
+            {isManager && !isLeader && (
               <div style={s.homeGrid}>
                 <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("ask")}>
                   <div style={s.heroCardIcon}>
@@ -620,8 +786,8 @@ export default function PlaybookApp() {
               </div>
             )}
 
-            {/* Leadership / Admin */}
-            {(isLeader || isAdmin) && (
+            {/* GM / Leadership */}
+            {isLeader && (
               <div style={s.homeGrid}>
                 <div style={s.statsRow}>
                   <div style={s.statCard}><div style={s.statVal}>{totalSearches||"—"}</div><div style={s.statLbl}>Plays pulled</div></div>
@@ -631,7 +797,7 @@ export default function PlaybookApp() {
                 {frictionAlerts.length > 0 && (
                   <div>
                     <div style={s.sectionLabel}>Friction signals</div>
-                    {frictionAlerts.map(([cat, count]) => (
+                    {frictionAlerts.map(([cat,count]) => (
                       <div key={cat} style={s.alertCard}>
                         <div style={s.alertTitle}>"{cat}" being searched heavily</div>
                         <div style={s.alertSub}>{count} pulls — may indicate unclear guidance in this area</div>
@@ -639,8 +805,7 @@ export default function PlaybookApp() {
                     ))}
                   </div>
                 )}
-                <button className="hero-card" style={s.heroCard}
-                  onClick={() => setActiveTab(isAdmin ? "analytics" : "signals")}>
+                <button className="hero-card" style={s.heroCard} onClick={() => setActiveTab("signals")}>
                   <div style={s.heroCardIcon}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                   </div>
@@ -650,10 +815,7 @@ export default function PlaybookApp() {
                 </button>
                 <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("ask")}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <div style={s.featureCardText}>
-                    <div style={s.featureCardTitle}>Ask Playbook</div>
-                    <div style={s.featureCardSub}>Search policies and procedures</div>
-                  </div>
+                  <div style={s.featureCardText}><div style={s.featureCardTitle}>Ask Playbook</div><div style={s.featureCardSub}>Search policies and procedures</div></div>
                   <span style={s.featureCardArrow}>→</span>
                 </button>
               </div>
@@ -665,26 +827,23 @@ export default function PlaybookApp() {
         {activeTab === "ask" && (
           <div className="fade-in">
 
-            {/* ── STATE 1: SEARCH FORM ── */}
+            {/* SEARCH FORM */}
             {!results.length && !noResult && !searching && (
               <>
                 <div style={s.pageHead}>
                   <h1 style={s.pageTitle}>What's the situation?</h1>
                   <p style={s.pageSubtitle}>Describe the issue and we'll find the relevant policies.</p>
                 </div>
-
                 <form onSubmit={handleSearch} style={s.searchBlock}>
                   <textarea
                     ref={queryRef}
                     value={query}
                     onChange={e => setQuery(e.target.value)}
-                    onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleSearch(); } }}
+                    onKeyDown={e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSearch();} }}
                     placeholder={isManager
-                      ? "e.g.  Employee called off 30 min before shift\n       Customer dispute over return policy\n       Team member repeated policy violation"
+                      ? "e.g.  Employee called off 30 min before shift\n       Customer dispute over return policy"
                       : "e.g.  What do I do if a customer wants a refund?\n       Who do I call for an equipment issue?"}
-                    style={s.searchInput}
-                    rows={4}
-                    autoFocus
+                    style={s.searchInput} rows={4} autoFocus
                   />
                   <div style={s.searchBtnRow}>
                     <button type="submit"
@@ -720,7 +879,7 @@ export default function PlaybookApp() {
               </>
             )}
 
-            {/* ── STATE 2: SEARCHING ── */}
+            {/* SEARCHING */}
             {searching && (
               <div style={s.loadingBlock} className="fade-in">
                 <div style={s.spinner}/>
@@ -728,7 +887,7 @@ export default function PlaybookApp() {
               </div>
             )}
 
-            {/* ── STATE 3: NO RESULT ── */}
+            {/* NO RESULT */}
             {noResult && !searching && (
               <div style={s.emptyBlock} className="fade-in">
                 <div style={s.emptyIconWrap}>
@@ -740,7 +899,7 @@ export default function PlaybookApp() {
               </div>
             )}
 
-            {/* ── STATE 4: RESULTS LIST ── */}
+            {/* RESULTS LIST */}
             {results.length > 0 && !selectedPolicy && !searching && (
               <div className="fade-in">
                 <div style={s.resultTopBar}>
@@ -749,14 +908,11 @@ export default function PlaybookApp() {
                     New search
                   </button>
                 </div>
-
                 <div style={s.situationPill}>
                   <span style={{color:P.muted,fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em"}}>Situation · </span>
                   <span style={{color:P.soft}}>{query}</span>
                 </div>
-
                 <div style={s.sectionLabel}>Relevant Policies</div>
-
                 {results.map((policy, i) => (
                   <button key={policy.id} className="policy-card"
                     style={{...s.policyCard,...(i===0?s.policyCardTop:{})}}
@@ -766,7 +922,7 @@ export default function PlaybookApp() {
                         <div style={s.policyCardTitle}>{policy.title}</div>
                         <div style={s.policyCardReason}>{getMatchReason(policy, query)}</div>
                         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-                          {policy.category && <span style={s.pill(P.soft)}>{policy.category}</span>}
+                          {policy.category    && <span style={s.pill(P.soft)}>{policy.category}</span>}
                           {policy.policy_code && <span style={s.pill(P.muted)}>{policy.policy_code}</span>}
                         </div>
                       </div>
@@ -779,10 +935,9 @@ export default function PlaybookApp() {
                     </div>
                   </button>
                 ))}
-
                 <div style={s.searchAgain}>
                   <form onSubmit={handleSearch} style={{display:"flex",gap:8}}>
-                    <input value={query} onChange={e => setQuery(e.target.value)}
+                    <input value={query} onChange={e=>setQuery(e.target.value)}
                       placeholder="Search another situation…" style={s.inlineInput}/>
                     <button type="submit" style={s.inlineBtn} disabled={!query.trim()}>→</button>
                   </form>
@@ -790,13 +945,13 @@ export default function PlaybookApp() {
               </div>
             )}
 
-            {/* ── STATE 5: POLICY DETAIL ── */}
+            {/* POLICY DETAIL */}
             {selectedPolicy && !searching && (
               <div className="fade-in">
                 <div style={s.resultTopBar}>
-                  <button style={s.backBtn} onClick={results.length > 1 ? backToResults : clearSearch}>
+                  <button style={s.backBtn} onClick={results.length>1 ? backToResults : clearSearch}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                    {results.length > 1 ? "Back to results" : "New search"}
+                    {results.length>1 ? "Back to results" : "New search"}
                   </button>
                   <div style={{display:"flex",gap:8}}>
                     <button className="chip-btn" style={{...s.chipBtn,...(isSaved?s.chipBtnSaved:{})}} onClick={handleSave}>
@@ -827,13 +982,11 @@ export default function PlaybookApp() {
                   )}
                 </div>
 
-                {/* Steps / The Play */}
+                {/* The Play */}
                 {(selectedPolicy.action_steps || selectedPolicy.policy_text) && (
                   <div style={s.resultCard}>
                     <div style={s.resultCardTag}>The Play</div>
-                    <div style={s.resultCardBody}>
-                      {selectedPolicy.action_steps || selectedPolicy.policy_text}
-                    </div>
+                    <div style={s.resultCardBody}>{selectedPolicy.action_steps || selectedPolicy.policy_text}</div>
                   </div>
                 )}
 
@@ -855,9 +1008,8 @@ export default function PlaybookApp() {
 
                 {/* Reference PDFs */}
                 {policyRefsLoading && (
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 0"}}>
-                    <div style={s.spinner}/>
-                    <span style={{fontSize:13,color:P.muted}}>Loading references…</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 0"}}>
+                    <div style={s.spinner}/><span style={{fontSize:13,color:P.muted}}>Loading references…</span>
                   </div>
                 )}
                 {!policyRefsLoading && policyRefs.length > 0 && (
@@ -869,31 +1021,66 @@ export default function PlaybookApp() {
                           <div style={s.pdfIcon}><PdfIcon/></div>
                           <div style={s.pdfInfo}>
                             <div style={s.pdfName}>{ref.file_name}</div>
-                            {ref.description && (
-                              <div style={s.pdfDesc}>{ref.description}</div>
-                            )}
+                            {ref.description && <div style={s.pdfDesc}>{ref.description}</div>}
                           </div>
-                          <a href={ref.file_url} target="_blank" rel="noopener noreferrer"
-                            style={s.pdfOpenBtn}>
-                            Open ↗
-                          </a>
+                          <a href={ref.file_url} target="_blank" rel="noopener noreferrer" style={s.pdfOpenBtn}>Open ↗</a>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Search again inline */}
+                {/* ── HELPFUL FEEDBACK ── */}
+                <div style={s.helpfulBlock}>
+                  {!helpfulSaved ? (
+                    <>
+                      <div style={s.helpfulLabel}>Was this policy helpful?</div>
+                      <div style={s.helpfulBtnRow}>
+                        <button
+                          className="helpful-btn"
+                          style={{...s.helpfulBtn,...(helpfulChoice===true?s.helpfulBtnYesActive:{})}}
+                          onClick={() => submitHelpfulFeedback(true)}
+                          disabled={helpfulSaving}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke={helpfulChoice===true?"#fff":P.green} strokeWidth="2.2"
+                            strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                          Helpful
+                        </button>
+                        <button
+                          className="helpful-btn"
+                          style={{...s.helpfulBtn,...(helpfulChoice===false?s.helpfulBtnNoActive:{})}}
+                          onClick={() => submitHelpfulFeedback(false)}
+                          disabled={helpfulSaving}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke={helpfulChoice===false?"#fff":P.red} strokeWidth="2.2"
+                            strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                          Not helpful
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={s.helpfulConfirm}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      Feedback saved.
+                      <button style={s.helpfulChangeBtn} onClick={() => setHelpfulSaved(false)}>Change</button>
+                    </div>
+                  )}
+                </div>
+
                 <div style={s.searchAgain}>
                   <form onSubmit={handleSearch} style={{display:"flex",gap:8}}>
-                    <input value={query} onChange={e => setQuery(e.target.value)}
+                    <input value={query} onChange={e=>setQuery(e.target.value)}
                       placeholder="Search another situation…" style={s.inlineInput}/>
                     <button type="submit" style={s.inlineBtn} disabled={!query.trim()}>→</button>
                   </form>
                 </div>
               </div>
             )}
-
           </div>
         )}
 
@@ -906,29 +1093,24 @@ export default function PlaybookApp() {
             </div>
             <div style={{position:"relative",marginBottom:24}}>
               <svg style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input value={procSearch} onChange={e => setProcSearch(e.target.value)}
+              <input value={procSearch} onChange={e=>setProcSearch(e.target.value)}
                 placeholder="Search guides…"
                 style={{...s.inlineInput,paddingLeft:40,width:"100%",boxSizing:"border-box"}}/>
             </div>
             {procsLoading && <div style={s.loadingBlock}><div style={s.spinner}/></div>}
             {!procsLoading && procedures.length===0 && (
-              <div style={s.emptyBlock}>
-                <div style={s.emptyTitle}>No guides yet</div>
-                <div style={s.emptyBody}>Company procedures will appear here once added.</div>
-              </div>
+              <div style={s.emptyBlock}><div style={s.emptyTitle}>No guides yet</div><div style={s.emptyBody}>Company procedures will appear here once added.</div></div>
             )}
-            {!procsLoading && Object.entries(procsByCategory).map(([cat, items]) => (
+            {!procsLoading && Object.entries(procsByCategory).map(([cat,items]) => (
               <div key={cat} style={{marginBottom:28}}>
                 <div style={s.catLabel}>{cat}</div>
                 {items.map(proc => (
                   <div key={proc.id} style={s.procCard}>
                     <button className="proc-toggle" style={s.procToggle}
-                      onClick={() => setExpandedProc(expandedProc===proc.id ? null : proc.id)}>
+                      onClick={() => setExpandedProc(expandedProc===proc.id?null:proc.id)}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={s.procTitle}>{proc.title}</div>
-                        {proc.summary && expandedProc!==proc.id && (
-                          <div style={s.procPreview}>{proc.summary}</div>
-                        )}
+                        {proc.summary&&expandedProc!==proc.id&&<div style={s.procPreview}>{proc.summary}</div>}
                       </div>
                       <svg style={{transform:`rotate(${expandedProc===proc.id?180:0}deg)`,transition:"transform 0.2s",flexShrink:0}}
                         width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -938,9 +1120,7 @@ export default function PlaybookApp() {
                     {expandedProc===proc.id && (
                       <div style={s.procBody}>
                         <div style={s.procStepLabel}>Steps</div>
-                        <div style={s.procContent}>
-                          {proc.action_steps || proc.policy_text || proc.summary || "No content available."}
-                        </div>
+                        <div style={s.procContent}>{proc.action_steps||proc.policy_text||proc.summary||"No content available."}</div>
                       </div>
                     )}
                   </div>
@@ -959,14 +1139,10 @@ export default function PlaybookApp() {
             </div>
             {fbDone ? (
               <div style={s.successCard}>
-                <div style={s.successCheck}>
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                </div>
+                <div style={s.successCheck}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
                 <div style={s.successTitle}>Feedback submitted</div>
                 <div style={s.successBody}>Thanks. Your feedback helps leadership improve the systems you work with every day.</div>
-                <button style={s.primaryBtn} onClick={() => { setFbDone(false); setFbType(""); setFbCategory(""); setFbDescription(""); }}>
-                  Submit another
-                </button>
+                <button style={s.primaryBtn} onClick={() => { setFbDone(false);setFbType("");setFbCategory("");setFbDescription(""); }}>Submit another</button>
               </div>
             ) : (
               <div style={s.formCard}>
@@ -977,32 +1153,26 @@ export default function PlaybookApp() {
                       <button key={ft.id} className="fb-opt"
                         style={{...s.fbOpt,...(fbType===ft.id?s.fbOptActive:{})}}
                         onClick={() => setFbType(ft.id)}>
-                        {fbType===ft.id && <span style={{color:P.purple,marginRight:4}}>✓</span>}
-                        {ft.label}
+                        {fbType===ft.id&&<span style={{color:P.purple,marginRight:4}}>✓</span>}{ft.label}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div style={s.formSection}>
                   <label style={s.fieldLabel}>Related area <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-                  <input value={fbCategory} onChange={e => setFbCategory(e.target.value)}
-                    placeholder="e.g. call-offs, food safety, returns…" style={s.textInput}/>
+                  <input value={fbCategory} onChange={e=>setFbCategory(e.target.value)} placeholder="e.g. call-offs, food safety, returns…" style={s.textInput}/>
                 </div>
                 <div style={s.formSection}>
                   <label style={s.fieldLabel}>Tell us more <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional, anonymous)</span></label>
-                  <textarea value={fbDescription} onChange={e => setFbDescription(e.target.value.slice(0,400))}
-                    placeholder="Describe what's confusing or what could be clearer…"
-                    style={{...s.textInput,minHeight:120,resize:"vertical",lineHeight:1.65}}/>
+                  <textarea value={fbDescription} onChange={e=>setFbDescription(e.target.value.slice(0,400))} placeholder="Describe what's confusing or what could be clearer…" style={{...s.textInput,minHeight:120,resize:"vertical",lineHeight:1.65}}/>
                   <div style={{fontSize:11,color:P.muted,textAlign:"right",marginTop:4}}>{fbDescription.length}/400</div>
                 </div>
-                {fbError && <div style={s.errorBox}>{fbError}</div>}
+                {fbError&&<div style={s.errorBox}>{fbError}</div>}
                 <button style={{...s.primaryBtn,...(!fbType||fbSubmitting?{opacity:0.45,cursor:"not-allowed"}:{})}}
                   onClick={submitAnonFeedback} disabled={!fbType||fbSubmitting}>
-                  {fbSubmitting ? "Submitting…" : "Submit Feedback"}
+                  {fbSubmitting?"Submitting…":"Submit Feedback"}
                 </button>
-                <div style={s.privacyNote}>
-                  🔒 Your name and account are never linked to this submission. Only the type, area, and description are stored.
-                </div>
+                <div style={s.privacyNote}>🔒 Your name and account are never linked to this submission.</div>
               </div>
             )}
           </div>
@@ -1024,11 +1194,10 @@ export default function PlaybookApp() {
                   <div style={s.statCard}><div style={s.statVal}>{feedbackList.length}</div><div style={s.statLbl}>Policy flags</div></div>
                   <div style={s.statCard}><div style={s.statVal}>{anonFeedback.length}</div><div style={s.statLbl}>Anon feedback</div></div>
                 </div>
-
-                {frictionAlerts.length > 0 && (
+                {frictionAlerts.length>0&&(
                   <div style={{marginBottom:28}}>
                     <div style={s.sectionLabel}>Friction Alerts</div>
-                    {frictionAlerts.map(([cat, count]) => (
+                    {frictionAlerts.map(([cat,count])=>(
                       <div key={cat} style={s.alertCard}>
                         <div style={s.alertTitle}>High activity: {cat}</div>
                         <div style={s.alertSub}>{count} searches — may indicate unclear guidance in this area</div>
@@ -1036,78 +1205,41 @@ export default function PlaybookApp() {
                     ))}
                   </div>
                 )}
-
                 <div style={{marginBottom:28}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                     <div style={s.sectionLabel}>Policy Pulls by Category</div>
-                    <button className="ghost-btn" style={s.ghostBtn} onClick={() => { setSigFetched(false); loadSignals(); }}>Refresh</button>
+                    <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
                   </div>
-                  {catBreakdown.length===0
-                    ? <div style={s.emptyCard}>No data yet. Plays pulled will appear here.</div>
-                    : (
-                      <div style={s.dataCard}>
-                        {catBreakdown.map(([cat, count], i) => {
-                          const pct = Math.round((count/catBreakdown[0][1])*100);
-                          return (
-                            <div key={cat} style={i>0?{marginTop:16,paddingTop:16,borderTop:`1px solid ${P.border}`}:{}}>
-                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                                <span style={{fontSize:14,fontWeight:600,color:P.text}}>{cat}</span>
-                                <span style={{fontSize:13,color:P.muted,fontFamily:MONO}}>{count}</span>
-                              </div>
-                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                                <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
-                              </div>
+                  {catBreakdown.length===0?<div style={s.emptyCard}>No data yet.</div>:(
+                    <div style={s.dataCard}>
+                      {catBreakdown.map(([cat,count],i)=>{
+                        const pct=Math.round((count/catBreakdown[0][1])*100);
+                        return(
+                          <div key={cat} style={i>0?{marginTop:16,paddingTop:16,borderTop:`1px solid ${P.border}`}:{}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                              <span style={{fontSize:14,fontWeight:600,color:P.text}}>{cat}</span>
+                              <span style={{fontSize:13,color:P.muted,fontFamily:MONO}}>{count}</span>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                </div>
-
-                <div style={{marginBottom:28}}>
-                  <div style={s.sectionLabel}>Anonymous Feedback</div>
-                  {anonFeedback.length===0
-                    ? <div style={s.emptyCard}>No feedback submitted yet.</div>
-                    : (
-                      <>
-                        <div style={{...s.dataCard,marginBottom:10}}>
-                          <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>By type</div>
-                          {Object.entries(anonByType).sort((a,b)=>b[1]-a[1]).map(([type, count]) => {
-                            const ft = FB_TYPES.find(f=>f.id===type);
-                            return (
-                              <div key={type} style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                                <span style={{fontSize:13,color:P.soft}}>{ft?.label||type}</span>
-                                <span style={{fontSize:13,fontWeight:700,color:P.text,fontFamily:MONO}}>{count}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {anonFeedback.slice(0,10).map(fb => (
-                          <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
-                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                              <span style={s.pill(P.purple)}>{FB_TYPES.find(f=>f.id===fb.feedback_type)?.label||fb.feedback_type}</span>
-                              <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{fmtDate(fb.created_at)}</span>
+                            <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
                             </div>
-                            {fb.category    && <div style={{fontSize:12,color:P.soft,marginBottom:4}}>Area: {fb.category}</div>}
-                            {fb.description && <div style={{fontSize:13,color:P.text,lineHeight:1.55}}>{fb.description}</div>}
                           </div>
-                        ))}
-                      </>
-                    )}
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-
-                {feedbackList.length > 0 && (
+                {feedbackList.length>0&&(
                   <div style={{marginBottom:28}}>
                     <div style={s.sectionLabel}>Policy Flags</div>
-                    {feedbackList.map(fb => (
+                    {feedbackList.map(fb=>(
                       <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
                         <div style={{display:"flex",justifyContent:"space-between",gap:12,marginBottom:8,flexWrap:"wrap"}}>
                           <div style={{fontSize:13,fontWeight:700,color:P.text,flex:1}}>{fb.company_policies?.title||"Policy"}</div>
                           <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
                         </div>
                         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{(fb.flags||[]).map(flag=><span key={flag} style={s.pill(P.muted)}>{flag}</span>)}</div>
-                        {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
-                        {fb.facility_number && <div style={{marginTop:6,fontSize:11,color:P.muted}}>Facility {fb.facility_number}</div>}
+                        {fb.note&&<div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
                       </div>
                     ))}
                   </div>
@@ -1117,13 +1249,49 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ ANALYTICS ═══════════════════════════════════════════════ */}
+        {/* ══ ANALYTICS (admin) ═══════════════════════════════════════ */}
         {activeTab === "analytics" && isAdmin && (
           <div className="fade-in">
             <div style={s.pageHead}>
               <h1 style={s.pageTitle}>Analytics</h1>
-              <p style={s.pageSubtitle}>Full usage data and feedback</p>
+              <p style={s.pageSubtitle}>Usage data, helpfulness ratings, and policy flags</p>
             </div>
+
+            {/* Helpfulness summary */}
+            {!helpStatsLoading && helpStats && helpStats.total > 0 && (
+              <div style={{marginBottom:28}}>
+                <div style={s.sectionLabel}>Policy Helpfulness</div>
+                <div style={s.statsRow}>
+                  <div style={{...s.statCard,borderTopColor:P.green}}>
+                    <div style={{...s.statVal,color:P.green}}>{helpStats.positive}</div>
+                    <div style={s.statLbl}>Helpful</div>
+                  </div>
+                  <div style={{...s.statCard,borderTopColor:P.red}}>
+                    <div style={{...s.statVal,color:P.red}}>{helpStats.negative}</div>
+                    <div style={s.statLbl}>Not helpful</div>
+                  </div>
+                  <div style={s.statCard}>
+                    <div style={s.statVal}>{helpStats.total ? Math.round((helpStats.positive/helpStats.total)*100) : 0}%</div>
+                    <div style={s.statLbl}>Helpful rate</div>
+                  </div>
+                </div>
+                {helpStats.mostHelpful.length > 0 && (
+                  <div style={{...s.dataCard,marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Top rated policies</div>
+                    {helpStats.mostHelpful.map((p,i)=>(
+                      <div key={p.title} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                          <span style={{fontSize:13,color:P.text,fontWeight:600,flex:1}}>{p.title}</span>
+                          <span style={s.pill(P.green)}>{Math.round(p.score*100)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Search stats */}
             {sigLoading
               ? <div style={s.loadingBlock}><div style={s.spinner}/></div>
               : (
@@ -1136,57 +1304,46 @@ export default function PlaybookApp() {
                 <div style={{marginBottom:24}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                     <div style={s.sectionLabel}>Plays by Category</div>
-                    <button className="ghost-btn" style={s.ghostBtn} onClick={() => { setSigFetched(false); loadSignals(); }}>Refresh</button>
+                    <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);loadSignals();}}>Refresh</button>
                   </div>
                   <div style={s.dataCard}>
-                    {catBreakdown.length===0
-                      ? <span style={{color:P.muted,fontSize:13}}>No data yet.</span>
-                      : catBreakdown.map(([cat, count], i) => {
-                          const pct = Math.round((count/catBreakdown[0][1])*100);
-                          return (
-                            <div key={cat} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
-                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                                <span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span>
-                                <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span>
-                              </div>
-                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                                <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3}}/>
-                              </div>
-                            </div>
-                          );
-                        })}
+                    {catBreakdown.length===0?<span style={{color:P.muted,fontSize:13}}>No data yet.</span>:catBreakdown.map(([cat,count],i)=>{
+                      const pct=Math.round((count/catBreakdown[0][1])*100);
+                      return(
+                        <div key={cat} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span><span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span></div>
+                          <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3}}/></div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <div style={{marginBottom:24}}>
                   <div style={s.sectionLabel}>Policy Feedback</div>
-                  {feedbackList.length===0
-                    ? <div style={s.emptyCard}>No feedback yet.</div>
-                    : feedbackList.map(fb => (
-                        <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
-                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
-                            <div style={{fontSize:13,fontWeight:700,color:P.text}}>{fb.company_policies?.title||"Policy"}</div>
-                            <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
-                          </div>
-                          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{(fb.flags||[]).map(f=><span key={f} style={s.pill(P.muted)}>{f}</span>)}</div>
-                          {fb.note && <div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
-                        </div>
-                      ))}
+                  {feedbackList.length===0?<div style={s.emptyCard}>No feedback yet.</div>:feedbackList.map(fb=>(
+                    <div key={fb.id} style={{...s.dataCard,marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
+                        <div style={{fontSize:13,fontWeight:700,color:P.text}}>{fb.company_policies?.title||"Policy"}</div>
+                        <span style={{fontSize:11,color:P.muted,fontFamily:MONO,flexShrink:0}}>{fmtDate(fb.created_at)}</span>
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{(fb.flags||[]).map(f=><span key={f} style={s.pill(P.muted)}>{f}</span>)}</div>
+                      {fb.note&&<div style={{marginTop:8,fontSize:13,color:P.soft,fontStyle:"italic"}}>"{fb.note}"</div>}
+                    </div>
+                  ))}
                 </div>
                 <div style={{marginBottom:24}}>
                   <div style={s.sectionLabel}>Recent Plays</div>
                   <div style={s.dataCard}>
-                    {recentSearches.length===0
-                      ? <span style={{color:P.muted,fontSize:13}}>No searches yet.</span>
-                      : recentSearches.map((sr, i) => (
-                          <div key={sr.id} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
-                            <div style={{fontSize:13,color:P.text,marginBottom:3}}>{sr.situation_text}</div>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                              {sr.company_policies?.title    && <span style={{fontSize:11,color:P.soft}}>→ {sr.company_policies.title}</span>}
-                              {sr.company_policies?.category && <span style={s.pill(P.muted)}>{sr.company_policies.category}</span>}
-                              <span style={{fontSize:11,color:P.muted,marginLeft:"auto",fontFamily:MONO}}>{timeAgo(sr.created_at)}</span>
-                            </div>
-                          </div>
-                        ))}
+                    {recentSearches.length===0?<span style={{color:P.muted,fontSize:13}}>No searches yet.</span>:recentSearches.map((sr,i)=>(
+                      <div key={sr.id} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                        <div style={{fontSize:13,color:P.text,marginBottom:3}}>{sr.situation_text}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                          {sr.company_policies?.title&&<span style={{fontSize:11,color:P.soft}}>→ {sr.company_policies.title}</span>}
+                          {sr.company_policies?.category&&<span style={s.pill(P.muted)}>{sr.company_policies.category}</span>}
+                          <span style={{fontSize:11,color:P.muted,marginLeft:"auto",fontFamily:MONO}}>{timeAgo(sr.created_at)}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </>
@@ -1196,58 +1353,51 @@ export default function PlaybookApp() {
 
       </main>
 
-      {/* ── BOTTOM NAV (mobile) ──────────────────────────────────────── */}
+      {/* ── BOTTOM NAV ──────────────────────────────────────────────── */}
       {isMobile && (
         <nav style={s.bottomNav}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)}
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setActiveTab(t.id)}
               style={{...s.bottomNavBtn,...(activeTab===t.id?s.bottomNavBtnActive:{})}}>
               <NavIcon name={t.icon} active={activeTab===t.id}/>
-              <span style={{...s.bottomNavLabel,...(activeTab===t.id?{color:P.purple}:{})}}>
-                {t.label}
-              </span>
+              <span style={{...s.bottomNavLabel,...(activeTab===t.id?{color:P.purple}:{})}}>{t.label}</span>
             </button>
           ))}
         </nav>
       )}
 
-      {/* ── POLICY FEEDBACK MODAL ───────────────────────────────────── */}
+      {/* ── POLICY FLAG MODAL ───────────────────────────────────────── */}
       {showPolicyFeedback && (
         <div style={s.overlay} onClick={closePolicyFeedback}>
-          <div style={s.modal} onClick={e => e.stopPropagation()}>
-            {policyFbDone ? (
+          <div style={s.modal} onClick={e=>e.stopPropagation()}>
+            {policyFbDone?(
               <div style={{textAlign:"center",padding:"8px 0 8px"}}>
-                <div style={{...s.successCheck,margin:"0 auto 14px"}}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                </div>
+                <div style={{...s.successCheck,margin:"0 auto 14px"}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={P.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
                 <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:8}}>Thanks for flagging that</div>
                 <div style={{fontSize:13,color:P.soft,lineHeight:1.55,marginBottom:20}}>Your feedback helps improve policies for everyone.</div>
                 <button style={s.primaryBtn} onClick={closePolicyFeedback}>Done</button>
               </div>
-            ) : (
+            ):(
               <>
                 <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:4}}>Flag Policy</div>
                 <div style={{fontSize:13,color:P.soft,marginBottom:16,lineHeight:1.5}}>{selectedPolicy?.title}</div>
                 <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-                  {POLICY_FLAGS.map(flag => (
+                  {POLICY_FLAGS.map(flag=>(
                     <button key={flag} className="fb-opt"
                       style={{...s.fbOpt,...(policyFlags.includes(flag)?s.fbOptActive:{})}}
-                      onClick={() => togglePolicyFlag(flag)}>
-                      {policyFlags.includes(flag) && <span style={{color:P.purple,marginRight:4}}>✓</span>}
-                      {flag}
+                      onClick={()=>togglePolicyFlag(flag)}>
+                      {policyFlags.includes(flag)&&<span style={{color:P.purple,marginRight:4}}>✓</span>}{flag}
                     </button>
                   ))}
                 </div>
                 <label style={s.fieldLabel}>Optional note <span style={{color:P.muted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(max 280 chars)</span></label>
-                <textarea value={policyFeedbackNote}
-                  onChange={e => setPolicyFeedbackNote(e.target.value.slice(0,280))}
-                  placeholder="Any context…"
-                  style={{...s.textInput,minHeight:72,resize:"vertical",marginBottom:4,lineHeight:1.65}}/>
+                <textarea value={policyFeedbackNote} onChange={e=>setPolicyFeedbackNote(e.target.value.slice(0,280))}
+                  placeholder="Any context…" style={{...s.textInput,minHeight:72,resize:"vertical",marginBottom:4,lineHeight:1.65}}/>
                 <div style={{fontSize:11,color:P.muted,textAlign:"right",marginBottom:16}}>{policyFeedbackNote.length}/280</div>
                 <div style={{display:"flex",gap:8}}>
                   <button style={{...s.primaryBtn,flex:1,...(!policyFlags.length||policyFbSubmitting?{opacity:0.45,cursor:"not-allowed"}:{})}}
                     onClick={submitPolicyFeedback} disabled={!policyFlags.length||policyFbSubmitting}>
-                    {policyFbSubmitting ? "Submitting…" : "Submit"}
+                    {policyFbSubmitting?"Submitting…":"Submit"}
                   </button>
                   <button className="ghost-btn" style={s.ghostBtn} onClick={closePolicyFeedback}>Cancel</button>
                 </div>
@@ -1286,12 +1436,8 @@ const CSS = `
   .fb-opt:hover        { border-color: #A99AC8 !important; }
   .ghost-btn:hover     { border-color: #A99AC8 !important; background: #FAF9FD !important; }
   .signout-btn:hover   { color: #1C1830 !important; border-color: #A99AC8 !important; }
-
-  .policy-card:hover {
-    border-color: rgba(107,94,168,0.40) !important;
-    box-shadow: 0 3px 16px rgba(107,94,168,0.10) !important;
-    transform: translateY(-1px);
-  }
+  .policy-card:hover   { border-color: rgba(107,94,168,0.40) !important; box-shadow: 0 3px 16px rgba(107,94,168,0.10) !important; transform: translateY(-1px); }
+  .helpful-btn:hover   { filter: brightness(0.93); }
 
   textarea:focus, input:focus, select:focus {
     border-color: rgba(107,94,168,0.50) !important;
@@ -1310,19 +1456,19 @@ const s = {
   shell: { minHeight:"100vh", background:P.pageBg, color:P.text, fontFamily:SANS },
 
   // Header
-  header:      { background:P.surface, borderBottom:`1px solid ${P.border}`, position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(107,94,168,0.06)" },
-  headerInner: { maxWidth:1120, margin:"0 auto", display:"flex", alignItems:"center", height:60, paddingLeft:28, paddingRight:24, gap:20 },
-  brand:       { display:"flex", alignItems:"center", gap:10, flexShrink:0 },
-  brandText:   { display:"flex", alignItems:"baseline", gap:5 },
-  brandName:   { fontWeight:700, fontSize:16, color:P.text, letterSpacing:"-0.01em" },
-  brandBy:     { fontSize:11, color:P.muted, letterSpacing:"0.03em" },
-  proBadge:    { fontSize:9, fontWeight:800, color:P.purple, background:P.purpleDim, border:`1px solid rgba(107,94,168,0.25)`, borderRadius:4, padding:"2px 7px", letterSpacing:"0.10em", textTransform:"uppercase" },
-  desktopNav:  { display:"flex", alignItems:"stretch", flex:1, height:60, overflowX:"auto" },
-  navTab:      { border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:P.muted, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.01em", display:"flex", alignItems:"center", transition:"color 0.15s" },
-  navTabActive:{ borderBottom:`2px solid ${P.purple}`, color:P.text },
-  headerRight: { display:"flex", alignItems:"center", gap:12, marginLeft:"auto", flexShrink:0 },
-  headerUser:  { fontSize:12, color:P.muted },
-  signOutBtn:  { border:`1px solid ${P.border}`, background:"transparent", color:P.muted, borderRadius:7, padding:"7px 14px", fontSize:12, fontWeight:600, letterSpacing:"0.02em", transition:"all 0.15s" },
+  header:        { background:P.surface, borderBottom:`1px solid ${P.border}`, position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(107,94,168,0.06)" },
+  headerInner:   { maxWidth:1120, margin:"0 auto", display:"flex", alignItems:"center", height:60, paddingLeft:28, paddingRight:24, gap:20 },
+  brand:         { display:"flex", alignItems:"center", gap:10, flexShrink:0 },
+  brandText:     { display:"flex", alignItems:"baseline", gap:5 },
+  brandName:     { fontWeight:700, fontSize:16, color:P.text, letterSpacing:"-0.01em" },
+  brandBy:       { fontSize:11, color:P.muted, letterSpacing:"0.03em" },
+  proBadge:      { fontSize:9, fontWeight:800, color:P.purple, background:P.purpleDim, border:`1px solid rgba(107,94,168,0.25)`, borderRadius:4, padding:"2px 7px", letterSpacing:"0.10em", textTransform:"uppercase" },
+  desktopNav:    { display:"flex", alignItems:"stretch", flex:1, height:60, overflowX:"auto" },
+  navTab:        { border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:P.muted, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.01em", display:"flex", alignItems:"center", transition:"color 0.15s" },
+  navTabActive:  { borderBottom:`2px solid ${P.purple}`, color:P.text },
+  headerRight:   { display:"flex", alignItems:"center", gap:12, marginLeft:"auto", flexShrink:0 },
+  headerContext: { fontSize:12, color:P.soft, fontWeight:600, letterSpacing:"0.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:240 },
+  signOutBtn:    { border:`1px solid ${P.border}`, background:"transparent", color:P.muted, borderRadius:7, padding:"7px 14px", fontSize:12, fontWeight:600, letterSpacing:"0.02em", transition:"all 0.15s", flexShrink:0 },
 
   // Main
   main: { maxWidth:1120, margin:"0 auto", padding:"36px 28px 48px" },
@@ -1379,16 +1525,8 @@ const s = {
   recentBlock:  { marginBottom:28 },
 
   // Policy list cards
-  policyCard: {
-    width:"100%", background:P.surface, border:`1px solid ${P.border}`,
-    borderRadius:10, padding:"16px 18px", marginBottom:10,
-    textAlign:"left", cursor:"pointer",
-    boxShadow:"0 1px 4px rgba(107,94,168,0.05)",
-    transition:"all 0.16s ease",
-  },
-  policyCardTop: {
-    borderLeft:`3px solid ${P.purple}`,
-  },
+  policyCard:       { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 18px", marginBottom:10, textAlign:"left", cursor:"pointer", boxShadow:"0 1px 4px rgba(107,94,168,0.05)", transition:"all 0.16s ease" },
+  policyCardTop:    { borderLeft:`3px solid ${P.purple}` },
   policyCardInner:  { display:"flex", alignItems:"flex-start", gap:12 },
   policyCardLeft:   { flex:1, minWidth:0 },
   policyCardRight:  { display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0 },
@@ -1406,6 +1544,20 @@ const s = {
   detailPolicyTitle:  { fontSize:20, fontWeight:700, color:P.text, lineHeight:1.25, letterSpacing:"-0.01em" },
   detailSummary:      { fontSize:14, color:P.soft, lineHeight:1.65, marginTop:14, paddingTop:14, borderTop:`1px solid ${P.border}` },
 
+  // Helpful feedback
+  helpfulBlock:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"18px 20px", marginTop:10, marginBottom:4, display:"flex", flexDirection:"column", gap:12 },
+  helpfulLabel:     { fontSize:13, fontWeight:600, color:P.soft },
+  helpfulBtnRow:    { display:"flex", gap:10 },
+  helpfulBtn:       { display:"flex", alignItems:"center", gap:7, padding:"9px 18px", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", transition:"all 0.14s", border:`1.5px solid ${P.border}`, background:P.surfaceSub, color:P.soft },
+  helpfulBtnYesActive: { background:P.green, border:`1.5px solid ${P.green}`, color:"#fff", boxShadow:"0 2px 8px rgba(46,125,82,0.25)" },
+  helpfulBtnNoActive:  { background:P.red,   border:`1.5px solid ${P.red}`,   color:"#fff", boxShadow:"0 2px 8px rgba(138,46,46,0.22)" },
+  helpfulConfirm:   { display:"flex", alignItems:"center", gap:7, fontSize:13, color:P.green, fontWeight:600 },
+  helpfulChangeBtn: { background:"transparent", border:"none", fontSize:12, color:P.muted, cursor:"pointer", textDecoration:"underline", padding:0, marginLeft:6 },
+
+  // Admin helpful badges
+  helpBadgePos: { fontSize:11, fontWeight:700, color:P.green, background:"rgba(46,125,82,0.09)", border:`1px solid rgba(46,125,82,0.25)`, borderRadius:5, padding:"2px 8px" },
+  helpBadgeNeg: { fontSize:11, fontWeight:700, color:P.red,   background:"rgba(138,46,46,0.08)", border:`1px solid rgba(138,46,46,0.20)`, borderRadius:5, padding:"2px 8px" },
+
   // Loading / empty
   loadingBlock: { display:"flex", alignItems:"center", gap:12, padding:"60px 0", justifyContent:"center" },
   spinner:      { width:22, height:22, border:`2px solid ${P.borderMid}`, borderTopColor:P.purple, borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 },
@@ -1415,18 +1567,18 @@ const s = {
   emptyBody:    { fontSize:13, color:P.soft, lineHeight:1.6, maxWidth:280 },
   emptyCard:    { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:10, padding:"24px", textAlign:"center", color:P.muted, fontSize:13 },
 
-  // Result cards
-  resultTopBar:    { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:12 },
-  backBtn:         { display:"flex", alignItems:"center", gap:5, background:"transparent", border:"none", color:P.purple, fontSize:13, fontWeight:600, padding:0, cursor:"pointer" },
-  chipBtn:         { border:`1px solid ${P.border}`, background:P.surface, color:P.soft, borderRadius:7, padding:"7px 13px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"border-color 0.12s" },
-  chipBtnSaved:    { border:`1px solid rgba(138,94,16,0.35)`, color:P.amber, background:"rgba(138,94,16,0.06)" },
-  situationPill:   { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 16px", fontSize:13, lineHeight:1.5, marginBottom:16 },
-  resultCard:      { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
-  resultCardTag:   { fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.purple}` },
-  resultCardBody:  { fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
-  searchAgain:     { marginTop:20, paddingTop:18, borderTop:`1px solid ${P.border}` },
-  inlineInput:     { flex:1, height:46, background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"0 14px", fontSize:14, outline:"none", fontFamily:SANS },
-  inlineBtn:       { width:46, height:46, background:BTN_GRAD, border:"none", borderRadius:8, color:"#fff", fontSize:16, fontWeight:700, cursor:"pointer", flexShrink:0 },
+  // Result / detail cards
+  resultTopBar:   { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, gap:12 },
+  backBtn:        { display:"flex", alignItems:"center", gap:5, background:"transparent", border:"none", color:P.purple, fontSize:13, fontWeight:600, padding:0, cursor:"pointer" },
+  chipBtn:        { border:`1px solid ${P.border}`, background:P.surface, color:P.soft, borderRadius:7, padding:"7px 13px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"border-color 0.12s" },
+  chipBtnSaved:   { border:`1px solid rgba(138,94,16,0.35)`, color:P.amber, background:"rgba(138,94,16,0.06)" },
+  situationPill:  { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 16px", fontSize:13, lineHeight:1.5, marginBottom:16 },
+  resultCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
+  resultCardTag:  { fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.purple}` },
+  resultCardBody: { fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
+  searchAgain:    { marginTop:20, paddingTop:18, borderTop:`1px solid ${P.border}` },
+  inlineInput:    { flex:1, height:46, background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"0 14px", fontSize:14, outline:"none", fontFamily:SANS },
+  inlineBtn:      { width:46, height:46, background:BTN_GRAD, border:"none", borderRadius:8, color:"#fff", fontSize:16, fontWeight:700, cursor:"pointer", flexShrink:0 },
 
   // PDF references
   pdfRow:    { display:"flex", alignItems:"flex-start", gap:12, padding:"12px 14px", background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8 },
@@ -1467,7 +1619,7 @@ const s = {
   successTitle: { fontSize:18, fontWeight:700, color:P.text, marginBottom:8 },
   successBody:  { fontSize:14, color:P.soft, lineHeight:1.6, marginBottom:24 },
 
-  // Pill / badge
+  // Pill
   pill: (c) => ({ display:"inline-flex", alignItems:"center", padding:"3px 9px", borderRadius:5, fontSize:11, fontWeight:600, background:`${c}18`, border:`1px solid ${c}40`, color:c, letterSpacing:"0.03em" }),
 
   // Data cards
