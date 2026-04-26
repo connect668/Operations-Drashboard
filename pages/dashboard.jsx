@@ -420,7 +420,7 @@ export default function PlaybookApp() {
     try {
       const { data: refs } = await supabase.from("policy_references")
         .select("id,file_name,file_url,description,created_at")
-        .eq("policy_id", policy.id).order("created_at",{ascending:true});
+        .eq("policy_id", String(policy.id)).order("created_at",{ascending:true});
       setPolicyRefs(refs||[]);
     } catch { setPolicyRefs([]); }
     setPolicyRefsLoading(false);
@@ -469,7 +469,7 @@ export default function PlaybookApp() {
         const { data: existing } = await supabase.from("policy_helpfulness_feedback")
           .select("id")
           .eq("user_id", profile.id)
-          .eq("policy_id", selectedPolicy.id)
+          .eq("policy_id", String(selectedPolicy.id))
           .order("created_at",{ascending:false})
           .limit(1).maybeSingle();
 
@@ -484,7 +484,7 @@ export default function PlaybookApp() {
               user_id:         profile.id,
               company_id:      safeUuid(profile.company_id),
               facility_number: profile.facility_number || null,
-              policy_id:       selectedPolicy.id,
+              policy_id:       String(selectedPolicy.id),
               policy_title:    selectedPolicy.title,
               helpful:         isHelpful,
             }).select("id").single();
