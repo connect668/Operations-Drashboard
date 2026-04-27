@@ -5,30 +5,30 @@ import { supabase } from "../lib/supabaseClient";
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const P = {
-  pageBg:    "#F6F4FA",
+  pageBg:    "#F5F0FF",
   surface:   "#FFFFFF",
-  surfaceSub:"#FAF9FD",
-  border:    "#E5E0F0",
-  borderMid: "#CFC8E8",
-  borderHigh:"#A99AC8",
-  text:      "#1C1830",
-  soft:      "#5C5278",
-  muted:     "#9589AE",
-  purple:    "#6B5EA8",
-  purpleMid: "#7B6BBB",
-  purpleDeep:"#4E4280",
-  purpleDim: "rgba(107,94,168,0.10)",
-  purpleGlow:"rgba(107,94,168,0.05)",
+  surfaceSub:"#FAF8FF",
+  border:    "#DDD6FE",
+  borderMid: "#C4B5FD",
+  borderHigh:"#A78BFA",
+  text:      "#1F1635",
+  soft:      "#4C3D7A",
+  muted:     "#8B7CC8",
+  purple:    "#6D28D9",
+  purpleMid: "#7C3AED",
+  purpleDeep:"#5B21B6",
+  purpleDim: "rgba(109,40,217,0.10)",
+  purpleGlow:"rgba(109,40,217,0.06)",
   green:     "#2E7D52",
   greenDim:  "rgba(46,125,82,0.09)",
-  amber:     "#8A5E10",
-  amberDim:  "rgba(138,94,16,0.09)",
+  amber:     "#92620A",
+  amberDim:  "rgba(146,98,10,0.09)",
   red:       "#8A2E2E",
   redDim:    "rgba(138,46,46,0.08)",
 };
 const SANS     = "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif";
 const MONO     = '"JetBrains Mono","SF Mono",ui-monospace,monospace';
-const BTN_GRAD = "linear-gradient(135deg, #7B6BBB 0%, #5A4D94 100%)";
+const BTN_GRAD = "linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)";
 
 // ─── ROLES ────────────────────────────────────────────────────────────────────
 const RANK = { user:0, manager:1, admin:99 };
@@ -160,6 +160,23 @@ function Logo({ size = 22 }) {
   );
 }
 
+// ─── COUNT-UP ─────────────────────────────────────────────────────────────────
+function CountUp({ target = 0, duration = 1100, suffix = "" }) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    if (!target) { setVal(0); return; }
+    let current = 0;
+    const step  = target / (duration / 16);
+    const timer = setInterval(() => {
+      current = Math.min(current + step, target);
+      setVal(Math.floor(current));
+      if (current >= target) clearInterval(timer);
+    }, 16);
+    return () => clearInterval(timer);
+  }, [target, duration]);
+  return <>{val}{suffix}</>;
+}
+
 // ─── PDF ICON ─────────────────────────────────────────────────────────────────
 function PdfIcon() {
   return (
@@ -193,6 +210,13 @@ export default function PlaybookApp() {
   const [isSaved,           setIsSaved]           = useState(false);
   const [recents,           setRecents]           = useState([]);
   const [savedPlays,        setSavedPlays]        = useState([]);
+
+  // ── AI Jack policy answer
+  const [jackAnswer,        setJackAnswer]        = useState(null);
+  const [jackAnswerLoading, setJackAnswerLoading] = useState(false);
+
+  // ── Admin analytics panel
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
 
   // ── Helpful feedback (per policy view)
   const [helpfulChoice,   setHelpfulChoice]   = useState(null);  // null | true | false
@@ -322,7 +346,7 @@ export default function PlaybookApp() {
     setSigLoading(true);
     try {
       let sq = supabase.from("playbook_searches")
-        .select("id,situation_text,created_at,policy_id,company_policies(title,category)")
+        .select("id,situation_text,created_at,policy_id,facility_number,matched_policy_title,matched_category,company_policies(title,category)")
         .order("created_at",{ascending:false}).limit(500);
       sq = applyScope(sq, profile);
       const { data: searches } = await sq;
@@ -420,7 +444,7 @@ export default function PlaybookApp() {
         setResults(hits);
         try {
           const { data: logged } = await supabase.from("playbook_searches")
-            .insert({ user_id:profile.id, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), situation_text:term, policy_id:hits[0].id, saved:false })
+            .insert({ user_id:profile.id, facility_number:profile.facility_number||null, company_id:safeUuid(profile.company_id), company:profile.company||null, situation_text:term, policy_id:hits[0].id, matched_policy_title:hits[0].title||null, matched_category:hits[0].category||null, saved:false })
             .select("id").single();
           if (logged?.id) { setSearchId(logged.id); loadRecents(); }
         } catch {}
@@ -431,23 +455,40 @@ export default function PlaybookApp() {
   // ── Select policy ──────────────────────────────────────────────────────────
   const selectPolicy = async (policy) => {
     setSelectedPolicy(policy);
-    setPolicyRefs([]); setPolicyRefsLoading(true);
+    setJackAnswer(null);
+    setPolicyRefs([]); setPolicyRefsLoading(true); setJackAnswerLoading(true);
+
+    // 1. Fetch reference docs
+    let refs = [];
     try {
-      const { data: refs } = await supabase.from("policy_references")
+      const { data } = await supabase.from("policy_references")
         .select("id,file_name,file_url,description,created_at")
         .eq("policy_id", String(policy.id)).order("created_at",{ascending:true});
-      setPolicyRefs(refs||[]);
+      refs = data || [];
+      setPolicyRefs(refs);
     } catch { setPolicyRefs([]); }
     setPolicyRefsLoading(false);
+
+    // 2. Ask Jack to generate a structured answer
+    try {
+      const res  = await fetch("/api/jack-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ situation: query, policy, refs }),
+      });
+      const data = await res.json();
+      setJackAnswer(data);
+    } catch { setJackAnswer(null); }
+    setJackAnswerLoading(false);
   };
 
   const handleSearch  = e => { e?.preventDefault(); doSearch(query.trim()); };
   const clearSearch   = () => {
-    setResults([]); setSelectedPolicy(null); setPolicyRefs([]);
+    setResults([]); setSelectedPolicy(null); setPolicyRefs([]); setJackAnswer(null);
     setNoResult(false); setQuery(""); setSearchId(null); setIsSaved(false);
     setTimeout(() => queryRef.current?.focus(), 50);
   };
-  const backToResults = () => { setSelectedPolicy(null); setPolicyRefs([]); };
+  const backToResults = () => { setSelectedPolicy(null); setPolicyRefs([]); setJackAnswer(null); };
 
   const reopenRecent = async (r) => {
     setQuery(r.situation_text);
@@ -585,6 +626,33 @@ export default function PlaybookApp() {
   const helpfulnessPct = helpStats && helpStats.total > 0
     ? Math.round((helpStats.positive / helpStats.total) * 100)
     : null;
+
+  const avgSearchesPerFacility = facilityBreakdown.length > 0
+    ? Math.round(totalSearches / facilityBreakdown.length)
+    : 0;
+
+  // Per-facility detail rows for the drill-down panel
+  const facilityTableData = (() => {
+    if (!recentSearches.length) return [];
+    const map = {};
+    recentSearches.forEach(s => {
+      const f = s.facility_number != null ? String(s.facility_number) : "No Facility";
+      if (!map[f]) map[f] = { facility:f, searches:0, cats:{}, policies:{}, last:null };
+      map[f].searches++;
+      const cat = s.matched_category || s.company_policies?.category;
+      if (cat) map[f].cats[cat] = (map[f].cats[cat]||0)+1;
+      const pol = s.matched_policy_title || s.company_policies?.title;
+      if (pol) map[f].policies[pol] = (map[f].policies[pol]||0)+1;
+      if (!map[f].last || s.created_at > map[f].last) map[f].last = s.created_at;
+    });
+    return Object.values(map).sort((a,b) => b.searches - a.searches).map(r => ({
+      facility:    r.facility,
+      searches:    r.searches,
+      topCategory: Object.entries(r.cats).sort((a,b)=>b[1]-a[1])[0]?.[0] || "—",
+      topPolicy:   Object.entries(r.policies).sort((a,b)=>b[1]-a[1])[0]?.[0] || "—",
+      last:        r.last,
+    }));
+  })();
   const frictionAlerts = catBreakdown.filter(([cat,count]) => {
     if (count < 3) return false;
     return feedbackList.some(f=>f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count>=5;
@@ -656,67 +724,67 @@ export default function PlaybookApp() {
           <div className="fade-in">
             <div style={s.pageHead}>
               <h1 style={s.pageTitle}>Operations Dashboard</h1>
-              <p style={s.pageSubtitle}>{buildFacilityContext(profile) || "Usage, searches, and policy feedback overview"}</p>
+              <p style={s.pageSubtitle}>{buildFacilityContext(profile) || "Usage, policy searches, and feedback overview"}</p>
             </div>
 
-            {/* ── TOP STATS ── */}
-            <div style={s.statsRow}>
-              <div style={s.statCard}>
-                <div style={s.statVal}>{sigLoading ? "…" : totalSearches}</div>
-                <div style={s.statLbl}>Total Plays</div>
-              </div>
-              <div style={s.statCard}>
-                <div style={s.statVal}>{sigLoading ? "…" : facilityBreakdown.length}</div>
-                <div style={s.statLbl}>Facilities Active</div>
-              </div>
-              {helpfulnessPct !== null ? (
-                <div style={{...s.statCard, borderTopColor: helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
-                  <div style={{...s.statVal, color: helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
-                    {helpfulnessPct}%
-                  </div>
-                  <div style={s.statLbl}>Helpfulness Rate</div>
+            {/* ── ANIMATED METRIC CARDS ── */}
+            <div style={s.metricsRow}>
+
+              {/* Card 1: Total Plays — clickable */}
+              <button className="metric-card metric-card-anim-1" style={s.metricCard}
+                onClick={() => { if(!sigLoading && totalSearches>0) setShowSearchPanel(true); }}>
+                <div style={s.metricAccent}/>
+                <div style={s.metricIcon}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 </div>
-              ) : (
-                <div style={s.statCard}>
-                  <div style={{...s.statVal,color:P.muted,fontSize:18}}>No data</div>
-                  <div style={s.statLbl}>Helpfulness Rate</div>
+                <div style={s.metricVal}>
+                  {sigLoading ? <span style={{fontSize:24,color:P.muted}}>…</span> : <CountUp target={totalSearches}/>}
                 </div>
-              )}
+                <div style={s.metricLabel}>Total Play Searches</div>
+                <div style={s.metricSub}>Company-wide · tap to explore →</div>
+              </button>
+
+              {/* Card 2: Avg per Facility — clickable */}
+              <button className="metric-card metric-card-anim-2" style={s.metricCard}
+                onClick={() => { if(!sigLoading && facilityBreakdown.length>0) setShowSearchPanel(true); }}>
+                <div style={s.metricAccent}/>
+                <div style={s.metricIcon}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                </div>
+                <div style={s.metricVal}>
+                  {sigLoading ? <span style={{fontSize:24,color:P.muted}}>…</span> : <CountUp target={avgSearchesPerFacility}/>}
+                </div>
+                <div style={s.metricLabel}>Avg Searches / Facility</div>
+                <div style={s.metricSub}>{facilityBreakdown.length} active {facilityBreakdown.length===1?"facility":"facilities"} · tap to explore →</div>
+              </button>
+
+              {/* Card 3: Useful Rating */}
+              <div className="metric-card metric-card-anim-3" style={{...s.metricCard, cursor:"default"}}>
+                <div style={{...s.metricAccent, background: helpfulnessPct==null?"#DDD6FE":helpfulnessPct>=70?"linear-gradient(90deg,#16a34a,#22c55e)":helpfulnessPct>=50?"linear-gradient(90deg,#b45309,#f59e0b)":"linear-gradient(90deg,#991b1b,#ef4444)"}}/>
+                <div style={s.metricIcon}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={helpfulnessPct!=null&&helpfulnessPct>=70?P.green:helpfulnessPct!=null&&helpfulnessPct>=50?P.amber:helpfulnessPct!=null?P.red:P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div style={{...s.metricVal, color: helpfulnessPct==null?P.muted:helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
+                  {helpStatsLoading ? <span style={{fontSize:24}}>…</span>
+                    : helpfulnessPct !== null ? <CountUp target={helpfulnessPct} suffix="%"/>
+                    : <span style={{fontSize:22}}>—</span>}
+                </div>
+                <div style={s.metricLabel}>Policy Useful Rating</div>
+                <div style={s.metricSub}>
+                  {helpStats && helpStats.total > 0
+                    ? `✓ ${helpStats.positive} helpful · ✗ ${helpStats.negative} not`
+                    : "No ratings yet"}
+                </div>
+              </div>
             </div>
 
-            {/* ── PER-FACILITY BREAKDOWN ── */}
+            {/* ── MOST SEARCHED POLICIES ── */}
             <div style={{marginBottom:28}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={s.sectionLabel}>Plays by Facility</div>
-                <button className="ghost-btn" style={s.ghostBtn} onClick={()=>{setSigFetched(false);setHelpStatsFetched(false);}}>Refresh</button>
+                <div style={s.sectionLabel}>Most Searched Policies</div>
+                <button className="ghost-btn" style={s.ghostBtn}
+                  onClick={()=>{setSigFetched(false);setHelpStatsFetched(false);}}>Refresh</button>
               </div>
-              {sigLoading ? (
-                <div style={s.loadingBlock}><div style={s.spinner}/></div>
-              ) : facilityBreakdown.length === 0 ? (
-                <div style={s.emptyCard}>No play data yet.</div>
-              ) : (
-                <div style={s.dataCard}>
-                  {facilityBreakdown.map(([fac,count],i) => {
-                    const pct = Math.round((count/facilityBreakdown[0][1])*100);
-                    return (
-                      <div key={fac} style={i>0?{marginTop:14,paddingTop:14,borderTop:`1px solid ${P.border}`}:{}}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                          <span style={{fontSize:13,fontWeight:600,color:P.text}}>{fac}</span>
-                          <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count} plays</span>
-                        </div>
-                        <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s ease"}}/>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* ── COMMON SEARCHES ── */}
-            <div style={{marginBottom:28}}>
-              <div style={s.sectionLabel}>Most Searched Policies</div>
               {sigLoading ? (
                 <div style={s.loadingBlock}><div style={s.spinner}/></div>
               ) : commonSearchTitles.length === 0 ? (
@@ -732,7 +800,7 @@ export default function PlaybookApp() {
                           <span style={{fontSize:12,color:P.muted,fontFamily:MONO,flexShrink:0}}>{count}×</span>
                         </div>
                         <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${P.purpleMid},${P.purple})`,borderRadius:3,transition:"width 0.4s ease"}}/>
+                          <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.5s ease"}}/>
                         </div>
                       </div>
                     );
@@ -747,61 +815,59 @@ export default function PlaybookApp() {
               {helpStatsLoading ? (
                 <div style={s.loadingBlock}><div style={s.spinner}/></div>
               ) : !helpStats || helpStats.total === 0 ? (
-                <div style={s.emptyCard}>No helpfulness ratings yet. These appear after users view and rate policies.</div>
+                <div style={s.emptyCard}>No helpfulness ratings yet — these appear once users view and rate policies.</div>
               ) : (
                 <>
-                  {/* Big % number */}
-                  <div style={{...s.dataCard, display:"flex", alignItems:"center", gap:20, marginBottom:10, flexWrap:"wrap"}}>
-                    <div style={{textAlign:"center", minWidth:80}}>
-                      <div style={{
-                        fontSize:52, fontWeight:800, fontFamily:MONO, letterSpacing:"-0.04em", lineHeight:1,
-                        color: helpfulnessPct>=70 ? P.green : helpfulnessPct>=50 ? P.amber : P.red,
-                      }}>{helpfulnessPct}%</div>
-                      <div style={{fontSize:11,fontWeight:600,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginTop:4}}>Helpful</div>
+                  <div style={{...s.dataCard,display:"flex",alignItems:"center",gap:24,marginBottom:10,flexWrap:"wrap"}}>
+                    <div style={{textAlign:"center",minWidth:88}}>
+                      <div style={{fontSize:56,fontWeight:800,fontFamily:MONO,letterSpacing:"-0.04em",lineHeight:1,color:helpfulnessPct>=70?P.green:helpfulnessPct>=50?P.amber:P.red}}>
+                        <CountUp target={helpfulnessPct??0} suffix="%"/>
+                      </div>
+                      <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginTop:5}}>Useful</div>
                     </div>
-                    <div style={{flex:1, display:"flex", flexDirection:"column", gap:8, minWidth:160}}>
+                    <div style={{flex:1,display:"flex",flexDirection:"column",gap:10,minWidth:160}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <span style={{fontSize:13,color:P.green,fontWeight:600,minWidth:28}}>✓ {helpStats.positive}</span>
-                        <div style={{flex:1,height:6,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.positive/helpStats.total*100):0}%`,background:P.green,borderRadius:3}}/>
+                        <span style={{fontSize:13,color:P.green,fontWeight:700,minWidth:36}}>✓ {helpStats.positive}</span>
+                        <div style={{flex:1,height:7,background:P.border,borderRadius:4,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.positive/helpStats.total*100):0}%`,background:P.green,borderRadius:4,transition:"width 0.5s ease"}}/>
                         </div>
-                        <span style={{fontSize:11,color:P.muted,minWidth:40,textAlign:"right"}}>Helpful</span>
+                        <span style={{fontSize:11,color:P.muted,minWidth:44,textAlign:"right"}}>Helpful</span>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <span style={{fontSize:13,color:P.red,fontWeight:600,minWidth:28}}>✗ {helpStats.negative}</span>
-                        <div style={{flex:1,height:6,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.negative/helpStats.total*100):0}%`,background:P.red,borderRadius:3}}/>
+                        <span style={{fontSize:13,color:P.red,fontWeight:700,minWidth:36}}>✗ {helpStats.negative}</span>
+                        <div style={{flex:1,height:7,background:P.border,borderRadius:4,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${helpStats.total?Math.round(helpStats.negative/helpStats.total*100):0}%`,background:P.red,borderRadius:4,transition:"width 0.5s ease"}}/>
                         </div>
-                        <span style={{fontSize:11,color:P.muted,minWidth:40,textAlign:"right"}}>Not helpful</span>
+                        <span style={{fontSize:11,color:P.muted,minWidth:44,textAlign:"right"}}>Not helpful</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Per-policy table */}
                   {helpStats.mostHelpful.length > 0 && (
                     <div style={s.dataCard}>
-                      <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Per-Policy Breakdown</div>
-                      {[...helpStats.mostHelpful, ...helpStats.leastHelpful.filter(p=>p.score<1&&!helpStats.mostHelpful.find(m=>m.title===p.title))]
-                        .slice(0,8).map((p,i) => {
-                          const pct = Math.round(p.score*100);
-                          const col = pct>=70?P.green:pct>=50?P.amber:P.red;
-                          return (
-                            <div key={p.title} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:5}}>
-                                <span style={{fontSize:13,fontWeight:600,color:P.text,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.title}</span>
-                                <span style={{fontSize:13,fontWeight:700,color:col,fontFamily:MONO,flexShrink:0}}>{pct}%</span>
-                              </div>
-                              <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
-                                <div style={{height:"100%",width:`${pct}%`,background:col,borderRadius:3,opacity:0.7}}/>
-                              </div>
-                              <div style={{display:"flex",gap:12,marginTop:4}}>
-                                <span style={{fontSize:11,color:P.green}}>✓ {p.helpful}</span>
-                                <span style={{fontSize:11,color:P.red}}>✗ {p.not}</span>
-                                <span style={{fontSize:11,color:P.muted}}>{p.total} total</span>
-                              </div>
+                      <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Per-Policy Breakdown</div>
+                      {[...helpStats.mostHelpful,
+                        ...helpStats.leastHelpful.filter(p=>p.score<1&&!helpStats.mostHelpful.find(m=>m.title===p.title))
+                      ].slice(0,8).map((p,i) => {
+                        const pct = Math.round(p.score*100);
+                        const col = pct>=70?P.green:pct>=50?P.amber:P.red;
+                        return (
+                          <div key={p.title} style={i>0?{marginTop:13,paddingTop:13,borderTop:`1px solid ${P.border}`}:{}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:5}}>
+                              <span style={{fontSize:13,fontWeight:600,color:P.text,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.title}</span>
+                              <span style={{fontSize:13,fontWeight:800,color:col,fontFamily:MONO,flexShrink:0}}>{pct}%</span>
                             </div>
-                          );
-                        })}
+                            <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:col,borderRadius:3,opacity:0.75,transition:"width 0.5s ease"}}/>
+                            </div>
+                            <div style={{display:"flex",gap:14,marginTop:4}}>
+                              <span style={{fontSize:11,color:P.green}}>✓ {p.helpful}</span>
+                              <span style={{fontSize:11,color:P.red}}>✗ {p.not}</span>
+                              <span style={{fontSize:11,color:P.muted}}>{p.total} total</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </>
@@ -1057,28 +1123,70 @@ export default function PlaybookApp() {
                   )}
                 </div>
 
-                {/* The Play */}
-                {(selectedPolicy.action_steps || selectedPolicy.policy_text) && (
-                  <div style={s.resultCard}>
-                    <div style={s.resultCardTag}>The Play</div>
-                    <div style={s.resultCardBody}>{selectedPolicy.action_steps || selectedPolicy.policy_text}</div>
+                {/* ── AI JACK ANSWER ── */}
+                {jackAnswerLoading && (
+                  <div style={s.jackLoadingBlock}>
+                    <div style={s.jackLoadingInner}>
+                      <div style={s.spinner}/>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:P.purple}}>Jack is reading the policy…</div>
+                        <div style={{fontSize:12,color:P.muted,marginTop:2}}>Generating a tailored answer</div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {/* Avoid This */}
-                {selectedPolicy.incorrect_examples && (
-                  <div style={{...s.resultCard,borderLeft:`3px solid ${P.amber}`}}>
-                    <div style={{...s.resultCardTag,color:P.amber}}>Avoid This</div>
-                    <div style={s.resultCardBody}>{selectedPolicy.incorrect_examples}</div>
-                  </div>
+                {!jackAnswerLoading && jackAnswer && (
+                  <>
+                    {jackAnswer.play && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.purple}`}}>
+                        <div style={s.resultCardTag}>The Play</div>
+                        <div style={s.resultCardBody}>{jackAnswer.play}</div>
+                      </div>
+                    )}
+                    {jackAnswer.policyBehindIt && (
+                      <div style={s.resultCard}>
+                        <div style={s.resultCardTag}>Policy Behind It</div>
+                        <div style={s.resultCardBody}>{jackAnswer.policyBehindIt}</div>
+                      </div>
+                    )}
+                    {jackAnswer.watchOuts && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.amber}`}}>
+                        <div style={{...s.resultCardTag,color:P.amber}}>Watch Outs</div>
+                        <div style={s.resultCardBody}>{jackAnswer.watchOuts}</div>
+                      </div>
+                    )}
+                    {jackAnswer.escalateIf && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.red}`}}>
+                        <div style={{...s.resultCardTag,color:P.red}}>Escalate If</div>
+                        <div style={s.resultCardBody}>{jackAnswer.escalateIf}</div>
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {/* Escalation */}
-                {selectedPolicy.escalation_guidance && (
-                  <div style={{...s.resultCard,borderLeft:`3px solid ${P.red}`}}>
-                    <div style={{...s.resultCardTag,color:P.red}}>Escalate If</div>
-                    <div style={s.resultCardBody}>{selectedPolicy.escalation_guidance}</div>
-                  </div>
+                {/* Fallback: no AI key — show static policy fields */}
+                {!jackAnswerLoading && !jackAnswer && (
+                  <>
+                    {(selectedPolicy.action_steps || selectedPolicy.policy_text) && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.purple}`}}>
+                        <div style={s.resultCardTag}>The Play</div>
+                        <div style={s.resultCardBody}>{selectedPolicy.action_steps || selectedPolicy.policy_text}</div>
+                      </div>
+                    )}
+                    {selectedPolicy.incorrect_examples && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.amber}`}}>
+                        <div style={{...s.resultCardTag,color:P.amber}}>Watch Outs</div>
+                        <div style={s.resultCardBody}>{selectedPolicy.incorrect_examples}</div>
+                      </div>
+                    )}
+                    {selectedPolicy.escalation_guidance && (
+                      <div style={{...s.resultCard,borderLeft:`3px solid ${P.red}`}}>
+                        <div style={{...s.resultCardTag,color:P.red}}>Escalate If</div>
+                        <div style={s.resultCardBody}>{selectedPolicy.escalation_guidance}</div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Reference PDFs */}
@@ -1172,7 +1280,7 @@ export default function PlaybookApp() {
               {jackMessages.map((m,i) => (
                 <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
                   {m.role === "assistant" && (
-                    <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(107,94,168,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:8,marginTop:2}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(109,40,217,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:8,marginTop:2}}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/><circle cx="8.5" cy="14" r="1" fill={P.purple}/><circle cx="15.5" cy="14" r="1" fill={P.purple}/></svg>
                     </div>
                   )}
@@ -1185,14 +1293,14 @@ export default function PlaybookApp() {
                     color: m.role==="user" ? "#fff" : P.text,
                     fontSize:14,
                     lineHeight:1.7,
-                    boxShadow: m.role==="user" ? "0 2px 10px rgba(107,94,168,0.25)" : "0 1px 4px rgba(107,94,168,0.05)",
+                    boxShadow: m.role==="user" ? "0 2px 10px rgba(109,40,217,0.25)" : "0 1px 4px rgba(109,40,217,0.05)",
                     whiteSpace:"pre-wrap",
                   }}>{m.content}</div>
                 </div>
               ))}
               {jackLoading && (
                 <div style={{display:"flex",justifyContent:"flex-start",alignItems:"center",gap:8}}>
-                  <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(107,94,168,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(109,40,217,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/></svg>
                   </div>
                   <div style={{padding:"10px 14px",background:P.surface,border:`1px solid ${P.border}`,borderRadius:"14px 14px 14px 3px",display:"flex",gap:5,alignItems:"center"}}>
@@ -1506,6 +1614,50 @@ export default function PlaybookApp() {
         </nav>
       )}
 
+      {/* ── SEARCH ANALYTICS PANEL ─────────────────────────────────── */}
+      {showSearchPanel && (
+        <div style={s.overlay} onClick={() => setShowSearchPanel(false)}>
+          <div style={{...s.modal, maxWidth:680, borderRadius:"16px 16px 0 0"}} onClick={e => e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:17,fontWeight:700,color:P.text}}>Search Analytics</div>
+              <button style={{...s.ghostBtn,padding:"4px 10px"}} onClick={() => setShowSearchPanel(false)}>✕</button>
+            </div>
+            <div style={{fontSize:13,color:P.muted,marginBottom:20}}>
+              {totalSearches} total plays across {facilityBreakdown.length} {facilityBreakdown.length===1?"facility":"facilities"}
+            </div>
+
+            {facilityTableData.length === 0 ? (
+              <div style={s.emptyCard}>No facility data yet.</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead>
+                    <tr style={{borderBottom:`2px solid ${P.border}`}}>
+                      {["Facility","Searches","Top Category","Top Policy","Last Search"].map(h => (
+                        <th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {facilityTableData.map((row,i) => (
+                      <tr key={row.facility} style={{borderBottom:`1px solid ${P.border}`,background:i%2===0?"transparent":P.surfaceSub}}>
+                        <td style={{padding:"10px 10px",fontWeight:700,color:P.purple,whiteSpace:"nowrap"}}>
+                          {row.facility === "No Facility" ? row.facility : `Facility ${row.facility}`}
+                        </td>
+                        <td style={{padding:"10px 10px",fontFamily:MONO,fontWeight:700,color:P.text}}>{row.searches}</td>
+                        <td style={{padding:"10px 10px",color:P.soft,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.topCategory}</td>
+                        <td style={{padding:"10px 10px",color:P.soft,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.topPolicy}</td>
+                        <td style={{padding:"10px 10px",color:P.muted,whiteSpace:"nowrap",fontFamily:MONO,fontSize:11}}>{row.last ? fmtDate(row.last) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── POLICY FLAG MODAL ───────────────────────────────────────── */}
       {showPolicyFeedback && (
         <div style={s.overlay} onClick={closePolicyFeedback}>
@@ -1562,31 +1714,36 @@ export default function PlaybookApp() {
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; }
-  body { margin: 0; -webkit-font-smoothing: antialiased; background: #F6F4FA; }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
-  @keyframes spin   { to { transform: rotate(360deg); } }
-  .fade-in { animation: fadeIn 0.16s ease both; }
+  body { margin: 0; -webkit-font-smoothing: antialiased; background: #F5F0FF; }
+  @keyframes fadeIn    { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  @keyframes spin      { to { transform: rotate(360deg); } }
+  @keyframes cardIn    { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  .fade-in { animation: fadeIn 0.18s ease both; }
+  .metric-card-anim-1 { animation: cardIn 0.30s ease both; }
+  .metric-card-anim-2 { animation: cardIn 0.42s ease both; }
+  .metric-card-anim-3 { animation: cardIn 0.54s ease both; }
 
-  .nav-tab:hover       { color: #1C1830 !important; }
-  .hero-card:hover     { box-shadow: 0 6px 24px rgba(107,94,168,0.15) !important; transform: translateY(-1px); }
-  .feature-card:hover  { border-color: #A99AC8 !important; background: #FAF9FD !important; }
-  .list-row:hover      { border-color: #CFC8E8 !important; background: #FAF9FD !important; }
-  .chip-btn:hover      { border-color: #A99AC8 !important; }
-  .proc-toggle:hover   { background: #FAF9FD !important; }
-  .fb-opt:hover        { border-color: #A99AC8 !important; }
-  .ghost-btn:hover     { border-color: #A99AC8 !important; background: #FAF9FD !important; }
-  .signout-btn:hover   { color: #1C1830 !important; border-color: #A99AC8 !important; }
-  .policy-card:hover   { border-color: rgba(107,94,168,0.40) !important; box-shadow: 0 3px 16px rgba(107,94,168,0.10) !important; transform: translateY(-1px); }
+  .nav-tab:hover       { color: #1F1635 !important; }
+  .hero-card:hover     { box-shadow: 0 8px 32px rgba(109,40,217,0.18) !important; transform: translateY(-2px); }
+  .feature-card:hover  { border-color: #A78BFA !important; background: #FAF8FF !important; }
+  .list-row:hover      { border-color: #C4B5FD !important; background: #FAF8FF !important; }
+  .chip-btn:hover      { border-color: #A78BFA !important; }
+  .proc-toggle:hover   { background: #FAF8FF !important; }
+  .fb-opt:hover        { border-color: #A78BFA !important; }
+  .ghost-btn:hover     { border-color: #A78BFA !important; background: #FAF8FF !important; }
+  .signout-btn:hover   { color: #1F1635 !important; border-color: #A78BFA !important; }
+  .policy-card:hover   { border-color: rgba(109,40,217,0.45) !important; box-shadow: 0 4px 20px rgba(109,40,217,0.12) !important; transform: translateY(-2px); }
   .helpful-btn:hover   { filter: brightness(0.93); }
+  .metric-card:hover   { box-shadow: 0 8px 32px rgba(109,40,217,0.18) !important; transform: translateY(-3px) !important; border-color: rgba(109,40,217,0.40) !important; }
 
   textarea:focus, input:focus, select:focus {
-    border-color: rgba(107,94,168,0.50) !important;
-    box-shadow: 0 0 0 3px rgba(107,94,168,0.08) !important;
+    border-color: rgba(109,40,217,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(109,40,217,0.10) !important;
     outline: none !important;
   }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #D4CEEA; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: #C4B5FD; border-radius: 4px; }
   button { font-family: inherit; cursor: pointer; }
   button, a { -webkit-tap-highlight-color: transparent; }
 `;
@@ -1596,13 +1753,13 @@ const s = {
   shell: { minHeight:"100vh", background:P.pageBg, color:P.text, fontFamily:SANS },
 
   // Header
-  header:        { background:P.surface, borderBottom:`1px solid ${P.border}`, position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(107,94,168,0.06)" },
+  header:        { background:P.surface, borderBottom:`1px solid ${P.border}`, position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(109,40,217,0.06)" },
   headerInner:   { maxWidth:1120, margin:"0 auto", display:"flex", alignItems:"center", height:60, paddingLeft:28, paddingRight:24, gap:20 },
   brand:         { display:"flex", alignItems:"center", gap:10, flexShrink:0 },
   brandText:     { display:"flex", alignItems:"baseline", gap:5 },
   brandName:     { fontWeight:700, fontSize:16, color:P.text, letterSpacing:"-0.01em" },
   brandBy:       { fontSize:11, color:P.muted, letterSpacing:"0.03em" },
-  proBadge:      { fontSize:9, fontWeight:800, color:P.purple, background:P.purpleDim, border:`1px solid rgba(107,94,168,0.25)`, borderRadius:4, padding:"2px 7px", letterSpacing:"0.10em", textTransform:"uppercase" },
+  proBadge:      { fontSize:9, fontWeight:800, color:P.purple, background:P.purpleDim, border:`1px solid rgba(109,40,217,0.25)`, borderRadius:4, padding:"2px 7px", letterSpacing:"0.10em", textTransform:"uppercase" },
   desktopNav:    { display:"flex", alignItems:"stretch", flex:1, height:60, overflowX:"auto" },
   navTab:        { border:"none", borderBottom:"2px solid transparent", borderTop:"2px solid transparent", background:"transparent", color:P.muted, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", letterSpacing:"0.01em", display:"flex", alignItems:"center", transition:"color 0.15s" },
   navTabActive:  { borderBottom:`2px solid ${P.purple}`, color:P.text },
@@ -1619,14 +1776,14 @@ const s = {
   pageSubtitle:{ fontSize:15, color:P.soft, margin:0, lineHeight:1.55 },
 
   // Bottom nav
-  bottomNav:          { position:"fixed", bottom:0, left:0, right:0, height:62, background:P.surface, borderTop:`1px solid ${P.border}`, display:"flex", alignItems:"stretch", zIndex:100, boxShadow:"0 -1px 8px rgba(107,94,168,0.07)" },
+  bottomNav:          { position:"fixed", bottom:0, left:0, right:0, height:62, background:P.surface, borderTop:`1px solid ${P.border}`, display:"flex", alignItems:"stretch", zIndex:100, boxShadow:"0 -1px 8px rgba(109,40,217,0.07)" },
   bottomNavBtn:       { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, border:"none", background:"transparent", padding:"6px 4px", minWidth:0, transition:"background 0.15s" },
   bottomNavBtnActive: { background:P.purpleGlow },
   bottomNavLabel:     { fontSize:10, fontWeight:600, color:P.muted, letterSpacing:"0.03em" },
 
   // Home
   homeGrid:         { display:"flex", flexDirection:"column", gap:14 },
-  heroCard:         { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:12, padding:"24px 22px", textAlign:"left", cursor:"pointer", position:"relative", boxShadow:"0 2px 12px rgba(107,94,168,0.08)", transition:"all 0.18s ease" },
+  heroCard:         { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:12, padding:"24px 22px", textAlign:"left", cursor:"pointer", position:"relative", boxShadow:"0 2px 12px rgba(109,40,217,0.08)", transition:"all 0.18s ease" },
   heroCardIcon:     { marginBottom:14, display:"inline-flex", padding:"10px", background:P.purpleDim, borderRadius:10 },
   heroCardTitle:    { fontSize:18, fontWeight:700, color:P.text, marginBottom:4, letterSpacing:"-0.01em" },
   heroCardSub:      { fontSize:13, color:P.soft, lineHeight:1.5 },
@@ -1639,9 +1796,22 @@ const s = {
 
   // Stats
   statsRow: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:12, marginBottom:24 },
-  statCard:  { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"18px 16px", boxShadow:"0 1px 4px rgba(107,94,168,0.06)" },
+  statCard:  { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"18px 16px", boxShadow:"0 1px 4px rgba(109,40,217,0.06)" },
   statVal:   { fontSize:30, fontWeight:700, color:P.text, fontFamily:MONO, letterSpacing:"-0.03em", lineHeight:1 },
   statLbl:   { fontSize:11, fontWeight:600, color:P.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginTop:6 },
+
+  // Animated metric cards (admin dashboard)
+  metricsRow:  { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:16, marginBottom:32 },
+  metricCard:  { background:P.surface, border:`1.5px solid ${P.border}`, borderRadius:14, padding:"28px 22px 22px", textAlign:"center", position:"relative", overflow:"hidden", boxShadow:`0 2px 16px rgba(109,40,217,0.07)`, transition:"all 0.22s ease", cursor:"pointer" },
+  metricAccent:{ position:"absolute", top:0, left:0, right:0, height:4, background:BTN_GRAD },
+  metricIcon:  { display:"inline-flex", padding:"8px", background:P.purpleDim, borderRadius:10, marginBottom:12 },
+  metricVal:   { fontSize:48, fontWeight:800, color:P.text, fontFamily:MONO, letterSpacing:"-0.04em", lineHeight:1, marginBottom:10 },
+  metricLabel: { fontSize:13, fontWeight:700, color:P.text, marginBottom:5 },
+  metricSub:   { fontSize:11, color:P.muted, lineHeight:1.5 },
+
+  // Jack loading state in policy detail
+  jackLoadingBlock: { background:P.purpleDim, border:`1px solid ${P.borderMid}`, borderRadius:10, padding:"18px 20px", marginBottom:10 },
+  jackLoadingInner: { display:"flex", alignItems:"center", gap:14 },
 
   // Alert
   alertCard:  { background:"#FFFBF0", border:`1px solid #F0DFA0`, borderLeft:`3px solid ${P.amber}`, borderRadius:8, padding:"14px 16px", marginBottom:8 },
@@ -1659,13 +1829,13 @@ const s = {
 
   // Search
   searchBlock:  { display:"flex", flexDirection:"column", gap:0, marginBottom:32 },
-  searchInput:  { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:10, color:P.text, padding:"18px 20px", fontSize:15, lineHeight:1.65, resize:"vertical", outline:"none", fontFamily:SANS, boxShadow:"0 1px 4px rgba(107,94,168,0.06)", marginBottom:14 },
+  searchInput:  { width:"100%", background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:10, color:P.text, padding:"18px 20px", fontSize:15, lineHeight:1.65, resize:"vertical", outline:"none", fontFamily:SANS, boxShadow:"0 1px 4px rgba(109,40,217,0.06)", marginBottom:14 },
   searchBtnRow: { display:"flex", justifyContent:"flex-end" },
-  searchBtn:    { background:BTN_GRAD, border:"none", color:"#fff", borderRadius:9, padding:"13px 28px", fontSize:14, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 3px 12px rgba(107,94,168,0.28)", transition:"opacity 0.15s" },
+  searchBtn:    { background:BTN_GRAD, border:"none", color:"#fff", borderRadius:9, padding:"13px 28px", fontSize:14, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 3px 12px rgba(109,40,217,0.28)", transition:"opacity 0.15s" },
   recentBlock:  { marginBottom:28 },
 
   // Policy list cards
-  policyCard:       { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 18px", marginBottom:10, textAlign:"left", cursor:"pointer", boxShadow:"0 1px 4px rgba(107,94,168,0.05)", transition:"all 0.16s ease" },
+  policyCard:       { width:"100%", background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"16px 18px", marginBottom:10, textAlign:"left", cursor:"pointer", boxShadow:"0 1px 4px rgba(109,40,217,0.05)", transition:"all 0.16s ease" },
   policyCardTop:    { borderLeft:`3px solid ${P.purple}` },
   policyCardInner:  { display:"flex", alignItems:"flex-start", gap:12 },
   policyCardLeft:   { flex:1, minWidth:0 },
@@ -1675,12 +1845,12 @@ const s = {
 
   // Relevance badges
   relevanceBadge:        { fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:5, letterSpacing:"0.05em", textTransform:"uppercase", display:"inline-block" },
-  relevanceBadgeBest:    { background:"rgba(107,94,168,0.12)", color:P.purple, border:`1px solid rgba(107,94,168,0.30)` },
+  relevanceBadgeBest:    { background:"rgba(109,40,217,0.12)", color:P.purple, border:`1px solid rgba(109,40,217,0.30)` },
   relevanceBadgeStrong:  { background:"rgba(46,125,82,0.09)",  color:P.green,  border:`1px solid rgba(46,125,82,0.25)` },
   relevanceBadgeRelated: { background:P.surfaceSub, color:P.muted, border:`1px solid ${P.border}` },
 
   // Policy detail
-  detailHeaderCard:   { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"22px 22px 20px", marginBottom:10, boxShadow:"0 2px 8px rgba(107,94,168,0.07)" },
+  detailHeaderCard:   { background:P.surface, border:`1px solid ${P.border}`, borderTop:`2px solid ${P.purple}`, borderRadius:10, padding:"22px 22px 20px", marginBottom:10, boxShadow:"0 2px 8px rgba(109,40,217,0.07)" },
   detailPolicyTitle:  { fontSize:20, fontWeight:700, color:P.text, lineHeight:1.25, letterSpacing:"-0.01em" },
   detailSummary:      { fontSize:14, color:P.soft, lineHeight:1.65, marginTop:14, paddingTop:14, borderTop:`1px solid ${P.border}` },
 
@@ -1702,7 +1872,7 @@ const s = {
   loadingBlock: { display:"flex", alignItems:"center", gap:12, padding:"60px 0", justifyContent:"center" },
   spinner:      { width:22, height:22, border:`2px solid ${P.borderMid}`, borderTopColor:P.purple, borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 },
   emptyBlock:   { display:"flex", flexDirection:"column", alignItems:"center", gap:12, padding:"60px 20px", textAlign:"center" },
-  emptyIconWrap:{ width:56, height:56, borderRadius:14, background:P.surface, border:`1px solid ${P.border}`, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 1px 4px rgba(107,94,168,0.06)" },
+  emptyIconWrap:{ width:56, height:56, borderRadius:14, background:P.surface, border:`1px solid ${P.border}`, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 1px 4px rgba(109,40,217,0.06)" },
   emptyTitle:   { fontSize:17, fontWeight:700, color:P.text },
   emptyBody:    { fontSize:13, color:P.soft, lineHeight:1.6, maxWidth:280 },
   emptyCard:    { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:10, padding:"24px", textAlign:"center", color:P.muted, fontSize:13 },
@@ -1713,7 +1883,7 @@ const s = {
   chipBtn:        { border:`1px solid ${P.border}`, background:P.surface, color:P.soft, borderRadius:7, padding:"7px 13px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"border-color 0.12s" },
   chipBtnSaved:   { border:`1px solid rgba(138,94,16,0.35)`, color:P.amber, background:"rgba(138,94,16,0.06)" },
   situationPill:  { background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 16px", fontSize:13, lineHeight:1.5, marginBottom:16 },
-  resultCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
+  resultCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"20px", marginBottom:10, boxShadow:"0 1px 4px rgba(109,40,217,0.05)" },
   resultCardTag:  { fontSize:10, fontWeight:800, color:P.muted, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:12, paddingLeft:8, borderLeft:`2px solid ${P.purple}` },
   resultCardBody: { fontSize:14, lineHeight:1.8, color:P.text, whiteSpace:"pre-wrap" },
   searchAgain:    { marginTop:20, paddingTop:18, borderTop:`1px solid ${P.border}` },
@@ -1726,7 +1896,7 @@ const s = {
   pdfInfo:   { flex:1, minWidth:0 },
   pdfName:   { fontSize:14, fontWeight:600, color:P.text, marginBottom:2, lineHeight:1.3 },
   pdfDesc:   { fontSize:12, color:P.muted, lineHeight:1.5 },
-  pdfOpenBtn:{ flexShrink:0, background:BTN_GRAD, color:"#fff", border:"none", borderRadius:6, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"none", whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", boxShadow:"0 2px 8px rgba(107,94,168,0.20)" },
+  pdfOpenBtn:{ flexShrink:0, background:BTN_GRAD, color:"#fff", border:"none", borderRadius:6, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"none", whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", boxShadow:"0 2px 8px rgba(109,40,217,0.20)" },
 
   // Procedures
   procCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, marginBottom:8, overflow:"hidden" },
@@ -1742,19 +1912,19 @@ const s = {
   formSection: { marginBottom:22 },
   fbGrid:      { display:"flex", flexDirection:"column", gap:8 },
   fbOpt:       { width:"100%", background:P.surfaceSub, border:`1px solid ${P.border}`, borderRadius:8, padding:"13px 16px", textAlign:"left", fontSize:14, color:P.soft, transition:"border-color 0.12s" },
-  fbOptActive: { background:P.purpleDim, border:`1px solid rgba(107,94,168,0.40)`, color:P.text, fontWeight:600 },
+  fbOptActive: { background:P.purpleDim, border:`1px solid rgba(109,40,217,0.40)`, color:P.text, fontWeight:600 },
   fieldLabel:  { display:"block", fontSize:11, fontWeight:700, color:P.soft, textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 },
   textInput:   { width:"100%", minHeight:48, background:P.surface, border:`1px solid ${P.borderMid}`, borderRadius:8, color:P.text, padding:"13px 16px", fontSize:14, outline:"none", fontFamily:SANS, display:"block" },
   errorBox:    { background:P.redDim, border:`1px solid rgba(138,46,46,0.25)`, borderRadius:8, padding:"12px 16px", fontSize:13, color:P.red, marginBottom:16, lineHeight:1.5 },
   privacyNote: { marginTop:16, padding:14, background:P.surfaceSub, borderRadius:8, border:`1px solid ${P.border}`, fontSize:12, color:P.muted, lineHeight:1.6 },
 
   // Buttons
-  primaryBtn: { width:"100%", minHeight:50, background:BTN_GRAD, border:"none", color:"#fff", borderRadius:10, fontSize:15, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 3px 12px rgba(107,94,168,0.25)", display:"block" },
+  primaryBtn: { width:"100%", minHeight:50, background:BTN_GRAD, border:"none", color:"#fff", borderRadius:10, fontSize:15, fontWeight:700, cursor:"pointer", letterSpacing:"-0.01em", boxShadow:"0 3px 12px rgba(109,40,217,0.25)", display:"block" },
   outlineBtn: { background:"transparent", border:`1px solid ${P.border}`, color:P.soft, borderRadius:8, padding:"10px 18px", fontSize:13, fontWeight:600, cursor:"pointer", minHeight:44 },
   ghostBtn:   { background:"transparent", border:`1px solid ${P.border}`, color:P.muted, borderRadius:7, padding:"7px 12px", fontSize:12, fontWeight:600, cursor:"pointer", transition:"all 0.12s" },
 
   // Success
-  successCard:  { background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"36px 24px", textAlign:"center", boxShadow:"0 2px 12px rgba(107,94,168,0.07)" },
+  successCard:  { background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"36px 24px", textAlign:"center", boxShadow:"0 2px 12px rgba(109,40,217,0.07)" },
   successCheck: { width:54, height:54, background:"rgba(46,125,82,0.09)", border:"1px solid rgba(46,125,82,0.25)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px" },
   successTitle: { fontSize:18, fontWeight:700, color:P.text, marginBottom:8 },
   successBody:  { fontSize:14, color:P.soft, lineHeight:1.6, marginBottom:24 },
@@ -1763,11 +1933,11 @@ const s = {
   pill: (c) => ({ display:"inline-flex", alignItems:"center", padding:"3px 9px", borderRadius:5, fontSize:11, fontWeight:600, background:`${c}18`, border:`1px solid ${c}40`, color:c, letterSpacing:"0.03em" }),
 
   // Data cards
-  dataCard: { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"18px 20px", boxShadow:"0 1px 4px rgba(107,94,168,0.05)" },
+  dataCard: { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, padding:"18px 20px", boxShadow:"0 1px 4px rgba(109,40,217,0.05)" },
 
   // Modal
   overlay: { position:"fixed", inset:0, zIndex:200, background:"rgba(28,24,48,0.45)", backdropFilter:"blur(2px)", display:"flex", alignItems:"flex-end", justifyContent:"center", boxSizing:"border-box" },
-  modal:   { background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:"16px 16px 0 0", padding:"24px 20px 40px", width:"100%", maxWidth:540, boxShadow:"0 -8px 32px rgba(107,94,168,0.15)", maxHeight:"90vh", overflowY:"auto" },
+  modal:   { background:P.surface, border:`1px solid ${P.borderMid}`, borderTop:`2px solid ${P.purple}`, borderRadius:"16px 16px 0 0", padding:"24px 20px 40px", width:"100%", maxWidth:540, boxShadow:"0 -8px 32px rgba(109,40,217,0.15)", maxHeight:"90vh", overflowY:"auto" },
 
   // Footer
   footer:      { borderTop:`1px solid ${P.border}`, padding:"18px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:12 },
