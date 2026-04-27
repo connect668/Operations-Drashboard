@@ -47,7 +47,7 @@ const Spinner = () => (
   }}/>
 );
 
-export default function JackChat({ profile }) {
+export default function JackChat({ profile = {} }) {
   const [question,          setQuestion]          = useState("");
   const [loading,           setLoading]           = useState(false);
   const [result,            setResult]            = useState(null);
@@ -62,6 +62,15 @@ export default function JackChat({ profile }) {
     return session?.access_token || null;
   };
 
+  // Build a company context string from profile fields to help Jack
+  const buildCompanyContext = () => {
+    const parts = [];
+    if (profile.company) parts.push(`Company: ${profile.company}`);
+    if (profile.facility_number) parts.push(`Facility #${profile.facility_number}`);
+    if (profile.role) parts.push(`User role: ${profile.role}`);
+    return parts.length ? parts.join(" | ") : null;
+  };
+
   const handleAsk = async () => {
     const q = question.trim();
     if (!q) return;
@@ -73,14 +82,24 @@ export default function JackChat({ profile }) {
     setError("");
     try {
       const token = await getToken();
+      const companyContext = buildCompanyContext();
       const res = await fetch("/api/jack", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ question: q }),
+        body: JSON.stringify({ question: q, companyContext }),
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("[JackChat] Non-OK response:", res.status, text);
+        setError("Jack is temporarily unavailable. Please try again.");
+        setLoading(false);
+        return;
+      }
+
       const data = await res.json();
       if (data.error && !data.category) {
         setError(data.error);
@@ -88,6 +107,7 @@ export default function JackChat({ profile }) {
         setResult(data);
       }
     } catch (err) {
+      console.error("[JackChat] fetch error:", err);
       setError("Something went wrong. Please try again.");
     }
     setLoading(false);
@@ -161,9 +181,9 @@ export default function JackChat({ profile }) {
             <RobotIcon size={24}/>
           </div>
           <div style={{ fontSize: 15, fontWeight: 700, color: P.text, marginBottom: 8 }}>
-            Jack is reviewing your company policies…
+            Jack is thinking…
           </div>
-          <div style={{ fontSize: 13, color: P.muted }}>Grounding answer in your playbook</div>
+          <div style={{ fontSize: 13, color: P.muted }}>Searching policies · Generating guidance</div>
           <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
             <Spinner/>
           </div>
@@ -220,18 +240,31 @@ export default function JackChat({ profile }) {
               <RobotIcon size={18}/>
             </div>
             <div style={{ fontWeight: 700, fontSize: 15, color: P.text }}>Jack</div>
-            {result.category && (
-              <div style={{
-                marginLeft: "auto",
-                background: P.purpleDim,
-                color: P.purple,
-                fontSize: 11, fontWeight: 700,
-                padding: "3px 10px", borderRadius: 20,
-                letterSpacing: "0.04em",
-              }}>
-                {result.category}
-              </div>
-            )}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+              {result.category && (
+                <div style={{
+                  background: P.purpleDim,
+                  color: P.purple,
+                  fontSize: 11, fontWeight: 700,
+                  padding: "3px 10px", borderRadius: 20,
+                  letterSpacing: "0.04em",
+                }}>
+                  {result.category}
+                </div>
+              )}
+              {result.aiGenerated && (
+                <div style={{
+                  background: "rgba(109,40,217,0.06)",
+                  border: `1px solid rgba(109,40,217,0.18)`,
+                  color: P.muted,
+                  fontSize: 10, fontWeight: 600,
+                  padding: "3px 9px", borderRadius: 20,
+                  letterSpacing: "0.05em",
+                }}>
+                  AI · Claude
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Body */}
