@@ -111,14 +111,14 @@ function getRelevanceLabel(index) {
 function buildTabs(role) {
   if (role === "admin") return [
     { id:"home",       label:"Dashboard", icon:"analytics" },
-    { id:"ask",        label:"Ask",       icon:"ask"       },
+    { id:"ask",        label:"Playbook",  icon:"ask"       },
     { id:"jack",       label:"Jack AI",   icon:"jack"      },
     { id:"procedures", label:"Guides",    icon:"guides"    },
     { id:"feedback",   label:"Feedback",  icon:"feedback"  },
   ];
   if (role === "manager") return [
     { id:"home",       label:"Home",     icon:"home"     },
-    { id:"ask",        label:"Ask",      icon:"ask"      },
+    { id:"ask",        label:"Playbook", icon:"ask"      },
     { id:"jack",       label:"Jack AI",  icon:"jack"     },
     { id:"procedures", label:"Guides",   icon:"guides"   },
     { id:"feedback",   label:"Feedback", icon:"feedback" },
@@ -126,7 +126,7 @@ function buildTabs(role) {
   // user
   return [
     { id:"home",       label:"Home",     icon:"home"     },
-    { id:"ask",        label:"Ask",      icon:"ask"      },
+    { id:"ask",        label:"Playbook", icon:"ask"      },
     { id:"procedures", label:"Guides",   icon:"guides"   },
     { id:"feedback",   label:"Feedback", icon:"feedback" },
   ];
@@ -232,12 +232,12 @@ export default function PlaybookApp() {
   const [policyFbSubmitting, setPolicyFbSubmitting] = useState(false);
   const [policyFbDone,       setPolicyFbDone]       = useState(false);
 
-  // ── Procedures
-  const [procedures,   setProcedures]   = useState([]);
-  const [procsLoading, setProcsLoading] = useState(false);
-  const [procsFetched, setProcsFetched] = useState(false);
-  const [expandedProc, setExpandedProc] = useState(null);
-  const [procSearch,   setProcSearch]   = useState("");
+  // ── PDF Guides
+  const [procedures,    setProcedures]    = useState([]);
+  const [procsLoading,  setProcsLoading]  = useState(false);
+  const [procsFetched,  setProcsFetched]  = useState(false);
+  const [procSearch,    setProcSearch]    = useState("");
+  const [guideCategory, setGuideCategory] = useState("");
 
   // ── Anonymous feedback
   const [fbType,        setFbType]        = useState("");
@@ -339,14 +339,17 @@ export default function PlaybookApp() {
   const loadProcedures = async () => {
     setProcsLoading(true);
     try {
-      let q = supabase.from("company_policies")
-        .select("id,title,policy_code,category,summary,action_steps,policy_text,is_active")
-        .eq("is_active",true).order("category").order("title");
+      let q = supabase
+        .from("pdf_guides")
+        .select("id, title, description, category, file_url, is_active, created_at")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
       q = applyScope(q, profile);
-      const { data } = await q.limit(100);
-      setProcedures(data||[]);
-    } catch {}
-    setProcsLoading(false); setProcsFetched(true);
+      const { data } = await q;
+      setProcedures(data || []);
+    } catch (err) { console.warn("loadProcedures:", err?.message); }
+    setProcsLoading(false);
+    setProcsFetched(true);
   };
 
   const loadSignals = async () => {
@@ -704,12 +707,17 @@ export default function PlaybookApp() {
     if (count < 3) return false;
     return feedbackList.some(f=>f.company_policies?.title?.toLowerCase().includes(cat.toLowerCase())) || count>=5;
   }).slice(0,3);
-  const filteredProcs = procedures.filter(p => {
-    if (!procSearch.trim()) return true;
-    const s = procSearch.toLowerCase();
-    return (p.title||"").toLowerCase().includes(s)||(p.category||"").toLowerCase().includes(s)||(p.summary||"").toLowerCase().includes(s);
+  // ── Guides: filter by search text + selected category ──────────────────────
+  const guideCategories = [...new Set(procedures.map(p => p.category).filter(Boolean))].sort();
+  const filteredGuides = procedures.filter(p => {
+    const term = procSearch.trim().toLowerCase();
+    const matchesSearch = !term ||
+      (p.title||"").toLowerCase().includes(term) ||
+      (p.description||"").toLowerCase().includes(term) ||
+      (p.category||"").toLowerCase().includes(term);
+    const matchesCat = !guideCategory || p.category === guideCategory;
+    return matchesSearch && matchesCat;
   });
-  const procsByCategory = filteredProcs.reduce((acc,p)=>{ const cat=p.category||"General"; if(!acc[cat])acc[cat]=[]; acc[cat].push(p); return acc; },{});
 
   // ── Loading ────────────────────────────────────────────────────────────────
   if (authLoading) return (
@@ -1025,8 +1033,8 @@ export default function PlaybookApp() {
                 <button className="feature-card" style={s.featureCard} onClick={() => setActiveTab("procedures")}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
                   <div style={s.featureCardText}>
-                    <div style={s.featureCardTitle}>Step-by-Step Guides</div>
-                    <div style={s.featureCardSub}>Company procedures and workflows</div>
+                    <div style={s.featureCardTitle}>PDF Guides</div>
+                    <div style={s.featureCardSub}>Company documents &amp; reference PDFs</div>
                   </div>
                   <span style={s.featureCardArrow}>→</span>
                 </button>
@@ -1397,49 +1405,95 @@ export default function PlaybookApp() {
           </div>
         )}
 
-        {/* ══ GUIDES ══════════════════════════════════════════════════ */}
+        {/* ══ GUIDES (PDF only) ═══════════════════════════════════════ */}
         {activeTab === "procedures" && (
           <div className="fade-in">
+            {/* Header */}
             <div style={s.pageHead}>
-              <h1 style={s.pageTitle}>Step-by-Step Guides</h1>
-              <p style={s.pageSubtitle}>Company procedures and workflows</p>
+              <h1 style={s.pageTitle}>Guides</h1>
+              <p style={s.pageSubtitle}>Company PDF guides — tap any card to open</p>
             </div>
-            <div style={{position:"relative",marginBottom:24}}>
+
+            {/* Search bar */}
+            <div style={{position:"relative",marginBottom:16}}>
               <svg style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input value={procSearch} onChange={e=>setProcSearch(e.target.value)}
+              <input
+                value={procSearch}
+                onChange={e => setProcSearch(e.target.value)}
                 placeholder="Search guides…"
-                style={{...s.inlineInput,paddingLeft:40,width:"100%",boxSizing:"border-box"}}/>
+                style={{...s.inlineInput, paddingLeft:40, width:"100%", boxSizing:"border-box"}}
+              />
             </div>
-            {procsLoading && <div style={s.loadingBlock}><div style={s.spinner}/></div>}
-            {!procsLoading && procedures.length===0 && (
-              <div style={s.emptyBlock}><div style={s.emptyTitle}>No guides yet</div><div style={s.emptyBody}>Company procedures will appear here once added.</div></div>
+
+            {/* Category filter pills */}
+            {guideCategories.length > 0 && (
+              <div style={s.guideCatRow}>
+                <button
+                  onClick={() => setGuideCategory("")}
+                  style={{...s.guideCatPill, ...(guideCategory===""?s.guideCatPillActive:{})}}
+                >
+                  All
+                </button>
+                {guideCategories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setGuideCategory(guideCategory===cat?"":cat)}
+                    style={{...s.guideCatPill, ...(guideCategory===cat?s.guideCatPillActive:{})}}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             )}
-            {!procsLoading && Object.entries(procsByCategory).map(([cat,items]) => (
-              <div key={cat} style={{marginBottom:28}}>
-                <div style={s.catLabel}>{cat}</div>
-                {items.map(proc => (
-                  <div key={proc.id} style={s.procCard}>
-                    <button className="proc-toggle" style={s.procToggle}
-                      onClick={() => setExpandedProc(expandedProc===proc.id?null:proc.id)}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={s.procTitle}>{proc.title}</div>
-                        {proc.summary&&expandedProc!==proc.id&&<div style={s.procPreview}>{proc.summary}</div>}
+
+            {/* Loading */}
+            {procsLoading && <div style={s.loadingBlock}><div style={s.spinner}/></div>}
+
+            {/* Empty */}
+            {!procsLoading && filteredGuides.length === 0 && (
+              <div style={s.emptyBlock}>
+                <div style={s.emptyTitle}>{procedures.length===0 ? "No guides yet" : "No results"}</div>
+                <div style={s.emptyBody}>{procedures.length===0 ? "PDF guides will appear here once added." : "Try a different search or category."}</div>
+              </div>
+            )}
+
+            {/* Guide cards grid */}
+            {!procsLoading && filteredGuides.length > 0 && (
+              <div style={s.guideGrid}>
+                {filteredGuides.map(guide => (
+                  <div key={guide.id} style={s.guideCard}>
+                    {/* PDF icon + category */}
+                    <div style={s.guideCardTop}>
+                      <div style={s.guidePdfIconWrap}>
+                        <PdfIcon/>
                       </div>
-                      <svg style={{transform:`rotate(${expandedProc===proc.id?180:0}deg)`,transition:"transform 0.2s",flexShrink:0}}
-                        width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={P.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
-                    </button>
-                    {expandedProc===proc.id && (
-                      <div style={s.procBody}>
-                        <div style={s.procStepLabel}>Steps</div>
-                        <div style={s.procContent}>{proc.action_steps||proc.policy_text||proc.summary||"No content available."}</div>
-                      </div>
+                      {guide.category && (
+                        <span style={s.guideCatBadge}>{guide.category}</span>
+                      )}
+                    </div>
+
+                    {/* Title */}
+                    <div style={s.guideCardTitle}>{guide.title}</div>
+
+                    {/* Description */}
+                    {guide.description && (
+                      <div style={s.guideCardDesc}>{guide.description}</div>
                     )}
+
+                    {/* Open Guide button */}
+                    <a
+                      href={guide.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={s.guideOpenBtn}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      Open Guide
+                    </a>
                   </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
         )}
 
@@ -1963,7 +2017,76 @@ const s = {
   pdfDesc:   { fontSize:12, color:P.muted, lineHeight:1.5 },
   pdfOpenBtn:{ flexShrink:0, background:BTN_GRAD, color:"#fff", border:"none", borderRadius:6, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"none", whiteSpace:"nowrap", display:"inline-flex", alignItems:"center", boxShadow:"0 2px 8px rgba(109,40,217,0.20)" },
 
-  // Procedures
+  // ── PDF Guides grid ──────────────────────────────────────────────────────────
+  guideCatRow: {
+    display: "flex", gap: 8, flexWrap: "wrap",
+    marginBottom: 20,
+  },
+  guideCatPill: {
+    padding: "7px 15px", borderRadius: 999, border: `1.5px solid ${P.border}`,
+    background: P.surface, color: P.soft, fontSize: 12, fontWeight: 600,
+    cursor: "pointer", fontFamily: SANS, transition: "all 0.14s", whiteSpace: "nowrap",
+  },
+  guideCatPillActive: {
+    background: P.purpleDim, border: `1.5px solid ${P.borderHigh}`,
+    color: P.purple,
+  },
+  guideGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 320px), 1fr))",
+    gap: 16,
+  },
+  guideCard: {
+    background: P.surface,
+    border: `1px solid ${P.border}`,
+    borderRadius: 14,
+    padding: "20px 20px 18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+    boxShadow: "0 2px 12px rgba(109,40,217,0.05)",
+    transition: "box-shadow 0.18s, border-color 0.18s",
+  },
+  guideCardTop: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  guidePdfIconWrap: {
+    width: 38, height: 38, borderRadius: 10,
+    background: "rgba(138,46,46,0.08)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
+  },
+  guideCatBadge: {
+    fontSize: 10, fontWeight: 700, letterSpacing: "0.09em",
+    textTransform: "uppercase", padding: "4px 10px", borderRadius: 999,
+    background: P.purpleDim, color: P.purple,
+    border: `1px solid rgba(109,40,217,0.18)`,
+    maxWidth: "60%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  guideCardTitle: {
+    fontSize: 15, fontWeight: 700, color: P.text,
+    lineHeight: 1.35, marginBottom: 8,
+  },
+  guideCardDesc: {
+    fontSize: 13, color: P.soft, lineHeight: 1.6,
+    marginBottom: 18, flex: 1,
+    display: "-webkit-box", WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical", overflow: "hidden",
+  },
+  guideOpenBtn: {
+    display: "inline-flex", alignItems: "center", gap: 7,
+    marginTop: "auto",
+    padding: "10px 18px", borderRadius: 9,
+    background: BTN_GRAD,
+    color: "#fff", fontSize: 13, fontWeight: 600,
+    textDecoration: "none", letterSpacing: "-0.01em",
+    boxShadow: "0 2px 10px rgba(109,40,217,0.22)",
+    fontFamily: SANS, alignSelf: "flex-start",
+    transition: "opacity 0.15s",
+  },
+
+  // Legacy procedure styles (kept for reference, no longer rendered)
   procCard:     { background:P.surface, border:`1px solid ${P.border}`, borderRadius:10, marginBottom:8, overflow:"hidden" },
   procToggle:   { width:"100%", display:"flex", alignItems:"center", gap:12, background:"transparent", border:"none", padding:"16px 18px", textAlign:"left", transition:"background 0.12s" },
   procTitle:    { fontSize:15, fontWeight:700, color:P.text, marginBottom:2 },
