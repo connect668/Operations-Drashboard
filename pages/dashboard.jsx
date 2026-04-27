@@ -2,6 +2,7 @@ import Head from "next/head";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
+import JackChat from "../components/JackChat";
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const P = {
@@ -260,6 +261,11 @@ export default function PlaybookApp() {
   const [helpStatsLoading, setHelpStatsLoading] = useState(false);
   const [helpStatsFetched, setHelpStatsFetched] = useState(false);
 
+  // ── Jack AI analytics (admin)
+  const [jackStats,        setJackStats]        = useState(null);
+  const [jackStatsLoading, setJackStatsLoading] = useState(false);
+  const [jackStatsFetched, setJackStatsFetched] = useState(false);
+
   // ── Jack AI
   const [jackMessages, setJackMessages] = useState([
     { role:"assistant", content:"Hey, I'm Jack. Describe the situation and I'll help you handle it." }
@@ -302,6 +308,7 @@ export default function PlaybookApp() {
     if (activeTab === "home" && profile.role === "admin") {
       if (!sigFetched) loadSignals();
       if (!helpStatsFetched) loadHelpStats();
+      if (!jackStatsFetched) loadJackStats();
     }
   }, [activeTab, profile]);
 
@@ -408,6 +415,46 @@ export default function PlaybookApp() {
       });
     } catch (err) { console.warn("help stats:", err.message); }
     setHelpStatsLoading(false); setHelpStatsFetched(true);
+  };
+
+  const loadJackStats = async () => {
+    setJackStatsLoading(true);
+    try {
+      let sq = supabase.from("jack_searches")
+        .select("id,question,category,facility_number,created_at")
+        .order("created_at",{ascending:false}).limit(500);
+      sq = applyScope(sq, profile);
+      const { data: searches } = await sq;
+
+      let fq = supabase.from("jack_feedback")
+        .select("id,search_id,helpful,comment,created_at,facility_number")
+        .order("created_at",{ascending:false}).limit(500);
+      fq = applyScope(fq, profile);
+      const { data: feedback } = await fq;
+
+      const allS = searches || [];
+      const allF = feedback || [];
+      const positives = allF.filter(f=>f.helpful).length;
+      const negatives = allF.filter(f=>!f.helpful).length;
+
+      const catMap = {};
+      allS.forEach(s => { const c = s.category||"Other"; catMap[c]=(catMap[c]||0)+1; });
+      const topCategories = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+      const facMap = {};
+      allS.forEach(s => { const f = s.facility_number||"No Facility"; facMap[f]=(facMap[f]||0)+1; });
+      const facilityBreakdownJack = Object.entries(facMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+      setJackStats({
+        total: allS.length,
+        positives, negatives,
+        helpfulPct: allF.length > 0 ? Math.round(positives/allF.length*100) : null,
+        topCategories,
+        facilityBreakdownJack,
+        recentNegative: allF.filter(f=>!f.helpful).slice(0,8),
+      });
+    } catch(err) { console.warn("jack stats:", err.message); }
+    setJackStatsLoading(false); setJackStatsFetched(true);
   };
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -873,6 +920,82 @@ export default function PlaybookApp() {
                 </>
               )}
             </div>
+
+            {/* ── JACK AI INSIGHTS ── */}
+            <div style={{marginBottom:28}}>
+              <div style={s.sectionLabel}>Jack AI Usage</div>
+
+              {jackStatsLoading && (
+                <div style={s.loadingBlock}><div style={s.spinner}/></div>
+              )}
+
+              {!jackStatsLoading && jackStats && (
+                <>
+                  <div style={s.statsRow}>
+                    <div style={s.statCard}>
+                      <div style={s.statVal}>{jackStats.total}</div>
+                      <div style={s.statLbl}>Jack Searches</div>
+                    </div>
+                    {jackStats.helpfulPct !== null ? (
+                      <div style={{...s.statCard, borderTopColor: jackStats.helpfulPct>=70?P.green:jackStats.helpfulPct>=50?P.amber:P.red}}>
+                        <div style={{...s.statVal, color: jackStats.helpfulPct>=70?P.green:jackStats.helpfulPct>=50?P.amber:P.red}}>
+                          {jackStats.helpfulPct}%
+                        </div>
+                        <div style={s.statLbl}>Helpful Rate</div>
+                      </div>
+                    ) : (
+                      <div style={s.statCard}>
+                        <div style={{...s.statVal,color:P.muted,fontSize:16}}>No ratings</div>
+                        <div style={s.statLbl}>Helpful Rate</div>
+                      </div>
+                    )}
+                    <div style={s.statCard}>
+                      <div style={{...s.statVal,color:P.red}}>{jackStats.negatives}</div>
+                      <div style={s.statLbl}>Not Helpful</div>
+                    </div>
+                  </div>
+
+                  {jackStats.topCategories.length > 0 && (
+                    <div style={{...s.dataCard,marginBottom:12}}>
+                      <div style={{fontSize:11,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Top Questions by Category</div>
+                      {jackStats.topCategories.map(([cat,count],i) => {
+                        const pct = Math.round((count/jackStats.topCategories[0][1])*100);
+                        return (
+                          <div key={cat} style={i>0?{marginTop:12,paddingTop:12,borderTop:`1px solid ${P.border}`}:{}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                              <span style={{fontSize:13,fontWeight:600,color:P.text}}>{cat}</span>
+                              <span style={{fontSize:12,color:P.muted,fontFamily:MONO}}>{count}</span>
+                            </div>
+                            <div style={{height:5,background:P.border,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:BTN_GRAD,borderRadius:3,transition:"width 0.4s"}}/>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {jackStats.recentNegative.length > 0 && (
+                    <div style={s.dataCard}>
+                      <div style={{fontSize:11,fontWeight:700,color:P.red,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Recent Negative Feedback</div>
+                      {jackStats.recentNegative.map((fb,i) => (
+                        <div key={fb.id} style={i>0?{marginTop:10,paddingTop:10,borderTop:`1px solid ${P.border}`}:{}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                            <span style={s.helpBadgeNeg}>✗ Not helpful</span>
+                            <span style={{fontSize:11,color:P.muted,fontFamily:MONO}}>{timeAgo(fb.created_at)}</span>
+                          </div>
+                          {fb.comment && <div style={{fontSize:13,color:P.soft,marginTop:5,fontStyle:"italic"}}>"{fb.comment}"</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {jackStats.total === 0 && (
+                    <div style={s.emptyCard}>No Jack searches yet. Jack AI usage will appear here once employees start asking questions.</div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -1269,66 +1392,8 @@ export default function PlaybookApp() {
 
         {/* ══ JACK AI ═════════════════════════════════════════════════ */}
         {activeTab === "jack" && (
-          <div className="fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 140px)",minHeight:400}}>
-            <div style={{...s.pageHead,marginBottom:16}}>
-              <h1 style={s.pageTitle}>Jack AI</h1>
-              <p style={s.pageSubtitle}>Describe any workplace situation — call-offs, disputes, performance, safety, and more.</p>
-            </div>
-
-            {/* Messages */}
-            <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,paddingBottom:8}}>
-              {jackMessages.map((m,i) => (
-                <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
-                  {m.role === "assistant" && (
-                    <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(109,40,217,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:8,marginTop:2}}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/><circle cx="8.5" cy="14" r="1" fill={P.purple}/><circle cx="15.5" cy="14" r="1" fill={P.purple}/></svg>
-                    </div>
-                  )}
-                  <div style={{
-                    maxWidth:"78%",
-                    padding:"12px 15px",
-                    borderRadius: m.role==="user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-                    background: m.role==="user" ? BTN_GRAD : P.surface,
-                    border: m.role==="user" ? "none" : `1px solid ${P.border}`,
-                    color: m.role==="user" ? "#fff" : P.text,
-                    fontSize:14,
-                    lineHeight:1.7,
-                    boxShadow: m.role==="user" ? "0 2px 10px rgba(109,40,217,0.25)" : "0 1px 4px rgba(109,40,217,0.05)",
-                    whiteSpace:"pre-wrap",
-                  }}>{m.content}</div>
-                </div>
-              ))}
-              {jackLoading && (
-                <div style={{display:"flex",justifyContent:"flex-start",alignItems:"center",gap:8}}>
-                  <div style={{width:28,height:28,borderRadius:"50%",background:P.purpleDim,border:`1px solid rgba(109,40,217,0.25)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={P.purple} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="11" rx="2"/><path d="M8 8V6a4 4 0 018 0v2"/></svg>
-                  </div>
-                  <div style={{padding:"10px 14px",background:P.surface,border:`1px solid ${P.border}`,borderRadius:"14px 14px 14px 3px",display:"flex",gap:5,alignItems:"center"}}>
-                    <div style={{...s.spinner,width:12,height:12}}/>
-                    <span style={{fontSize:13,color:P.muted}}>Jack is thinking…</span>
-                  </div>
-                </div>
-              )}
-              <div ref={jackEndRef}/>
-            </div>
-
-            {/* Input row */}
-            <div style={{paddingTop:12,borderTop:`1px solid ${P.border}`,display:"flex",gap:8,flexShrink:0}}>
-              <input
-                value={jackInput}
-                onChange={e => setJackInput(e.target.value)}
-                onKeyDown={e => { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendJackMessage();} }}
-                placeholder="Describe the situation…"
-                disabled={jackLoading}
-                style={{...s.inlineInput,flex:1}}
-              />
-              <button
-                onClick={sendJackMessage}
-                disabled={!jackInput.trim()||jackLoading}
-                style={{...s.inlineBtn,opacity:(!jackInput.trim()||jackLoading)?0.45:1,transition:"opacity 0.15s"}}>
-                →
-              </button>
-            </div>
+          <div className="fade-in">
+            <JackChat profile={profile}/>
           </div>
         )}
 
